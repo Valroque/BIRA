@@ -1,8 +1,47 @@
 # BIRA — Project context for Claude
 
 This file is the load-bearing brief for any Claude session working on BIRA.
-Read it end-to-end before making changes; the rest of the codebase will make
-sense faster.
+Read the TL;DR. Skim the rest before making changes; the rest of the
+codebase will make sense faster.
+
+---
+
+## TL;DR — if you only read this
+
+1. **Frontend prototype only.** No backend, no real auth, no API client. Do
+   NOT propose backend / persistence / fetch work — the user has explicitly
+   chosen a design-first phase. Wiring real submit handlers also off-limits.
+2. **Stack**: Vite + React 18 + TypeScript + `react-router-dom` v7. Plain CSS
+   with design tokens in `src/index.css`. No Tailwind, no UI library,
+   self-hosted Geist fonts.
+3. **Mental model**: workspace (tenant) → project → issue. URLs are path-slug
+   only: `/:workspace/...`, `/:workspace/:project/...`. No subdomains.
+4. **Workflows** are first-class directed graphs (cycles allowed — reopen,
+   request-changes are back-edges). Each `(project, issue_type)` selects one
+   workflow. Multiple workflows can exist for the same issue type.
+5. **Transition rules** are a closed enum of five: `role`, `assignee_only`,
+   `reporter_only`, `required_fields`, `not_self`. No scripting language.
+   Don't add `approver`, `external_check`, or `custom_script` — they were
+   designer drift and were removed.
+6. **Out of scope for v1**: sprints, backlog grooming, sub-tasks under epics,
+   custom fields, JQL, SSO, integrations, notifications, public REST API,
+   granular roles. Full list in `.claude/rules/v1-constraints.md`.
+7. **State**: in-memory fixtures only (`src/fixtures.ts`), plus
+   `localStorage` for one piece of UI preference (`bira:list-layout`). Read
+   from URL via `useWorkspaceContext()` in `shell.tsx` — never hardcode
+   `/acme/comet/`.
+8. **Reuse, don't reinvent**: every layout primitive lives in
+   `src/components/` (especially `shell.tsx`). Adding a parallel `<button>`
+   styled like an existing `Chip` is a defect, not a shortcut.
+9. **Design tokens only**. Use `var(--token)` from `src/index.css`. No raw
+   hex codes outside the `/design-canvas` reference page.
+10. **Build gate**: `npm run build` (or `npx tsc --noEmit` for a faster
+    type-only pass). There is **no test infrastructure yet** — don't add
+    Vitest/Jest configs without approval.
+
+When work feels like more than a 3-edit task, invoke `/tech-lead` first to
+plan and decompose. The agent personas in `.claude/commands/` know the
+project conventions and reference the same rules file.
 
 ---
 
