@@ -5,6 +5,7 @@ import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { Icon } from '../components/icons';
 import { TopBar, Avatar, useWorkspaceContext } from '../components/shell';
 import { Modal, ModalHeader, ModalBody, ModalFooter } from '../components/modal';
+import { Field, Hint, DangerRow } from '../components/forms';
 import { MEMBERS, type Member } from '../fixtures';
 
 // --- Outer layout (header + secondary tab strip + outlet) ---
@@ -363,47 +364,11 @@ function Section({ title, subtitle, danger, children }: SectionProps) {
   );
 }
 
-function Field({ label, children }: { label: string; children: ReactNode }) {
-  return (
-    <label style={{ display: 'block', marginBottom: 12 }}>
-      <div style={{
-        fontSize: 11, fontWeight: 600, color: 'var(--fg-muted)',
-        textTransform: 'uppercase', letterSpacing: 0.4, marginBottom: 4,
-      }}>{label}</div>
-      {children}
-    </label>
-  );
-}
-
-function Hint({ children }: { children: ReactNode }) {
-  return <div style={{ marginTop: 4, fontSize: 11, color: 'var(--fg-faint)' }}>{children}</div>;
-}
-
 function SaveBar() {
   return (
     <div style={{ marginTop: 12, display: 'flex', gap: 8 }}>
       <button className="btn btn-primary btn-sm">Save changes</button>
       <button className="btn btn-sm">Discard</button>
-    </div>
-  );
-}
-
-interface DangerRowProps {
-  label: string;
-  description: string;
-  actionLabel: string;
-}
-function DangerRow({ label, description, actionLabel }: DangerRowProps) {
-  return (
-    <div style={{
-      display: 'flex', alignItems: 'center', gap: 12,
-      padding: '10px 0', borderBottom: '1px solid var(--border-muted)',
-    }}>
-      <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ fontSize: 13, fontWeight: 600 }}>{label}</div>
-        <div style={{ fontSize: 12, color: 'var(--fg-muted)', marginTop: 2 }}>{description}</div>
-      </div>
-      <button className="btn btn-danger btn-sm">{actionLabel}</button>
     </div>
   );
 }

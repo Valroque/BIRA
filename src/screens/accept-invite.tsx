@@ -4,6 +4,7 @@
 import { useState, type FormEvent } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { Icon } from '../components/icons';
+import { Field, Hint } from '../components/forms';
 
 interface InviteContext {
   workspace: string;
@@ -131,22 +132,3 @@ export function AcceptInvitePage() {
   );
 }
 
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <label style={{ display: 'block', marginBottom: 10 }}>
-      <div style={{
-        fontSize: 11, fontWeight: 600, color: 'var(--fg-muted)',
-        textTransform: 'uppercase', letterSpacing: 0.4, marginBottom: 4,
-      }}>{label}</div>
-      {children}
-    </label>
-  );
-}
-
-function Hint({ children, warning }: { children: React.ReactNode; warning?: boolean }) {
-  return (
-    <div style={{ marginTop: 4, fontSize: 11, color: warning ? 'var(--blocked)' : 'var(--fg-faint)' }}>
-      {children}
-    </div>
-  );
-}

@@ -4,6 +4,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { Icon } from '../components/icons';
 import { TopBar, Avatar, useWorkspaceContext } from '../components/shell';
 import { Modal, ModalHeader, ModalFooter } from '../components/modal';
+import { Field, Hint } from '../components/forms';
 import {
   CURRENT_USER, DEFAULT_PROJECT_WORKFLOWS, ISSUES, ISSUE_TYPE_NAMES, MEMBERS,
   RESERVED_PROJECT_SLUGS, TEAMS, WORKFLOWS,
@@ -376,22 +377,3 @@ function CreateProjectModal({ onClose }: { onClose: () => void }) {
   );
 }
 
-function Field({ label, optional, children }: { label: string; optional?: boolean; children: React.ReactNode }) {
-  return (
-    <label style={{ display: 'block', marginBottom: 14 }}>
-      <div style={{
-        fontSize: 11, fontWeight: 600, color: 'var(--fg-muted)',
-        textTransform: 'uppercase', letterSpacing: 0.4, marginBottom: 4,
-        display: 'flex', alignItems: 'center', gap: 6,
-      }}>
-        <span>{label}</span>
-        {optional && <span style={{ color: 'var(--fg-faint)', fontWeight: 500, textTransform: 'none', letterSpacing: 0 }}>· optional</span>}
-      </div>
-      {children}
-    </label>
-  );
-}
-
-function Hint({ children }: { children: React.ReactNode }) {
-  return <div style={{ marginTop: 4, fontSize: 11, color: 'var(--fg-faint)' }}>{children}</div>;
-}

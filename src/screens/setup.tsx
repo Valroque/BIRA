@@ -3,6 +3,7 @@
 import { useState, type FormEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Icon } from '../components/icons';
+import { Field, Hint } from '../components/forms';
 
 const STEPS = ['workspace', 'admin', 'review'] as const;
 type Step = typeof STEPS[number];
@@ -214,22 +215,6 @@ function Stepper({ current }: { current: Step }) {
       })}
     </div>
   );
-}
-
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <label style={{ display: 'block', marginBottom: 10 }}>
-      <div style={{
-        fontSize: 11, fontWeight: 600, color: 'var(--fg-muted)',
-        textTransform: 'uppercase', letterSpacing: 0.4, marginBottom: 4,
-      }}>{label}</div>
-      {children}
-    </label>
-  );
-}
-
-function Hint({ children }: { children: React.ReactNode }) {
-  return <div style={{ marginTop: 4, fontSize: 11, color: 'var(--fg-faint)' }}>{children}</div>;
 }
 
 function ReviewRow({ label, value, mono }: { label: string; value: string; mono?: boolean }) {

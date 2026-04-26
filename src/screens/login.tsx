@@ -1,17 +1,18 @@
 import { useState, type FormEvent } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { Icon } from '../components/icons';
+import { Field } from '../components/forms';
 
 export function LoginPage() {
   const navigate = useNavigate();
-  const [slug, setSlug] = useState('acme');
   const [email, setEmail] = useState('jordan@acme.com');
   const [password, setPassword] = useState('');
 
   const submit = (e: FormEvent) => {
     e.preventDefault();
-    const safe = slug.trim().toLowerCase().replace(/[^a-z0-9-]/g, '') || 'acme';
-    navigate(`/${safe}`);
+    // After sign-in we land on the workspace picker. The picker is the
+    // canonical path into a workspace — direct-slug shortcuts can come later.
+    navigate('/workspaces');
   };
 
   return (
@@ -35,24 +36,12 @@ export function LoginPage() {
         <div className="card" style={{ padding: 22 }}>
           <h2 style={{ fontSize: 17, fontWeight: 600, margin: 0 }}>Sign in</h2>
           <p style={{ fontSize: 12.5, color: 'var(--fg-muted)', margin: '4px 0 16px' }}>
-            BIRA workspaces are accessed by slug. Enter your workspace and credentials.
+            Sign in with your BIRA account. You'll pick a workspace next.
           </p>
-
-          <Field label="Workspace">
-            <input
-              autoFocus
-              className="input mono"
-              value={slug}
-              onChange={(e) => setSlug(e.target.value)}
-              placeholder="acme"
-              spellCheck={false}
-              autoCapitalize="off"
-            />
-            <Hint>Lowercase letters, digits, and hyphens. Your URL will be <code>/{slug || '…'}</code>.</Hint>
-          </Field>
 
           <Field label="Email">
             <input
+              autoFocus
               type="email"
               className="input"
               value={email}
@@ -96,20 +85,3 @@ export function LoginPage() {
   );
 }
 
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <label style={{ display: 'block', marginBottom: 10 }}>
-      <div style={{
-        fontSize: 11, fontWeight: 600, color: 'var(--fg-muted)',
-        textTransform: 'uppercase', letterSpacing: 0.4, marginBottom: 4,
-      }}>{label}</div>
-      {children}
-    </label>
-  );
-}
-
-function Hint({ children }: { children: React.ReactNode }) {
-  return (
-    <div style={{ marginTop: 4, fontSize: 11, color: 'var(--fg-faint)' }}>{children}</div>
-  );
-}

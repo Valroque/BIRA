@@ -3,6 +3,7 @@ import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Icon } from '../components/icons';
 import { TopBar, Tabs, TypeChip, projectTabs, useWorkspaceContext } from '../components/shell';
+import { Field, Hint, DangerRow } from '../components/forms';
 import {
   WORKFLOWS, ISSUE_TYPE_NAMES, DEFAULT_PROJECT_WORKFLOWS,
   type IssueTypeLetter,
@@ -146,34 +147,3 @@ function Section({ title, subtitle, danger, children }: { title: string; subtitl
   );
 }
 
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <label style={{ display: 'block', marginBottom: 12 }}>
-      <div style={{
-        fontSize: 11, fontWeight: 600, color: 'var(--fg-muted)',
-        textTransform: 'uppercase', letterSpacing: 0.4, marginBottom: 4,
-      }}>{label}</div>
-      {children}
-    </label>
-  );
-}
-
-function Hint({ children }: { children: React.ReactNode }) {
-  return <div style={{ marginTop: 4, fontSize: 11, color: 'var(--fg-faint)' }}>{children}</div>;
-}
-
-interface DangerRowProps { label: string; description: string; actionLabel: string; }
-function DangerRow({ label, description, actionLabel }: DangerRowProps) {
-  return (
-    <div style={{
-      display: 'flex', alignItems: 'center', gap: 12,
-      padding: '10px 0', borderBottom: '1px solid var(--border-muted)',
-    }}>
-      <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ fontSize: 13, fontWeight: 600 }}>{label}</div>
-        <div style={{ fontSize: 12, color: 'var(--fg-muted)', marginTop: 2 }}>{description}</div>
-      </div>
-      <button className="btn btn-danger btn-sm">{actionLabel}</button>
-    </div>
-  );
-}
