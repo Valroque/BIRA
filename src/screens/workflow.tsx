@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import { Icon } from '../components/icons';
 import { TopBar, Tabs, Toolbar, Chip, StatusDot, TypeChip, STATUSES, projectTabs, useWorkspaceContext } from '../components/shell';
@@ -36,30 +36,100 @@ interface WorkflowGraphProps {
   /** Append a new state. The caller is responsible for picking a sensible
    *  starting position + status. */
   onAddState?: () => void;
+  /** Append a new transition (edge). Called when the user drags the "+"
+   *  handle off one node and releases over another. */
+  onAddEdge?: (fromId: string, toId: string) => void;
 }
 
 const DRAG_THRESHOLD_PX = 4;  // movement under this is treated as a click
 
+// Zoom bounds + step. Half-size lets users see the whole graph on a small
+// laptop; 2× lets them get close enough for label legibility on big graphs.
+const ZOOM_MIN = 0.4;
+const ZOOM_MAX = 2.0;
+const ZOOM_STEP = 0.1;
+
 export function WorkflowGraph({
   nodes, edges, selected, blockedEdgeId, width, height,
-  onSelect, onUpdateNode, onAddState,
+  onSelect, onUpdateNode, onAddState, onAddEdge,
 }: WorkflowGraphProps) {
   const NODE_W = 140;
   const NODE_H = 56;
   const w = width ?? '100%';
   const h = height ?? '100%';
-  // The SVG accepts string lengths, so '100%' just works for the dotted
-  // pattern + edge layer. Nodes are absolutely positioned at fixed pixel
-  // coordinates regardless — the scroll layer's overflow handles the case
-  // where the viewport is smaller than the bounding box of all nodes.
+
+  const [zoom, setZoom] = useState(1);
+  const zoomIn = () => setZoom((z) => Math.min(ZOOM_MAX, Math.round((z + ZOOM_STEP) * 100) / 100));
+  const zoomOut = () => setZoom((z) => Math.max(ZOOM_MIN, Math.round((z - ZOOM_STEP) * 100) / 100));
+  const zoomReset = () => setZoom(1);
+
+  // Edge-drawing state. While the user drags the "+" handle off a node, we
+  // track the source id + the live cursor position (in unscaled content
+  // coordinates) so we can draw a dashed preview line. On mouseup we test
+  // whether the cursor landed inside another node and if so, create the edge.
+  const [drawing, setDrawing] = useState<{
+    fromId: string;
+    cursorX: number;
+    cursorY: number;
+  } | null>(null);
+  // Ref to the unscaled inner container — used to translate clientX/Y into
+  // content coordinates (clientX − rect.left) / zoom.
+  const contentRef = useRef<HTMLDivElement>(null);
+
+  const startEdgeDraw = (fromId: string, e: React.MouseEvent) => {
+    if (!onAddEdge) return;
+    e.stopPropagation();
+    e.preventDefault();
+    const fromNode = nodes.find((n) => n.id === fromId);
+    if (!fromNode) return;
+    const rect = contentRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    const toContentCoords = (clientX: number, clientY: number) => ({
+      cx: (clientX - rect.left) / zoom,
+      cy: (clientY - rect.top) / zoom,
+    });
+    setDrawing({
+      fromId,
+      cursorX: fromNode.x + NODE_W,
+      cursorY: fromNode.y + NODE_H / 2,
+    });
+
+    const onMove = (ev: MouseEvent) => {
+      const { cx, cy } = toContentCoords(ev.clientX, ev.clientY);
+      setDrawing((prev) => (prev ? { ...prev, cursorX: cx, cursorY: cy } : prev));
+    };
+    const onUp = (ev: MouseEvent) => {
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup', onUp);
+      document.body.style.userSelect = '';
+      // Hit-test the cursor against every node's bounding box (in content coords).
+      const { cx, cy } = toContentCoords(ev.clientX, ev.clientY);
+      const target = nodes.find(
+        (n) => cx >= n.x && cx <= n.x + NODE_W && cy >= n.y && cy <= n.y + NODE_H,
+      );
+      if (target && target.id !== fromId) {
+        onAddEdge(fromId, target.id);
+      }
+      setDrawing(null);
+    };
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
+    document.body.style.userSelect = 'none';
+  };
 
   // Track the size of the bounding box so the SVG and dot pattern can extend
   // to cover nodes positioned far from the origin (drag/create can take a
   // node well to the right or below the initial viewport).
   const contentW = Math.max(...nodes.map((n) => n.x + NODE_W + 40), 900);
   const contentH = Math.max(...nodes.map((n) => n.y + NODE_H + 40), 540);
+  // Scaled bounding box — the scroll layer needs to know the scaled size so
+  // scrollbars expose the right amount of scrollable area at every zoom level.
+  const scaledW = contentW * zoom;
+  const scaledH = contentH * zoom;
 
   // mousedown → select (on click) OR drag (on movement past threshold).
+  // Movement deltas are in screen pixels but the node coordinates live in
+  // unscaled content pixels, so divide by `zoom` before applying.
   const onNodePointerDown = (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
     const node = nodes.find((n) => n.id === id);
@@ -75,7 +145,10 @@ export function WorkflowGraph({
       const dy = ev.clientY - startY;
       if (!moved && Math.hypot(dx, dy) < DRAG_THRESHOLD_PX) return;
       moved = true;
-      onUpdateNode?.(id, { x: Math.max(0, origX + dx), y: Math.max(0, origY + dy) });
+      onUpdateNode?.(id, {
+        x: Math.max(0, origX + dx / zoom),
+        y: Math.max(0, origY + dy / zoom),
+      });
     };
     const onUp = () => {
       document.removeEventListener('mousemove', onMove);
@@ -150,9 +223,18 @@ export function WorkflowGraph({
           background: 'var(--bg-subtle)', borderRadius: 6,
         }}
       >
-        {/* Inner sized to the bounding box of all nodes so the dot pattern,
-            SVG, and node DOM all share the same coordinate space when scrolled. */}
-        <div style={{ position: 'relative', width: contentW, height: contentH }}>
+        {/* Outer wrapper sized to the SCALED bounding box, so the scroll layer
+            exposes the right amount of scrollable area at every zoom level. */}
+        <div style={{ position: 'relative', width: scaledW, height: scaledH }}>
+        {/* Inner is sized in unscaled coordinates and gets a CSS transform —
+            nodes/edges keep using their native pixel coordinates regardless. */}
+        <div
+          ref={contentRef}
+          style={{
+            position: 'absolute', top: 0, left: 0, width: contentW, height: contentH,
+            transform: `scale(${zoom})`, transformOrigin: 'top left',
+          }}
+        >
       <div style={{
         position: 'absolute', inset: 0,
         backgroundImage: 'radial-gradient(circle, #d0d7de 1px, transparent 1px)',
@@ -216,12 +298,34 @@ export function WorkflowGraph({
             </g>
           );
         })}
+        {drawing && (() => {
+          // Draw a dashed straight line from the source node's right edge to
+          // the cursor. Straight is intentional — the bezier from `pathFor`
+          // assumes both endpoints are nodes; following the cursor smoothly is
+          // more important than aesthetic curvature here.
+          const src = nodes.find((n) => n.id === drawing.fromId);
+          if (!src) return null;
+          const sx = src.x + NODE_W;
+          const sy = src.y + NODE_H / 2;
+          return (
+            <g style={{ pointerEvents: 'none' }}>
+              <line
+                x1={sx} y1={sy}
+                x2={drawing.cursorX} y2={drawing.cursorY}
+                stroke="var(--accent)" strokeWidth={1.8}
+                strokeDasharray="5 4"
+                markerEnd="url(#arrow-accent)"
+              />
+            </g>
+          );
+        })()}
       </svg>
 
       {nodes.map((n) => {
         const status = STATUSES.find((s) => s.id === n.statusId);
         const isSel = selected?.type === 'node' && selected.id === n.id;
         const draggable = !!onUpdateNode;
+        const canDrawEdge = !!onAddEdge;
         return (
           <div
             key={n.id}
@@ -246,9 +350,39 @@ export function WorkflowGraph({
               <span><span className="tnum">{n.count}</span> issues</span>
               {n.rules > 0 && <span style={{ color: 'var(--accent)' }}><span className="tnum">{n.rules}</span> rules</span>}
             </div>
+            {/* Right-edge transition handle. Drag onto another node to draw a
+                new edge. Visible on selection or hover; positioned slightly
+                outside the node's right edge so it's hit-testable without
+                catching node-drag mousedowns. */}
+            {canDrawEdge && (
+              <button
+                type="button"
+                onMouseDown={(ev) => startEdgeDraw(n.id, ev)}
+                onClick={(ev) => ev.stopPropagation()}
+                data-tip="Drag to another state to add a transition"
+                style={{
+                  position: 'absolute',
+                  right: -10, top: '50%', transform: 'translateY(-50%)',
+                  width: 18, height: 18, borderRadius: 9,
+                  background: 'var(--bg)', border: '1px solid var(--accent)',
+                  color: 'var(--accent)', cursor: 'crosshair',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  padding: 0,
+                  // Always visible while a node is selected; otherwise show on
+                  // hover to keep the canvas tidy. CSS-pseudo hover wouldn't
+                  // bubble through the node, so use opacity transitions on
+                  // the node's own hover via a child-of-hover trick.
+                  opacity: isSel ? 1 : 0.55,
+                  boxShadow: 'var(--shadow-sm)',
+                }}
+              >
+                <Icon name="plus" size={11} />
+              </button>
+            )}
           </div>
         );
       })}
+        </div>
         </div>
       </div>
 
@@ -280,9 +414,27 @@ export function WorkflowGraph({
         background: 'var(--bg)', border: '1px solid var(--border-muted)', borderRadius: 6,
         padding: 3, boxShadow: 'var(--shadow-sm)', zIndex: 2,
       }}>
-        <button className="btn btn-ghost btn-sm"><Icon name="plus" size={13} /></button>
-        <button className="btn btn-ghost btn-sm" style={{ fontSize: 10, fontWeight: 600 }}>100%</button>
-        <button className="btn btn-ghost btn-sm" style={{ fontSize: 14, fontWeight: 700, lineHeight: 1 }}>−</button>
+        <button
+          type="button" onClick={zoomIn} disabled={zoom >= ZOOM_MAX}
+          className="btn btn-ghost btn-sm" data-tip="Zoom in"
+        >
+          <Icon name="plus" size={13} />
+        </button>
+        <button
+          type="button" onClick={zoomReset}
+          className="btn btn-ghost btn-sm"
+          data-tip="Reset zoom"
+          style={{ fontSize: 10, fontWeight: 600 }}
+        >
+          {Math.round(zoom * 100)}%
+        </button>
+        <button
+          type="button" onClick={zoomOut} disabled={zoom <= ZOOM_MIN}
+          className="btn btn-ghost btn-sm" data-tip="Zoom out"
+          style={{ fontSize: 14, fontWeight: 700, lineHeight: 1 }}
+        >
+          −
+        </button>
       </div>
 
       {/* Legend */}
@@ -368,6 +520,14 @@ export function WorkflowEditor() {
     setSelected(null);
   };
 
+  const addEdge = (fromId: string, toId: string) => {
+    // Reject duplicates of the same direction so the graph stays clean.
+    if (edges.some((e) => e.from === fromId && e.to === toId)) return;
+    const id = `e${Date.now().toString(36)}`;
+    setEdges((prev) => [...prev, { id, from: fromId, to: toId }]);
+    setSelected({ type: 'edge', id });
+  };
+
   return (
     <div className="bira" style={{ height: '100%', display: 'flex', flexDirection: 'column', background: 'var(--bg)' }}>
       <TopBar breadcrumbs={[
@@ -448,6 +608,7 @@ export function WorkflowEditor() {
               onSelect={setSelected}
               onUpdateNode={updateNode}
               onAddState={addState}
+              onAddEdge={addEdge}
             />
           </div>
         </div>
