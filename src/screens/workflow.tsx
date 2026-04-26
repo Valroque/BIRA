@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import { Icon } from '../components/icons';
 import { TopBar, Tabs, Toolbar, Chip, StatusDot, TypeChip, STATUSES, projectTabs, useWorkspaceContext } from '../components/shell';
@@ -22,14 +22,26 @@ interface WorkflowGraphProps {
   edges: GraphEdge[];
   selected?: Selection | null;
   blockedEdgeId?: string;
-  width?: number;
-  height?: number;
+  /**
+   * Canvas width / height. Numbers render the canvas at a fixed pixel size
+   * (used by the design-canvas variants). When omitted, the canvas fills its
+   * parent at 100%/100% so the dotted background reaches the viewport edges
+   * and clicks land on nodes positioned anywhere within the available area.
+   */
+  width?: number | string;
+  height?: number | string;
   onSelect?: (sel: Selection | null) => void;
 }
 
-export function WorkflowGraph({ nodes, edges, selected, blockedEdgeId, width = 880, height = 540, onSelect }: WorkflowGraphProps) {
+export function WorkflowGraph({ nodes, edges, selected, blockedEdgeId, width, height, onSelect }: WorkflowGraphProps) {
   const NODE_W = 140;
   const NODE_H = 56;
+  const w = width ?? '100%';
+  const h = height ?? '100%';
+  // The SVG accepts string lengths, so '100%' just works for the dotted
+  // pattern + edge layer. Nodes are absolutely positioned at fixed pixel
+  // coordinates regardless — the parent container's overflow handles the
+  // case where the viewport is smaller than the bounding box of all nodes.
 
   const pathFor = (e: GraphEdge): string => {
     const a = nodes.find((n) => n.id === e.from);
@@ -74,14 +86,21 @@ export function WorkflowGraph({ nodes, edges, selected, blockedEdgeId, width = 8
   return (
     <div
       onClick={() => onSelect?.(null)}
-      style={{ position: 'relative', width, height, background: 'var(--bg-subtle)', overflow: 'hidden', borderRadius: 6 }}
+      style={{
+        position: 'relative', width: w, height: h,
+        minHeight: 540,  // keep the toolbar/legend chrome legible even on short viewports
+        background: 'var(--bg-subtle)', overflow: 'auto', borderRadius: 6,
+      }}
     >
       <div style={{
         position: 'absolute', inset: 0,
         backgroundImage: 'radial-gradient(circle, #d0d7de 1px, transparent 1px)',
         backgroundSize: '20px 20px', opacity: 0.6,
+        // Anchor the dot pattern to the SVG canvas so nodes positioned to the
+        // right of the viewport scroll into a properly-tiled background.
+        minWidth: '100%', minHeight: '100%',
       }} />
-      <svg width={width} height={height} style={{ position: 'absolute', inset: 0, overflow: 'visible' }}>
+      <svg width="100%" height="100%" style={{ position: 'absolute', inset: 0, overflow: 'visible' }}>
         <defs>
           <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
             <path d="M 0 0 L 10 5 L 0 10 z" fill="#59636e" />
@@ -230,8 +249,26 @@ export function WorkflowEditor() {
   const onSwitchType = (next: IssueTypeLetter) => { setType(next); setSelected(null); };
 
   const workflowId = workflows[type];
-  const workflow = WORKFLOWS[workflowId];
+  const baseWorkflow = WORKFLOWS[workflowId];
   const usage = projectsUsingWorkflow(workflowId);
+
+  // Session-local working copy of the current workflow. Edits in the
+  // inspector mutate this copy so the graph reflects them immediately —
+  // no persistence beyond the session, matching the rest of the prototype.
+  const [nodes, setNodes] = useState<GraphNode[]>(baseWorkflow.nodes);
+  const [edges, setEdges] = useState<GraphEdge[]>(baseWorkflow.edges);
+  // Reset whenever the source workflow changes (issue type switch, project
+  // switch). Re-running this on baseWorkflow identity is the right trigger
+  // because WORKFLOWS[id] is stable per id.
+  useEffect(() => {
+    setNodes(baseWorkflow.nodes);
+    setEdges(baseWorkflow.edges);
+  }, [baseWorkflow]);
+
+  const updateNode = (id: string, patch: Partial<GraphNode>) =>
+    setNodes((prev) => prev.map((n) => (n.id === id ? { ...n, ...patch } : n)));
+  const updateEdge = (id: string, patch: Partial<GraphEdge>) =>
+    setEdges((prev) => prev.map((e) => (e.id === id ? { ...e, ...patch } : e)));
 
   return (
     <div className="bira" style={{ height: '100%', display: 'flex', flexDirection: 'column', background: 'var(--bg)' }}>
@@ -278,7 +315,7 @@ export function WorkflowEditor() {
             </div>
             <Chip>
               <Icon name="branch" size={11} color="var(--fg-faint)" />
-              {workflow.name}
+              {baseWorkflow.name}
             </Chip>
             <Chip dim>
               Used by <strong style={{ color: 'var(--fg)', marginLeft: 3 }}>{usage.length}</strong>
@@ -296,7 +333,7 @@ export function WorkflowEditor() {
             }
           >
             <span style={{ fontSize: 12, color: 'var(--fg-muted)', maxWidth: 520, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-              {workflow.description}
+              {baseWorkflow.description}
             </span>
             <span style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--fg-muted)' }}>
               <span style={{ width: 6, height: 6, borderRadius: 3, background: 'var(--in-progress)' }} />
@@ -304,11 +341,11 @@ export function WorkflowEditor() {
             </span>
           </Toolbar>
 
-          <div style={{ flex: 1, padding: 16, overflow: 'auto' }}>
+          <div style={{ flex: 1, padding: 16, overflow: 'hidden', display: 'flex', minHeight: 0 }}>
             <WorkflowGraph
-              key={workflow.id}
-              nodes={workflow.nodes}
-              edges={workflow.edges}
+              key={baseWorkflow.id}
+              nodes={nodes}
+              edges={edges}
               selected={selected}
               onSelect={setSelected}
             />
@@ -317,10 +354,14 @@ export function WorkflowEditor() {
 
         <Inspector
           selected={selected}
-          nodes={workflow.nodes}
-          edges={workflow.edges}
+          nodes={nodes}
+          edges={edges}
           workspace={workspace}
           project={project}
+          workflowName={baseWorkflow.name}
+          issueTypeName={ISSUE_TYPE_NAMES[type]}
+          onUpdateNode={updateNode}
+          onUpdateEdge={updateEdge}
         />
       </div>
     </div>
@@ -333,16 +374,31 @@ interface InspectorProps {
   edges: GraphEdge[];
   workspace: string;
   project: string;
+  workflowName: string;
+  issueTypeName: string;
+  onUpdateNode: (id: string, patch: Partial<GraphNode>) => void;
+  onUpdateEdge: (id: string, patch: Partial<GraphEdge>) => void;
 }
-function Inspector({ selected, nodes, edges, workspace, project }: InspectorProps) {
+function Inspector({
+  selected, nodes, edges, workspace, project,
+  workflowName, issueTypeName, onUpdateNode, onUpdateEdge,
+}: InspectorProps) {
   return (
     <div style={{
       width: 320, borderLeft: '1px solid var(--border-muted)', background: 'var(--bg)',
       display: 'flex', flexDirection: 'column', flexShrink: 0,
     }}>
-      {!selected && <NothingSelectedInspector nodes={nodes} edges={edges} />}
+      {!selected && (
+        <NothingSelectedInspector
+          nodes={nodes} edges={edges}
+          workflowName={workflowName} issueTypeName={issueTypeName}
+        />
+      )}
       {selected?.type === 'node' && (
-        <NodeInspector node={nodes.find((n) => n.id === selected.id)!} />
+        <NodeInspector
+          node={nodes.find((n) => n.id === selected.id)!}
+          onChange={(patch) => onUpdateNode(selected.id, patch)}
+        />
       )}
       {selected?.type === 'edge' && (
         <EdgeInspector
@@ -350,20 +406,28 @@ function Inspector({ selected, nodes, edges, workspace, project }: InspectorProp
           nodes={nodes}
           workspace={workspace}
           project={project}
+          onChange={(patch) => onUpdateEdge(selected.id, patch)}
         />
       )}
     </div>
   );
 }
 
-function NothingSelectedInspector({ nodes, edges }: { nodes: GraphNode[]; edges: GraphEdge[] }) {
+function NothingSelectedInspector({
+  nodes, edges, workflowName, issueTypeName,
+}: {
+  nodes: GraphNode[];
+  edges: GraphEdge[];
+  workflowName: string;
+  issueTypeName: string;
+}) {
   const initial = nodes.find((n) => n.initial);
   const terminals = nodes.filter((n) => n.terminal);
   return (
     <>
       <div style={{ padding: '12px 16px', borderBottom: '1px solid var(--border-muted)' }}>
         <div className="label-section" style={{ marginBottom: 4 }}>Workflow</div>
-        <div style={{ fontSize: 14, fontWeight: 600 }}>Default · Bug</div>
+        <div style={{ fontSize: 14, fontWeight: 600 }}>{workflowName} · {issueTypeName}</div>
         <div style={{ marginTop: 4, fontSize: 12, color: 'var(--fg-muted)' }}>
           Click any state or transition to edit it.
         </div>
@@ -400,13 +464,8 @@ function NothingSelectedInspector({ nodes, edges }: { nodes: GraphNode[]; edges:
   );
 }
 
-function NodeInspector({ node }: { node: GraphNode }) {
+function NodeInspector({ node, onChange }: { node: GraphNode; onChange: (patch: Partial<GraphNode>) => void }) {
   const status = STATUSES.find((s) => s.id === node.statusId);
-  const category = node.statusId === 'in-progress' || node.statusId === 'in-review'
-    ? 'in_progress'
-    : node.statusId === 'done' || node.statusId === 'canceled'
-      ? 'done'
-      : 'todo';
   return (
     <>
       <div style={{ padding: '12px 16px', borderBottom: '1px solid var(--border-muted)' }}>
@@ -426,22 +485,31 @@ function NodeInspector({ node }: { node: GraphNode }) {
       </div>
 
       <div className="scroll" style={{ flex: 1, overflow: 'auto', padding: 12 }}>
-        <Field label="Display name">
-          <input className="input input-sm" defaultValue={status?.name} />
-        </Field>
-        <Field label="Category">
-          <select className="input input-sm" defaultValue={category}>
-            <option value="todo">Todo (not started)</option>
-            <option value="in_progress">In progress</option>
-            <option value="done">Done (terminal)</option>
+        <Field label="Status">
+          <select
+            className="input input-sm"
+            value={node.statusId}
+            onChange={(e) => onChange({ statusId: e.target.value })}
+          >
+            {STATUSES.map((s) => (
+              <option key={s.id} value={s.id}>{s.name}</option>
+            ))}
           </select>
         </Field>
         <Field label="Flags">
           <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--fg)' }}>
-            <input type="checkbox" className="cb" defaultChecked={!!node.initial} /> Initial state
+            <input
+              type="checkbox" className="cb"
+              checked={!!node.initial}
+              onChange={(e) => onChange({ initial: e.target.checked })}
+            /> Initial state
           </label>
           <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--fg)', marginTop: 6 }}>
-            <input type="checkbox" className="cb" defaultChecked={!!node.terminal} /> Terminal state
+            <input
+              type="checkbox" className="cb"
+              checked={!!node.terminal}
+              onChange={(e) => onChange({ terminal: e.target.checked })}
+            /> Terminal state
           </label>
         </Field>
         <div style={{ marginTop: 18, padding: 10, background: 'var(--bg-subtle)', borderRadius: 6, fontSize: 12, color: 'var(--fg-muted)' }}>
@@ -460,8 +528,9 @@ interface EdgeInspectorProps {
   nodes: GraphNode[];
   workspace: string;
   project: string;
+  onChange: (patch: Partial<GraphEdge>) => void;
 }
-function EdgeInspector({ edge, nodes, workspace, project }: EdgeInspectorProps) {
+function EdgeInspector({ edge, nodes, workspace, project, onChange }: EdgeInspectorProps) {
   const from = nodes.find((n) => n.id === edge.from);
   const to = nodes.find((n) => n.id === edge.to);
   const fromStatus = STATUSES.find((s) => s.id === from?.statusId);
@@ -536,16 +605,21 @@ function EdgeInspector({ edge, nodes, workspace, project }: EdgeInspectorProps) 
         {/* Drift fix: dropped "Visible to" select and "Auto-transition" toggle (out of v1 scope). */}
         <div className="label-section" style={{ marginTop: 18, marginBottom: 8 }}>Properties</div>
         <Field label="Trigger label">
-          <input className="input input-sm" defaultValue={edge.label ?? ''} placeholder="e.g. approve" />
-        </Field>
-        <Field label="Description (internal)">
-          <textarea
+          <input
             className="input input-sm"
-            rows={3}
-            defaultValue={isFull ? 'Used when an admin signs off on the review.' : ''}
-            placeholder="Optional note shown in the audit trail."
-            style={{ height: 'auto', padding: '6px 10px', fontFamily: 'var(--font-sans)', resize: 'vertical' }}
+            value={edge.label ?? ''}
+            onChange={(e) => onChange({ label: e.target.value || undefined })}
+            placeholder="e.g. approve"
           />
+        </Field>
+        <Field label="Restricted (dashed)">
+          <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--fg)' }}>
+            <input
+              type="checkbox" className="cb"
+              checked={!!edge.dashed}
+              onChange={(e) => onChange({ dashed: e.target.checked })}
+            /> Render as a restricted (dashed) transition
+          </label>
         </Field>
 
         <button className="btn btn-danger btn-sm" style={{ marginTop: 12, width: '100%' }}>
