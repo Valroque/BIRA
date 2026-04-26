@@ -1,9 +1,14 @@
 // /:workspace/projects — list of all projects in the workspace + create flow.
-import { useState, type FormEvent } from 'react';
+import { useMemo, useState, type FormEvent } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { Icon } from '../components/icons';
-import { TopBar, useWorkspaceContext } from '../components/shell';
-import { ISSUES, projectEffectiveMembers, type Project } from '../fixtures';
+import { TopBar, Avatar, useWorkspaceContext } from '../components/shell';
+import {
+  CURRENT_USER, DEFAULT_PROJECT_WORKFLOWS, ISSUES, ISSUE_TYPE_NAMES, MEMBERS,
+  RESERVED_PROJECT_SLUGS, TEAMS, WORKFLOWS,
+  pickProjectColor, projectEffectiveMembers,
+  type IssueTypeLetter, type Member, type Project,
+} from '../fixtures';
 import { useProjects } from '../state/projects';
 
 export function ProjectsPage() {
@@ -125,24 +130,83 @@ function Group({ label, projects, workspace, dim }: { label: string; projects: P
   );
 }
 
+const TYPE_ORDER: IssueTypeLetter[] = ['T', 'B', 'S', 'E'];
+const ACTIVE_MEMBERS: Member[] = MEMBERS.filter((m) => m.status === 'active');
+
+function slugify(name: string): string {
+  return name.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+}
+
+function deriveKey(name: string): string {
+  return name.trim().toUpperCase().replace(/[^A-Z0-9]+/g, '').slice(0, 4);
+}
+
 function CreateProjectModal({ onClose }: { onClose: () => void }) {
   const navigate = useNavigate();
   const { workspace } = useWorkspaceContext();
-  const [name, setName] = useState('');
-  const [key, setKey] = useState('');
+  const { projects, addProject } = useProjects();
 
-  // Auto-derive a key from the project name.
+  const [name, setName] = useState('');
+  // The user can override the auto-derived key but not the slug (slug is the
+  // URL primary key for v1; if it ever becomes editable, validate it the same
+  // way as `name` here).
+  const [key, setKey] = useState('');
+  const [keyTouched, setKeyTouched] = useState(false);
+  const [description, setDescription] = useState('');
+  const [workflows, setWorkflows] = useState<Record<IssueTypeLetter, string>>(DEFAULT_PROJECT_WORKFLOWS);
+  const [teamSlugs, setTeamSlugs] = useState<string[]>([]);
+  // Edit access starts with just the creator. They can add more before submit.
+  const [userEmails, setUserEmails] = useState<string[]>([CURRENT_USER.email]);
+
   const onName = (v: string) => {
     setName(v);
-    const auto = v.trim().toUpperCase().replace(/[^A-Z0-9]+/g, '').slice(0, 4);
-    setKey(auto);
+    if (!keyTouched) setKey(deriveKey(v));
   };
+  const onKey = (v: string) => {
+    setKeyTouched(true);
+    setKey(v.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 4));
+  };
+
+  const slug = slugify(name);
+
+  // Validation — surface the first applicable error so the form stays terse.
+  const error = useMemo<string | null>(() => {
+    if (!name.trim()) return null; // empty is the resting state, not an error
+    if (slug.length < 2) return 'Name must be at least 2 letters or digits.';
+    if (RESERVED_PROJECT_SLUGS.has(slug)) return `"${slug}" is reserved — pick a different name.`;
+    if (projects.some((p) => p.slug === slug)) return `A project with slug "${slug}" already exists.`;
+    if (!key) return null; // user is still typing
+    if (key.length < 2) return 'Issue key must be at least 2 characters.';
+    if (projects.some((p) => p.key === key)) return `Issue key "${key}" is taken — pick another.`;
+    return null;
+  }, [name, slug, key, projects]);
+
+  const canSubmit = !!slug && slug.length >= 2 && !error && key.length >= 2;
 
   const submit = (e: FormEvent) => {
     e.preventDefault();
-    const slug = name.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'project';
+    if (!canSubmit) return;
+    const palette = pickProjectColor(slug);
+    const created = addProject({
+      slug,
+      name: name.trim(),
+      key,
+      letter: (name.trim()[0] ?? slug[0] ?? '?').toUpperCase(),
+      color: palette.color,
+      bg: palette.bg,
+      description: description.trim(),
+      workflows,
+      teamSlugs,
+      // The creator is implicitly an editor. Listing them in `userEmails`
+      // makes that visible on the Members page; teams the creator is in
+      // would also grant access transitively.
+      userEmails: userEmails.includes(CURRENT_USER.email)
+        ? userEmails
+        : [CURRENT_USER.email, ...userEmails],
+      createdByEmail: CURRENT_USER.email,
+    });
     onClose();
-    navigate(`/${workspace}/${slug}`);
+    navigate(`/${workspace}/${created.slug}`);
   };
 
   return (
@@ -150,25 +214,34 @@ function CreateProjectModal({ onClose }: { onClose: () => void }) {
       onClick={onClose}
       style={{
         position: 'fixed', inset: 0, zIndex: 60, background: 'rgba(15,23,42,.4)',
-        display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24,
+        display: 'flex', alignItems: 'flex-start', justifyContent: 'center',
+        padding: '6vh 24px', overflow: 'auto',
       }}
     >
       <form
         onSubmit={submit}
         onClick={(e) => e.stopPropagation()}
         style={{
-          width: '100%', maxWidth: 480, background: 'var(--bg)', borderRadius: 10,
-          boxShadow: 'var(--shadow-lg)', overflow: 'hidden',
+          width: '100%', maxWidth: 560, background: 'var(--bg)', borderRadius: 10,
+          boxShadow: 'var(--shadow-lg)', display: 'flex', flexDirection: 'column',
+          maxHeight: '88vh',
         }}
       >
-        <div style={{ padding: '14px 18px', borderBottom: '1px solid var(--border-muted)', display: 'flex', alignItems: 'center', gap: 8 }}>
+        <header style={{
+          padding: '14px 18px', borderBottom: '1px solid var(--border-muted)',
+          display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0,
+        }}>
           <span style={{ fontSize: 14, fontWeight: 600 }}>New project</span>
           <div style={{ flex: 1 }} />
-          <button type="button" onClick={onClose} className="btn btn-ghost btn-sm" style={{ width: 24, padding: 0 }}>
+          <button
+            type="button" onClick={onClose} className="btn btn-ghost btn-sm"
+            style={{ width: 24, padding: 0 }} data-tip="Close"
+          >
             <Icon name="x" size={13} />
           </button>
-        </div>
-        <div style={{ padding: 18 }}>
+        </header>
+
+        <div className="scroll" style={{ flex: 1, overflow: 'auto', padding: 18 }}>
           <Field label="Name">
             <input
               autoFocus className="input"
@@ -177,38 +250,168 @@ function CreateProjectModal({ onClose }: { onClose: () => void }) {
               placeholder="e.g. Nebula"
               required
             />
+            {slug && <Hint>URL: <code>/{workspace}/{slug}</code></Hint>}
           </Field>
+
           <Field label="Issue key">
             <input
               className="input mono"
               value={key}
-              onChange={(e) => setKey(e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 4))}
+              onChange={(e) => onKey(e.target.value)}
               placeholder="e.g. NEB"
               required
               maxLength={4}
+              style={{ maxWidth: 120, textTransform: 'uppercase' }}
             />
             <Hint>Used as the prefix for issue IDs (<code>{key || 'NEB'}-1</code>).</Hint>
           </Field>
+
+          <Field label="Description" optional>
+            <textarea
+              className="input"
+              rows={2}
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              placeholder="A short summary — what this project tracks."
+              style={{ height: 'auto', padding: '8px 10px', fontFamily: 'var(--font-sans)', resize: 'vertical' }}
+            />
+          </Field>
+
+          <Field label="Workflows">
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 8 }}>
+              {TYPE_ORDER.map((t) => (
+                <label
+                  key={t}
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: 8,
+                    padding: '6px 8px', borderRadius: 6,
+                    background: 'var(--bg-subtle)', border: '1px solid var(--border-muted)',
+                  }}
+                >
+                  <span className={`tchip tchip-${t}`} style={{ width: 22, height: 22, fontSize: 11, flexShrink: 0 }}>
+                    {t}
+                  </span>
+                  <span style={{ fontSize: 12, fontWeight: 500, flex: 1 }}>{ISSUE_TYPE_NAMES[t]}</span>
+                  <select
+                    value={workflows[t]}
+                    onChange={(e) => setWorkflows((prev) => ({ ...prev, [t]: e.target.value }))}
+                    className="input input-sm"
+                    style={{ width: 'auto', maxWidth: 130 }}
+                  >
+                    {Object.values(WORKFLOWS).map((w) => (
+                      <option key={w.id} value={w.id}>{w.name}</option>
+                    ))}
+                  </select>
+                </label>
+              ))}
+            </div>
+            <Hint>Each issue type uses one workflow. You can change these later in project settings.</Hint>
+          </Field>
+
+          <Field label="Teams with access" optional>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+              {TEAMS.map((team) => {
+                const on = teamSlugs.includes(team.slug);
+                return (
+                  <button
+                    key={team.slug}
+                    type="button"
+                    onClick={() => setTeamSlugs((prev) =>
+                      on ? prev.filter((s) => s !== team.slug) : [...prev, team.slug],
+                    )}
+                    className="btn btn-sm"
+                    style={{
+                      gap: 6, height: 28,
+                      background: on ? 'var(--accent-subtle)' : 'var(--bg)',
+                      borderColor: on ? 'var(--accent)' : 'var(--border)',
+                      color: on ? 'var(--accent-active)' : 'var(--fg)',
+                      fontWeight: on ? 600 : 500,
+                    }}
+                  >
+                    <span style={{
+                      width: 6, height: 6, borderRadius: 3, background: team.color,
+                    }} />
+                    {team.name}
+                  </button>
+                );
+              })}
+            </div>
+            <Hint>Adds every member of the selected teams.</Hint>
+          </Field>
+
+          <Field label="People with edit access">
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+              {ACTIVE_MEMBERS.map((m) => {
+                const on = userEmails.includes(m.email);
+                const isSelf = m.email === CURRENT_USER.email;
+                return (
+                  <button
+                    key={m.email}
+                    type="button"
+                    onClick={() => {
+                      if (isSelf) return; // creator is always included
+                      setUserEmails((prev) =>
+                        on ? prev.filter((e) => e !== m.email) : [...prev, m.email],
+                      );
+                    }}
+                    className="btn btn-sm"
+                    data-tip={isSelf ? 'Creator — always included' : undefined}
+                    style={{
+                      gap: 6, height: 28,
+                      background: on ? 'var(--accent-subtle)' : 'var(--bg)',
+                      borderColor: on ? 'var(--accent)' : 'var(--border)',
+                      color: on ? 'var(--accent-active)' : 'var(--fg)',
+                      fontWeight: on ? 600 : 500,
+                      cursor: isSelf ? 'default' : 'pointer',
+                    }}
+                  >
+                    <Avatar name={m.name} size={18} />
+                    {m.name}{isSelf ? ' (you)' : ''}
+                  </button>
+                );
+              })}
+            </div>
+            <Hint>You can refine this anytime from the project's Members page.</Hint>
+          </Field>
+
+          {error && (
+            <div style={{
+              marginTop: 8, padding: '8px 10px', borderRadius: 6,
+              background: '#fef2f2', border: '1px solid #fecaca',
+              color: '#991b1b', fontSize: 12,
+              display: 'flex', alignItems: 'center', gap: 6,
+            }}>
+              <Icon name="alert" size={12} />{error}
+            </div>
+          )}
         </div>
-        <div style={{ padding: '10px 18px', borderTop: '1px solid var(--border-muted)', background: 'var(--bg-subtle)', display: 'flex', gap: 8 }}>
+
+        <footer style={{
+          padding: '10px 18px', borderTop: '1px solid var(--border-muted)',
+          background: 'var(--bg-subtle)', display: 'flex', gap: 8, flexShrink: 0,
+        }}>
           <div style={{ flex: 1 }} />
           <button type="button" onClick={onClose} className="btn btn-sm">Cancel</button>
-          <button type="submit" disabled={!name || !key} className="btn btn-primary btn-sm">
+          <button type="submit" disabled={!canSubmit} className="btn btn-primary btn-sm">
             <Icon name="check" size={13} />Create project
           </button>
-        </div>
+        </footer>
       </form>
     </div>
   );
 }
 
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
+function Field({ label, optional, children }: { label: string; optional?: boolean; children: React.ReactNode }) {
   return (
-    <label style={{ display: 'block', marginBottom: 12 }}>
+    <label style={{ display: 'block', marginBottom: 14 }}>
       <div style={{
         fontSize: 11, fontWeight: 600, color: 'var(--fg-muted)',
         textTransform: 'uppercase', letterSpacing: 0.4, marginBottom: 4,
-      }}>{label}</div>
+        display: 'flex', alignItems: 'center', gap: 6,
+      }}>
+        <span>{label}</span>
+        {optional && <span style={{ color: 'var(--fg-faint)', fontWeight: 500, textTransform: 'none', letterSpacing: 0 }}>· optional</span>}
+      </div>
       {children}
     </label>
   );

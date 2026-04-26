@@ -26,10 +26,14 @@ codebase will make sense faster.
 6. **Out of scope for v1**: sprints, backlog grooming, sub-tasks under epics,
    custom fields, JQL, SSO, integrations, notifications, public REST API,
    granular roles. Full list in `.claude/rules/v1-constraints.md`.
-7. **State**: in-memory fixtures only (`src/fixtures.ts`), plus
-   `localStorage` for one piece of UI preference (`bira:list-layout`). Read
-   from URL via `useWorkspaceContext()` in `shell.tsx` — never hardcode
-   `/acme/comet/`.
+7. **State**: in-memory fixtures only (`src/fixtures.ts`), plus a few
+   `localStorage` keys: `bira:list-layout` (column UI prefs),
+   `bira:board-columns:<workspace>:<project>` (per-project board config),
+   and `bira:projects` (user-created projects from the New project flow —
+   merged with `SEED_PROJECTS` by `ProjectsProvider`). Workspace + project
+   come from the URL via `useWorkspaceContext()` in `shell.tsx` — never
+   hardcode `/acme/comet/`. Read project data via `useProjects()` from
+   `src/state/projects.tsx`, never from a stale `PROJECT_INFO` map.
 8. **Reuse, don't reinvent**: every layout primitive lives in
    `src/components/` (especially `shell.tsx`). Adding a parallel `<button>`
    styled like an existing `Chip` is a defect, not a shortcut.
@@ -60,9 +64,11 @@ engine and rule-gated transitions.
 
 ## 2. Current status
 
-**Frontend prototype only.** No backend, no database, no real auth. All data
-is in-memory fixtures in `src/fixtures.ts` and edits don't persist (the only
-exceptions are user preferences for column layout, which use localStorage).
+**Frontend prototype only.** No backend, no database, no real auth. Most
+data is in-memory fixtures in `src/fixtures.ts` and edits don't persist; the
+exceptions are written to `localStorage` (column-layout prefs, per-project
+board config, and projects created via the New-project flow — see TL;DR
+point 7 for the full key list).
 
 The user has explicitly chosen to design-first: **do not propose backend or
 API or DB work until the entire UI and flows are signed off.** Wiring real
@@ -325,8 +331,12 @@ fixtures via `useWorkspaceContext()` (defined in `shell.tsx`) — it pulls
   `useWorkspaceContext()` to derive paths — never hardcode `/acme/`
   unless the surrounding context is genuinely the design canvas demo.
 - **Persistence**: `localStorage` is fine for user-preference state (column
-  layout). Anything that's "real data" (issues, comments, members) stays
-  in fixtures until the backend lands.
+  layout, per-project board config) AND for runtime workspace state that the
+  prototype lets the user mutate (currently: projects created via the New
+  project flow, keyed `bira:projects` and merged with `SEED_PROJECTS` by
+  `ProjectsProvider`). Other "real data" (issues, comments, members) stays
+  in fixtures until the backend lands. When you add a new persisted key,
+  update the TL;DR list in this file.
 - **Don't add new dependencies** without checking with the user first.
   The current dep list is intentionally tight.
 
