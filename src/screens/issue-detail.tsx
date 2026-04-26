@@ -2,7 +2,8 @@ import { useState, type ReactNode } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { Icon } from '../components/icons';
 import { TopBar, TypeChip, IssueId, StatusDot, Priority, Avatar, STATUSES, useWorkspaceContext } from '../components/shell';
-import { ISSUES, type Issue } from '../fixtures';
+import { AttachmentRow, renderRichText, useComposer, type Attachment } from '../components/composer';
+import { CURRENT_USER, ISSUES, type Issue } from '../fixtures';
 
 const STATUS_LABEL: Record<Issue['status'], string> = {
   backlog: 'Backlog',
@@ -385,6 +386,34 @@ type FeedItem =
   | { kind: 'comment'; who: string; when: string; body: ReactNode }
   | { kind: 'event'; who: string; when: string; verb: string; from?: string; to?: string; detail?: ReactNode; icon?: string };
 
+// Tiny inline SVG used as a demo screenshot in the seeded comment, so the
+// attached-image affordance is visible without uploading anything.
+const DEMO_SCREENSHOT =
+  'data:image/svg+xml;utf8,' +
+  encodeURIComponent(
+    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 360 200">
+      <rect width="360" height="200" fill="#0f172a"/>
+      <rect x="0" y="0" width="360" height="22" fill="#1e293b"/>
+      <circle cx="12" cy="11" r="3.5" fill="#64748b"/>
+      <circle cx="24" cy="11" r="3.5" fill="#64748b"/>
+      <circle cx="36" cy="11" r="3.5" fill="#64748b"/>
+      <rect x="60" y="6" width="120" height="11" rx="2" fill="#334155"/>
+      <rect x="20" y="40" width="90" height="10" rx="2" fill="#a78bfa"/>
+      <rect x="20" y="58" width="220" height="6" rx="2" fill="#cbd5e1"/>
+      <rect x="20" y="70" width="180" height="6" rx="2" fill="#94a3b8"/>
+      <rect x="20" y="82" width="140" height="6" rx="2" fill="#94a3b8"/>
+      <rect x="20" y="106" width="60" height="10" rx="2" fill="#fbbf24"/>
+      <rect x="20" y="124" width="200" height="6" rx="2" fill="#cbd5e1"/>
+      <rect x="20" y="136" width="160" height="6" rx="2" fill="#94a3b8"/>
+      <rect x="20" y="148" width="240" height="6" rx="2" fill="#94a3b8"/>
+      <rect x="20" y="170" width="80" height="14" rx="3" fill="#6366f1"/>
+    </svg>`,
+  );
+
+const DEMO_ATTACHMENTS: Attachment[] = [
+  { id: 'demo-att-1', name: 'workflow-filter-bug.png', dataUrl: DEMO_SCREENSHOT, size: 0 },
+];
+
 const FEED_ITEMS: FeedItem[] = [
   {
     kind: 'comment', who: 'Maya Chen', when: '2h ago',
@@ -392,6 +421,18 @@ const FEED_ITEMS: FeedItem[] = [
       <div style={{ fontSize: 13, color: 'var(--fg)', lineHeight: 1.55 }}>
         Pushed a fix that gates persistence on the unfiltered set. Want a second pair of eyes on the
         migration path for existing dirty state.
+        {renderRichText(`\nThe write-through path now looks like:\n\n\`\`\`ts\nconst persist = debounce((view) => {\n  // Drift fix: reorder over the *full* set, not the filtered subset.\n  const next = mergeOrder(allNodes, view.visibleOrder);\n  storage.set('workflow:order', next);\n}, 250);\n\`\`\``)}
+        <AttachmentRow attachments={DEMO_ATTACHMENTS} bordered={false} />
+      </div>
+    ),
+  },
+  {
+    kind: 'comment', who: CURRENT_USER.name, when: '2h ago',
+    body: (
+      <div style={{ fontSize: 13, color: 'var(--fg)', lineHeight: 1.55 }}>
+        Looks right. I'll take another pass on the migration once the staging deploy lands —
+        if any in-flight workflows still have orphaned slot orders we should null them out
+        rather than reconstruct.
       </div>
     ),
   },
@@ -473,22 +514,62 @@ function ActivityFeed() {
         )
       )}
 
-      {/* Comment composer */}
-      <div style={{ marginTop: 16, border: '1px solid var(--border)', borderRadius: 8, background: 'var(--bg)' }}>
-        <div style={{ padding: '10px 12px', minHeight: 60, fontSize: 13, color: 'var(--fg-faint)' }}>
-          Leave a comment…
-        </div>
-        <div style={{
-          padding: '6px 8px', borderTop: '1px solid var(--border-muted)',
-          display: 'flex', alignItems: 'center', gap: 2,
-        }}>
-          <button className="btn btn-ghost btn-sm" style={{ width: 26, padding: 0 }}><Icon name="bold" size={13} /></button>
-          <button className="btn btn-ghost btn-sm" style={{ width: 26, padding: 0 }}><Icon name="italic" size={13} /></button>
-          <button className="btn btn-ghost btn-sm" style={{ width: 26, padding: 0 }}><Icon name="code" size={13} /></button>
-          <button className="btn btn-ghost btn-sm" style={{ width: 26, padding: 0 }}><Icon name="paperclip" size={13} /></button>
-          <div style={{ flex: 1 }} />
-          <button className="btn btn-sm">Comment</button>
-        </div>
+      <CommentComposer />
+    </div>
+  );
+}
+
+function CommentComposer() {
+  const c = useComposer();
+  return (
+    <div
+      onDragOver={c.handleDragOver}
+      onDragLeave={c.handleDragLeave}
+      onDrop={c.handleDrop}
+      style={{
+        marginTop: 16,
+        border: `1px solid ${c.dragOver ? 'var(--accent)' : 'var(--border)'}`,
+        borderRadius: 8,
+        background: 'var(--bg)',
+        boxShadow: c.dragOver ? '0 0 0 3px var(--accent-muted)' : 'none',
+        transition: 'border-color .12s, box-shadow .12s',
+      }}
+    >
+      <textarea
+        ref={c.textareaRef}
+        value={c.value}
+        onChange={(e) => c.setValue(e.target.value)}
+        onPaste={c.handlePaste}
+        placeholder="Leave a comment… paste or drop an image, or use the code button to add a snippet"
+        rows={3}
+        style={{
+          width: '100%', display: 'block',
+          border: 'none', outline: 'none', resize: 'vertical',
+          padding: '10px 12px', minHeight: 60,
+          fontSize: 13, color: 'var(--fg)', background: 'transparent',
+          fontFamily: 'var(--font-sans)', lineHeight: 1.55,
+          boxSizing: 'border-box',
+        }}
+      />
+      <AttachmentRow attachments={c.attachments} onRemove={c.removeAttachment} />
+      <div style={{
+        padding: '6px 8px', borderTop: '1px solid var(--border-muted)',
+        display: 'flex', alignItems: 'center', gap: 2,
+      }}>
+        <button type="button" className="btn btn-ghost btn-sm" style={{ width: 26, padding: 0 }} data-tip="Bold"><Icon name="bold" size={13} /></button>
+        <button type="button" className="btn btn-ghost btn-sm" style={{ width: 26, padding: 0 }} data-tip="Italic"><Icon name="italic" size={13} /></button>
+        <button type="button" onClick={c.insertCodeBlock} className="btn btn-ghost btn-sm" style={{ width: 26, padding: 0 }} data-tip="Code block"><Icon name="code" size={13} /></button>
+        <button type="button" onClick={c.openFilePicker} className="btn btn-ghost btn-sm" style={{ width: 26, padding: 0 }} data-tip="Attach image"><Icon name="paperclip" size={13} /></button>
+        <input
+          ref={c.fileInputRef}
+          type="file"
+          accept="image/*"
+          multiple
+          hidden
+          onChange={c.handleFileChange}
+        />
+        <div style={{ flex: 1 }} />
+        <button type="button" className="btn btn-sm">Comment</button>
       </div>
     </div>
   );
@@ -531,16 +612,47 @@ function FeedCount({ n, active }: { n: number; active: boolean }) {
 }
 
 function Activity({ who, when, children }: { who: string; when: string; children: ReactNode }) {
+  const isSelf = who === CURRENT_USER.name;
   return (
     <div style={{ display: 'flex', gap: 10, marginBottom: 14, alignItems: 'flex-start' }}>
       <Avatar name={who} size={24} />
-      <div style={{ flex: 1, border: '1px solid var(--border-muted)', borderRadius: 8, overflow: 'hidden' }}>
+      <div style={{
+        flex: 1,
+        border: `1px solid ${isSelf ? 'var(--accent-muted)' : 'var(--border-muted)'}`,
+        borderRadius: 8, overflow: 'hidden',
+      }}>
         <div style={{
-          padding: '6px 12px', background: 'var(--bg-subtle)',
-          borderBottom: '1px solid var(--border-muted)',
+          padding: '6px 12px',
+          background: isSelf ? 'var(--accent-muted)' : 'var(--bg-subtle)',
+          borderBottom: `1px solid ${isSelf ? 'var(--accent-muted)' : 'var(--border-muted)'}`,
           display: 'flex', alignItems: 'center', gap: 6, fontSize: 12,
         }}>
-          <strong>{who}</strong><span style={{ color: 'var(--fg-muted)' }}>· {when}</span>
+          <strong style={{ color: isSelf ? 'var(--accent-active)' : 'var(--fg)' }}>{who}</strong>
+          {isSelf && (
+            <span className="pill" style={{
+              background: 'var(--bg)', color: 'var(--accent-active)',
+              fontSize: 10, padding: '1px 5px', fontWeight: 600,
+              border: '1px solid var(--accent-muted)',
+            }}>You</span>
+          )}
+          <span style={{ color: isSelf ? 'var(--accent-active)' : 'var(--fg-muted)', opacity: isSelf ? 0.75 : 1 }}>· {when}</span>
+          {isSelf && (
+            <>
+              <div style={{ flex: 1 }} />
+              <button type="button" className="btn btn-ghost btn-sm" data-tip="Edit" style={{
+                width: 22, height: 22, padding: 0, color: 'var(--accent-active)',
+                background: 'transparent', borderColor: 'transparent',
+              }}>
+                <Icon name="edit" size={12} />
+              </button>
+              <button type="button" className="btn btn-ghost btn-sm" data-tip="Delete" style={{
+                width: 22, height: 22, padding: 0, color: 'var(--accent-active)',
+                background: 'transparent', borderColor: 'transparent',
+              }}>
+                <Icon name="trash" size={12} />
+              </button>
+            </>
+          )}
         </div>
         <div style={{ padding: '10px 12px' }}>{children}</div>
       </div>

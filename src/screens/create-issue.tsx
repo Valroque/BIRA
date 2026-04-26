@@ -2,6 +2,7 @@ import { useEffect, useState, type FormEvent, type ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Icon } from '../components/icons';
 import { TypeChip, StatusDot, Priority, Avatar, KBD, useWorkspaceContext } from '../components/shell';
+import { AttachmentRow, useComposer } from '../components/composer';
 
 const TYPES = [
   { t: 'T', name: 'Task', color: 'var(--type-task)', bg: 'var(--type-task-bg)' },
@@ -17,6 +18,7 @@ export function CreateIssuePage() {
   const { workspace, project } = useWorkspaceContext();
   const close = () => navigate(-1);
   const [type, setType] = useState<TypeChar>('B');
+  const desc = useComposer();
 
   // Submit lands on a real issue's detail page (the closest thing the prototype
   // can do without persistence).
@@ -103,15 +105,61 @@ export function CreateIssuePage() {
               color: 'var(--fg)', fontFamily: 'var(--font-sans)',
             }}
           />
-          <textarea
-            placeholder="Add description… (markdown supported, /commands)"
-            rows={4}
+          <div
+            onDragOver={desc.handleDragOver}
+            onDragLeave={desc.handleDragLeave}
+            onDrop={desc.handleDrop}
             style={{
-              width: '100%', border: 'none', outline: 'none', resize: 'none',
-              fontSize: 13, color: 'var(--fg)', padding: '6px 0',
-              fontFamily: 'var(--font-sans)', lineHeight: 1.55,
+              borderRadius: 6,
+              outline: desc.dragOver ? '2px solid var(--accent)' : 'none',
+              outlineOffset: 2,
+              transition: 'outline-color .12s',
             }}
-          />
+          >
+            <textarea
+              ref={desc.textareaRef}
+              value={desc.value}
+              onChange={(e) => desc.setValue(e.target.value)}
+              onPaste={desc.handlePaste}
+              placeholder="Add description… paste or drop an image, or use the code button to add a snippet"
+              rows={4}
+              style={{
+                width: '100%', border: 'none', outline: 'none', resize: 'vertical',
+                fontSize: 13, color: 'var(--fg)', padding: '6px 0',
+                fontFamily: 'var(--font-sans)', lineHeight: 1.55,
+                background: 'transparent', boxSizing: 'border-box',
+              }}
+            />
+            <AttachmentRow attachments={desc.attachments} onRemove={desc.removeAttachment} bordered={false} />
+            <div style={{ display: 'flex', alignItems: 'center', gap: 2, marginTop: 2 }}>
+              <button
+                type="button"
+                onClick={desc.insertCodeBlock}
+                className="btn btn-ghost btn-sm"
+                style={{ width: 26, padding: 0 }}
+                data-tip="Code block"
+              >
+                <Icon name="code" size={13} />
+              </button>
+              <button
+                type="button"
+                onClick={desc.openFilePicker}
+                className="btn btn-ghost btn-sm"
+                style={{ width: 26, padding: 0 }}
+                data-tip="Attach image"
+              >
+                <Icon name="paperclip" size={13} />
+              </button>
+              <input
+                ref={desc.fileInputRef}
+                type="file"
+                accept="image/*"
+                multiple
+                hidden
+                onChange={desc.handleFileChange}
+              />
+            </div>
+          </div>
 
           {/* Drift fix: removed "Sprint" and "Estimate" meta buttons (out of v1 scope). */}
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 8 }}>

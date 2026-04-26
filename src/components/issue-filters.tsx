@@ -5,7 +5,7 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Icon } from './icons';
 import { Avatar, StatusDot, STATUSES } from './shell';
 import {
-  ISSUES, PROJECT_INFO, type Issue, type ProjectSlug,
+  CURRENT_USER, ISSUES, PROJECT_INFO, type Issue, type ProjectSlug,
 } from '../fixtures';
 
 export type FilterType = 'status' | 'project' | 'assignee' | 'label' | 'priority' | 'type';
@@ -425,6 +425,30 @@ export function FilterChip({ filter, onChange, onRemove }: FilterChipProps) {
               />
             </div>
           </div>
+          {filter.type === 'assignee' && (
+            <div style={{
+              padding: '6px 8px', borderBottom: '1px solid var(--border-muted)',
+              display: 'flex', alignItems: 'center', gap: 6,
+            }}>
+              <button
+                type="button"
+                onClick={() => toggle(CURRENT_USER.name)}
+                className="btn btn-sm"
+                data-tip={CURRENT_USER.name}
+                style={{
+                  height: 24, padding: '0 8px 0 4px', gap: 5,
+                  background: filter.values.includes(CURRENT_USER.name) ? 'var(--accent-subtle)' : 'var(--bg)',
+                  borderColor: filter.values.includes(CURRENT_USER.name) ? 'var(--accent)' : 'var(--border)',
+                  color: filter.values.includes(CURRENT_USER.name) ? 'var(--accent-active)' : 'var(--fg)',
+                  fontWeight: filter.values.includes(CURRENT_USER.name) ? 600 : 500,
+                }}
+              >
+                <Avatar name={CURRENT_USER.name} size={16} />
+                Me
+              </button>
+              <span style={{ fontSize: 11, color: 'var(--fg-faint)' }}>quick pick</span>
+            </div>
+          )}
           <div className="scroll" style={{ maxHeight: 280, overflow: 'auto', padding: 4 }}>
             {filteredOptions.map((opt) => {
               const checked = filter.values.includes(opt.value);
