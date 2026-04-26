@@ -396,13 +396,16 @@ export const Chip = ({ children, onX, dim, style }: ChipProps) => (
 
 /**
  * Standard `to` URLs for the project tabs. Re-exported so screens don't
- * each invent their own paths.
+ * each invent their own paths. The Issues count defaults to the live
+ * fixture count for `project`; pass `opts.issueCount` to override (e.g.
+ * to show a filtered count).
  */
 export function projectTabs(workspace: string, project: string, opts?: { issueCount?: number }): Tab[] {
+  const issueCount = opts?.issueCount ?? ISSUES.filter((i) => i.project === project).length;
   return [
     { id: 'overview', label: 'Overview', icon: 'eye',      to: `/${workspace}/${project}` },
     { id: 'board',    label: 'Board',    icon: 'board',    to: `/${workspace}/${project}/board` },
-    { id: 'issues',   label: 'Issues',   icon: 'list',     to: `/${workspace}/${project}/list`, count: opts?.issueCount ?? 489 },
+    { id: 'issues',   label: 'Issues',   icon: 'list',     to: `/${workspace}/${project}/list`, count: issueCount },
     { id: 'workflow', label: 'Workflow', icon: 'workflow', to: `/${workspace}/${project}/workflow` },
     { id: 'members',  label: 'Members',  icon: 'users',    to: `/${workspace}/${project}/members` },
     { id: 'settings', label: 'Settings', icon: 'settings', to: `/${workspace}/${project}/settings` },
