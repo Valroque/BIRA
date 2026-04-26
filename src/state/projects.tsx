@@ -1,13 +1,22 @@
-// Workspace projects — runtime state.
+// Workspace projects — runtime state, scoped per workspace.
 //
-// Combines code-defined seed projects (Comet/Orbit/Atlas/Halo) with
-// user-created additions persisted to localStorage. Every consumer that
-// used to read PROJECT_INFO / PROJECT_WORKFLOWS / PROJECT_MEMBERS now goes
-// through `useProjects()` so newly-created projects appear everywhere
-// (sidebar, board, list, filters, …) without each surface knowing about it.
+// Holds the full projects list (seeds + user-added) in component state and
+// persists it to localStorage. Seed projects are auto-backfilled on load if
+// the persisted list is missing them — so the demo workspace stays usable
+// across schema changes, but any user edit to a seed (rename, archive,
+// workflow re-assignment, etc.) sticks.
+//
+// Every consumer that used to read PROJECT_INFO / PROJECT_WORKFLOWS /
+// PROJECT_MEMBERS now goes through `useProjects()` so newly-created or
+// edited projects appear everywhere (sidebar, board, list, filters, …)
+// without each surface knowing about it.
+//
+// The provider is mounted inside `WorkspaceLayout` (App.tsx) with
+// `key={workspace}`, so navigating between workspaces remounts it with the
+// new workspace's storage key + seed.
 
 import {
-  createContext, useCallback, useContext, useEffect, useMemo, useState,
+  createContext, useCallback, useContext, useEffect, useState,
   type ReactNode,
 } from 'react';
 import {
@@ -15,7 +24,42 @@ import {
   type IssueTypeLetter, type Project,
 } from '../fixtures';
 
-const STORAGE_KEY = 'bira:projects';
+/** localStorage key for the full project list in a given workspace. */
+const storageKey = (workspace: string) => `bira:projects:${workspace}`;
+
+/**
+ * Demo `acme` workspace ships with seed projects so the prototype isn't
+ * empty on first load. Other workspaces start with no projects until the
+ * user creates one — matching the behavior of a fresh tenant.
+ */
+const seedFor = (workspace: string): Project[] =>
+  workspace === 'acme' ? SEED_PROJECTS : [];
+
+function isValidProject(p: unknown): p is Project {
+  return !!p && typeof (p as Project).slug === 'string'
+    && typeof (p as Project).name === 'string'
+    && typeof (p as Project).key === 'string';
+}
+
+/** Load + backfill missing seeds. Returns the persisted list, with any seed
+ *  slugs not present in storage prepended so the workspace is never missing
+ *  its expected starting projects. */
+function loadProjects(workspace: string): Project[] {
+  const seeds = seedFor(workspace);
+  let stored: Project[] = [];
+  try {
+    const raw = localStorage.getItem(storageKey(workspace));
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) stored = parsed.filter(isValidProject);
+    }
+  } catch {
+    // ignore — fall through to seeds-only.
+  }
+  const presentSlugs = new Set(stored.map((p) => p.slug));
+  const missingSeeds = seeds.filter((s) => !presentSlugs.has(s.slug));
+  return [...missingSeeds, ...stored];
+}
 
 /** Fields the create-project form supplies. The provider fills the rest. */
 export interface AddProjectInput {
@@ -39,6 +83,9 @@ export interface ProjectsCtxValue {
   getProject: (slug: string) => Project | undefined;
   /** Append a new project. Returns the newly-created `Project`. */
   addProject: (input: AddProjectInput) => Project;
+  /** Patch any field on an existing project (seed or user-added). No-op if
+   *  the slug isn't found. */
+  updateProject: (slug: string, patch: Partial<Project>) => void;
   /** Projects where `teamSlug` has been added. */
   projectsForTeam: (teamSlug: string) => Project[];
   /** All `(project, issue_type)` pairs that map to this workflow id. */
@@ -47,35 +94,18 @@ export interface ProjectsCtxValue {
 
 const ProjectsContext = createContext<ProjectsCtxValue | undefined>(undefined);
 
-function loadAdded(): Project[] {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return [];
-    const parsed = JSON.parse(raw);
-    if (!Array.isArray(parsed)) return [];
-    return parsed.filter(
-      (p): p is Project =>
-        p && typeof p.slug === 'string' && typeof p.name === 'string' && typeof p.key === 'string',
-    );
-  } catch {
-    return [];
-  }
-}
-
 const ALL_TYPES: IssueTypeLetter[] = ['T', 'B', 'S', 'E'];
 
-export function ProjectsProvider({ children }: { children: ReactNode }) {
-  const [added, setAdded] = useState<Project[]>(() => loadAdded());
+export function ProjectsProvider({ workspace, children }: { workspace: string; children: ReactNode }) {
+  const [projects, setProjects] = useState<Project[]>(() => loadProjects(workspace));
 
   useEffect(() => {
     try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(added));
+      localStorage.setItem(storageKey(workspace), JSON.stringify(projects));
     } catch {
       // Quota / privacy mode — best-effort, ignore.
     }
-  }, [added]);
-
-  const projects = useMemo(() => [...SEED_PROJECTS, ...added], [added]);
+  }, [workspace, projects]);
 
   const getProject = useCallback(
     (slug: string) => projects.find((p) => p.slug === slug),
@@ -88,8 +118,12 @@ export function ProjectsProvider({ children }: { children: ReactNode }) {
       status: 'active',
       createdAt: new Date().toISOString(),
     };
-    setAdded((prev) => [...prev, next]);
+    setProjects((prev) => [...prev, next]);
     return next;
+  }, []);
+
+  const updateProject = useCallback((slug: string, patch: Partial<Project>) => {
+    setProjects((prev) => prev.map((p) => (p.slug === slug ? { ...p, ...patch } : p)));
   }, []);
 
   const projectsForTeam = useCallback(
@@ -111,7 +145,7 @@ export function ProjectsProvider({ children }: { children: ReactNode }) {
   );
 
   const value: ProjectsCtxValue = {
-    projects, getProject, addProject, projectsForTeam, projectsUsingWorkflow,
+    projects, getProject, addProject, updateProject, projectsForTeam, projectsUsingWorkflow,
   };
 
   return <ProjectsContext.Provider value={value}>{children}</ProjectsContext.Provider>;

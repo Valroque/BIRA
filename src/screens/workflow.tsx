@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import { Icon } from '../components/icons';
 import { TopBar, Tabs, Toolbar, Chip, StatusDot, TypeChip, STATUSES, projectTabs, useWorkspaceContext } from '../components/shell';
+import { useDismiss } from '../components/use-dismiss';
 import {
   WORKFLOWS, ISSUE_TYPE_NAMES, DEFAULT_PROJECT_WORKFLOWS,
   type IssueTypeLetter,
@@ -468,7 +469,7 @@ export function WorkflowPage() {
 
 export function WorkflowEditor() {
   const { workspace, project } = useWorkspaceContext();
-  const { getProject, projectsUsingWorkflow } = useProjects();
+  const { getProject, projectsUsingWorkflow, updateProject } = useProjects();
   const projectInfo = getProject(project);
   const workflows = projectInfo?.workflows ?? DEFAULT_PROJECT_WORKFLOWS;
 
@@ -576,10 +577,16 @@ export function WorkflowEditor() {
                 );
               })}
             </div>
-            <Chip>
-              <Icon name="branch" size={11} color="var(--fg-faint)" />
-              {baseWorkflow.name}
-            </Chip>
+            <WorkflowSwitcher
+              currentId={workflowId}
+              onPick={(id) => {
+                if (!projectInfo || id === workflowId) return;
+                updateProject(projectInfo.slug, {
+                  workflows: { ...projectInfo.workflows, [type]: id },
+                });
+                setSelected(null);
+              }}
+            />
             <Chip dim>
               Used by <strong style={{ color: 'var(--fg)', marginLeft: 3 }}>{usage.length}</strong>
               <span style={{ marginLeft: 3 }}>{usage.length === 1 ? 'pair' : 'pairs'}</span>
@@ -632,6 +639,89 @@ export function WorkflowEditor() {
           onDeleteEdge={deleteEdge}
         />
       </div>
+    </div>
+  );
+}
+
+/**
+ * Dropdown that lets the user switch which workflow the current
+ * (project, issue_type) pair uses. Visually it's a Chip with a chevron;
+ * clicking opens a popover listing every workflow id.
+ */
+function WorkflowSwitcher({
+  currentId, onPick,
+}: {
+  currentId: string;
+  onPick: (workflowId: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  useDismiss(ref, () => setOpen(false), open);
+  const current = WORKFLOWS[currentId];
+
+  return (
+    <div ref={ref} style={{ position: 'relative' }}>
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        className="btn btn-sm"
+        data-tip="Switch workflow for this issue type"
+        style={{ height: 24, gap: 4, padding: '0 8px' }}
+      >
+        <Icon name="branch" size={11} color="var(--fg-faint)" />
+        <span style={{ fontSize: 12 }}>{current?.name ?? currentId}</span>
+        <Icon name="chevronDown" size={11} color="var(--fg-faint)" style={{ marginLeft: 2 }} />
+      </button>
+      {open && (
+        <div style={{
+          position: 'absolute', top: '100%', left: 0, marginTop: 6, zIndex: 30,
+          minWidth: 280, background: 'var(--bg)', border: '1px solid var(--border)',
+          borderRadius: 8, boxShadow: 'var(--shadow-lg)', overflow: 'hidden',
+        }}>
+          <div className="label-section" style={{
+            padding: '8px 12px', borderBottom: '1px solid var(--border-muted)',
+          }}>
+            Use this workflow
+          </div>
+          <div style={{ padding: 4, maxHeight: 280, overflow: 'auto' }} className="scroll">
+            {Object.values(WORKFLOWS).map((wf) => {
+              const active = wf.id === currentId;
+              return (
+                <button
+                  key={wf.id}
+                  type="button"
+                  onClick={() => { onPick(wf.id); setOpen(false); }}
+                  style={{
+                    display: 'flex', alignItems: 'flex-start', gap: 10,
+                    width: '100%', padding: '8px 10px', borderRadius: 5,
+                    border: 'none', cursor: 'pointer', textAlign: 'left',
+                    background: active ? 'var(--accent-subtle)' : 'transparent',
+                    color: active ? 'var(--accent-active)' : 'var(--fg)',
+                  }}
+                  onMouseEnter={(e) => { if (!active) e.currentTarget.style.background = 'var(--bg-subtle)'; }}
+                  onMouseLeave={(e) => { if (!active) e.currentTarget.style.background = 'transparent'; }}
+                >
+                  <Icon
+                    name="branch" size={13}
+                    color={active ? 'var(--accent)' : 'var(--fg-muted)'}
+                    style={{ marginTop: 1, flexShrink: 0 }}
+                  />
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: 13, fontWeight: active ? 600 : 500 }}>{wf.name}</div>
+                    <div style={{ fontSize: 11.5, color: 'var(--fg-muted)', marginTop: 2, lineHeight: 1.4 }}>
+                      {wf.description}
+                    </div>
+                    <div className="tnum" style={{ fontSize: 11, color: 'var(--fg-faint)', marginTop: 4 }}>
+                      {wf.nodes.length} states · {wf.edges.length} transitions
+                    </div>
+                  </div>
+                  {active && <Icon name="check" size={13} color="var(--accent)" style={{ marginTop: 1 }} />}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
