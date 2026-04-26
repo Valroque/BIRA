@@ -330,6 +330,11 @@ export function WorkflowGraph({
           <div
             key={n.id}
             onMouseDown={(ev) => onNodePointerDown(n.id, ev)}
+            // Stop click bubbling to the scroll-layer's deselect handler.
+            // (`stopPropagation()` on mousedown doesn't stop the `click` that
+            // fires after mouseup — without this, selecting a node would
+            // momentarily set state and then get cleared by the bubbled click.)
+            onClick={(ev) => ev.stopPropagation()}
             style={{
               position: 'absolute', left: n.x, top: n.y, width: NODE_W, height: NODE_H,
               background: 'var(--bg)',
