@@ -116,6 +116,11 @@ body {
 .mono { font-family: var(--font-mono); font-feature-settings: 'tnum' 1; }
 .tnum { font-variant-numeric: tabular-nums; }
 
+/* Tiny uppercase header used above lists, sections, and metadata blocks.
+   Spacing (margin/padding) is left to inline styles since it varies per site. */
+.label-section { font-size: 11px; font-weight: 600; color: var(--fg-faint);
+                 text-transform: uppercase; letter-spacing: 0.5px; }
+
 /* --- Buttons --- */
 .btn { display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 10px; border-radius: var(--r-2);
   border: 1px solid var(--border); background: var(--bg); color: var(--fg); font: 500 var(--t-md)/1 var(--font-sans);

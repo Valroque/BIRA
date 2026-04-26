@@ -745,10 +745,7 @@ export function BoardBulkExpanded() {
             boxShadow: 'var(--shadow-lg)', minWidth: 280, padding: 4,
             color: 'var(--fg)', fontSize: 13,
           }}>
-            <div style={{
-              padding: '6px 10px 8px', fontSize: 11, fontWeight: 600, color: 'var(--fg-faint)',
-              textTransform: 'uppercase', letterSpacing: 0.4,
-            }}>
+            <div className="label-section" style={{ padding: '6px 10px 8px' }}>
               Move 7 issues to…
             </div>
             <MenuItem icon={<StatusDot status="todo" size={11} />} label="Todo" />

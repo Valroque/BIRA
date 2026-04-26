@@ -635,10 +635,8 @@ function ColumnsMenu({ layout, onLayoutChange, projectScoped = false }: ColumnsM
           border: '1px solid var(--border)', borderRadius: 8,
           boxShadow: 'var(--shadow-lg)', zIndex: 30, overflow: 'hidden',
         }}>
-          <div style={{
+          <div className="label-section" style={{
             padding: '8px 12px', borderBottom: '1px solid var(--border-muted)',
-            fontSize: 11, fontWeight: 600, color: 'var(--fg-faint)',
-            textTransform: 'uppercase', letterSpacing: 0.4,
           }}>Display columns</div>
           <div style={{ padding: 4 }}>
             {togglableColumns.map((id) => {

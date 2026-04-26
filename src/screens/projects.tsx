@@ -105,10 +105,7 @@ export function ProjectsPage() {
 function Group({ label, projects, workspace, dim }: { label: string; projects: Project[]; workspace: string; dim?: boolean }) {
   return (
     <section style={{ marginBottom: 28, opacity: dim ? 0.65 : 1 }}>
-      <div style={{
-        fontSize: 11, fontWeight: 600, color: 'var(--fg-faint)',
-        textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 10,
-      }}>{label} · {projects.length}</div>
+      <div className="label-section" style={{ marginBottom: 10 }}>{label} · {projects.length}</div>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 12 }}>
         {projects.map((p) => {
           const open = ISSUES.filter(

@@ -145,11 +145,7 @@ export function CommandPalette() {
             const startIdx = flat.indexOf(cs[0]);
             return (
               <div key={group} style={{ marginBottom: 6 }}>
-                <div style={{
-                  fontSize: 11, fontWeight: 600, color: 'var(--fg-faint)',
-                  textTransform: 'uppercase', letterSpacing: 0.4,
-                  padding: '6px 10px',
-                }}>{group}</div>
+                <div className="label-section" style={{ padding: '6px 10px' }}>{group}</div>
                 {cs.map((c, i) => {
                   const isActive = startIdx + i === cursor;
                   return (

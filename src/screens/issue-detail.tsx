@@ -380,10 +380,7 @@ function TransOption({ status, label, trigger, blocked, reason }: TransOptionPro
 function Meta({ label, children }: { label: string; children: ReactNode }) {
   return (
     <div style={{ marginBottom: 14 }}>
-      <div style={{
-        fontSize: 11, fontWeight: 600, color: 'var(--fg-faint)',
-        textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 6,
-      }}>{label}</div>
+      <div className="label-section" style={{ marginBottom: 6 }}>{label}</div>
       <div style={{ fontSize: 12.5, color: 'var(--fg)' }}>{children}</div>
     </div>
   );
@@ -475,10 +472,7 @@ function ActivityFeed() {
       <div style={{
         display: 'flex', alignItems: 'center', gap: 12, marginBottom: 14,
       }}>
-        <span style={{
-          fontSize: 11, fontWeight: 600, color: 'var(--fg-faint)',
-          textTransform: 'uppercase', letterSpacing: 0.5,
-        }}>Activity</span>
+        <span className="label-section">Activity</span>
         <div style={{
           display: 'inline-flex', padding: 2, borderRadius: 6,
           background: 'var(--bg-subtle)', border: '1px solid var(--border-muted)',

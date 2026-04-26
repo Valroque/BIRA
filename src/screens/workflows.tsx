@@ -95,10 +95,7 @@ export function WorkflowsPage() {
                         </div>
                       </div>
                       <div style={{ minWidth: 0 }}>
-                        <div style={{
-                          fontSize: 11, fontWeight: 600, color: 'var(--fg-faint)',
-                          textTransform: 'uppercase', letterSpacing: 0.4, marginBottom: 6,
-                        }}>
+                        <div className="label-section" style={{ marginBottom: 6 }}>
                           Used by
                         </div>
                         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>

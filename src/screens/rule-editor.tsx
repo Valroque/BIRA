@@ -126,10 +126,7 @@ export function RuleEditor() {
 
       <div className="scroll" style={{ flex: 1, overflow: 'auto', padding: 24 }}>
         <div style={{ maxWidth: 760 }}>
-          <div style={{
-            fontSize: 11, fontWeight: 600, color: 'var(--fg-faint)',
-            textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 12,
-          }}>
+          <div className="label-section" style={{ marginBottom: 12 }}>
             Active rules · {rules.length}
           </div>
 
@@ -151,10 +148,7 @@ export function RuleEditor() {
             />
           ))}
 
-          <div style={{
-            fontSize: 11, fontWeight: 600, color: 'var(--fg-faint)',
-            textTransform: 'uppercase', letterSpacing: 0.5, margin: '20px 0 12px',
-          }}>
+          <div className="label-section" style={{ margin: '20px 0 12px' }}>
             Available rule types {availableTypes.length === 0 && <span style={{ color: 'var(--fg-faint)', fontWeight: 400 }}>· all in use</span>}
           </div>
 

@@ -250,9 +250,7 @@ export function WorkflowEditor() {
             padding: '8px 16px', background: 'var(--bg-subtle)',
             borderBottom: '1px solid var(--border-muted)',
           }}>
-            <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--fg-faint)', textTransform: 'uppercase', letterSpacing: 0.4 }}>
-              Issue type
-            </span>
+            <span className="label-section">Issue type</span>
             <div style={{
               display: 'inline-flex', padding: 2, borderRadius: 6,
               background: 'var(--bg)', border: '1px solid var(--border-muted)',
@@ -364,10 +362,7 @@ function NothingSelectedInspector({ nodes, edges }: { nodes: GraphNode[]; edges:
   return (
     <>
       <div style={{ padding: '12px 16px', borderBottom: '1px solid var(--border-muted)' }}>
-        <div style={{
-          fontSize: 11, fontWeight: 600, color: 'var(--fg-faint)',
-          textTransform: 'uppercase', letterSpacing: 0.4, marginBottom: 4,
-        }}>Workflow</div>
+        <div className="label-section" style={{ marginBottom: 4 }}>Workflow</div>
         <div style={{ fontSize: 14, fontWeight: 600 }}>Default · Bug</div>
         <div style={{ marginTop: 4, fontSize: 12, color: 'var(--fg-muted)' }}>
           Click any state or transition to edit it.
@@ -502,10 +497,7 @@ function EdgeInspector({ edge, nodes, workspace, project }: EdgeInspectorProps) 
         <div style={{
           display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8,
         }}>
-          <span style={{
-            fontSize: 11, fontWeight: 600, color: 'var(--fg-faint)',
-            textTransform: 'uppercase', letterSpacing: 0.5,
-          }}>Rules · {isFull ? 3 : 1}</span>
+          <span className="label-section">Rules · {isFull ? 3 : 1}</span>
           <Link
             to={`/${workspace}/${project}/workflow/rules`}
             style={{ fontSize: 11.5, color: 'var(--accent)', textDecoration: 'none' }}
@@ -542,10 +534,7 @@ function EdgeInspector({ edge, nodes, workspace, project }: EdgeInspectorProps) 
         </Link>
 
         {/* Drift fix: dropped "Visible to" select and "Auto-transition" toggle (out of v1 scope). */}
-        <div style={{
-          marginTop: 18, fontSize: 11, fontWeight: 600, color: 'var(--fg-faint)',
-          textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 8,
-        }}>Properties</div>
+        <div className="label-section" style={{ marginTop: 18, marginBottom: 8 }}>Properties</div>
         <Field label="Trigger label">
           <input className="input input-sm" defaultValue={edge.label ?? ''} placeholder="e.g. approve" />
         </Field>
@@ -570,10 +559,7 @@ function EdgeInspector({ edge, nodes, workspace, project }: EdgeInspectorProps) 
 function Stat({ label, value }: { label: string; value: ReactNode }) {
   return (
     <div style={{ marginBottom: 14 }}>
-      <div style={{
-        fontSize: 11, fontWeight: 600, color: 'var(--fg-faint)',
-        textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 4,
-      }}>{label}</div>
+      <div className="label-section" style={{ marginBottom: 4 }}>{label}</div>
       <div style={{ fontSize: 13, color: 'var(--fg)' }}>{value}</div>
     </div>
   );
@@ -707,11 +693,7 @@ export function EmptyState() {
             <button className="btn btn-sm"><Icon name="copy" size={13} />Use a template</button>
           </div>
           <div style={{ marginTop: 22, paddingTop: 18, borderTop: '1px dashed var(--border)', textAlign: 'left' }}>
-            <div style={{
-              fontSize: 11, fontWeight: 600, color: 'var(--fg-faint)',
-              textTransform: 'uppercase', letterSpacing: 0.5,
-              marginBottom: 8, textAlign: 'center',
-            }}>Templates</div>
+            <div className="label-section" style={{ marginBottom: 8, textAlign: 'center' }}>Templates</div>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
               <TplCard name="Standard" desc="Backlog → Todo → In Progress → Done" />
               <TplCard name="With review" desc="…+ In Review with required-fields rule" recommended />
