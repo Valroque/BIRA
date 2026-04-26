@@ -200,7 +200,7 @@ function TeamDetail({ team, workspace }: { team: Team; workspace: string }) {
             ) : (
               <div className="card" style={{ padding: 0 }}>
                 {teamMembers.map((m, i) => (
-                  <MemberRow key={m.email} member={m} first={i === 0} onRemove={() => remove(m.email)} />
+                  <MemberRow key={m.email} member={m} first={i === 0} onRemove={() => remove(m.email)} removeTip="Remove from team" />
                 ))}
               </div>
             )}
@@ -252,7 +252,20 @@ function TeamDetail({ team, workspace }: { team: Team; workspace: string }) {
   );
 }
 
-function MemberRow({ member, first, onRemove }: { member: Member; first?: boolean; onRemove: () => void }) {
+/**
+ * Avatar + name/email + role pill + remove button. Used by both team detail
+ * (rendering team members) and project-members (rendering individuals with
+ * explicit project access). Caller controls the tooltip on the remove button
+ * via `removeTip`.
+ */
+export function MemberRow({
+  member, first, onRemove, removeTip = 'Remove',
+}: {
+  member: Member;
+  first?: boolean;
+  onRemove: () => void;
+  removeTip?: string;
+}) {
   return (
     <div style={{
       display: 'grid', gridTemplateColumns: '32px 1fr auto auto',
@@ -274,7 +287,7 @@ function MemberRow({ member, first, onRemove }: { member: Member; first?: boolea
           member.role === 'write' ? 'var(--done)' :
           'var(--fg-muted)',
       }}>{member.role}</span>
-      <button onClick={onRemove} className="btn btn-ghost btn-sm" data-tip="Remove from team" style={{ width: 28, padding: 0 }}>
+      <button onClick={onRemove} className="btn btn-ghost btn-sm" data-tip={removeTip} style={{ width: 28, padding: 0 }}>
         <Icon name="x" size={13} color="var(--fg-muted)" />
       </button>
     </div>

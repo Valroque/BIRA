@@ -5,10 +5,10 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Icon } from '../components/icons';
-import { TopBar, Tabs, Avatar, projectTabs, useWorkspaceContext } from '../components/shell';
+import { TopBar, Tabs, projectTabs, useWorkspaceContext } from '../components/shell';
 import { Modal, ModalHeader } from '../components/modal';
 import { Section } from '../components/section';
-import { AddMembersModal, AvatarStack, TeamBadge } from './teams';
+import { AddMembersModal, AvatarStack, MemberRow, TeamBadge } from './teams';
 import {
   TEAMS,
   teamBySlug, memberByEmail,
@@ -115,6 +115,7 @@ export function ProjectMembersPage() {
                     member={m}
                     first={i === 0}
                     onRemove={() => removeUser(m.email)}
+                    removeTip="Remove member"
                   />
                 ))}
               </div>
@@ -174,34 +175,7 @@ function TeamRow({ team, workspace, first, onRemove }: { team: Team; workspace: 
   );
 }
 
-function MemberRow({ member, first, onRemove }: { member: Member; first?: boolean; onRemove: () => void }) {
-  return (
-    <div style={{
-      display: 'grid', gridTemplateColumns: '32px 1fr auto auto',
-      gap: 12, alignItems: 'center', padding: '10px 14px',
-      borderTop: first ? 'none' : '1px solid var(--border-muted)',
-    }}>
-      <Avatar name={member.name} size={28} />
-      <div style={{ minWidth: 0 }}>
-        <div style={{ fontSize: 13, fontWeight: 500 }}>{member.name}</div>
-        <div style={{ fontSize: 11.5, color: 'var(--fg-muted)' }}>{member.email}</div>
-      </div>
-      <span className="pill" style={{
-        background:
-          member.role === 'admin' ? 'var(--accent-muted)' :
-          member.role === 'write' ? 'var(--done-bg)' :
-          'var(--bg-muted)',
-        color:
-          member.role === 'admin' ? 'var(--accent-active)' :
-          member.role === 'write' ? 'var(--done)' :
-          'var(--fg-muted)',
-      }}>{member.role}</span>
-      <button onClick={onRemove} className="btn btn-ghost btn-sm" data-tip="Remove member" style={{ width: 28, padding: 0 }}>
-        <Icon name="x" size={13} color="var(--fg-muted)" />
-      </button>
-    </div>
-  );
-}
+// MemberRow lives in teams.tsx — re-imported above.
 
 function AddTeamModal({
   excludeSlugs, onAdd, onClose,
