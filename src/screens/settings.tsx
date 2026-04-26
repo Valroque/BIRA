@@ -1,12 +1,13 @@
 // Settings: workspace-level (general, members) + user profile.
 // Sections live as nested routes so each is deep-linkable.
-import { useState, type ReactNode } from 'react';
+import { useState } from 'react';
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { Icon } from '../components/icons';
 import { TopBar, Avatar, useWorkspaceContext } from '../components/shell';
 import { Modal, ModalHeader, ModalBody, ModalFooter } from '../components/modal';
 import { Field, Hint, DangerRow } from '../components/forms';
-import { MEMBERS, type Member } from '../fixtures';
+import { Section } from '../components/section';
+import { MEMBERS, type Member, type WorkspaceRole } from '../fixtures';
 
 // --- Outer layout (header + secondary tab strip + outlet) ---
 
@@ -73,7 +74,7 @@ export function GeneralSettings() {
 
   return (
     <>
-      <Section title="Workspace details" subtitle="How your workspace appears to its members.">
+      <Section title="Workspace details" subtitle="How your workspace appears to its members." card>
         <Field label="Name">
           <input className="input" value={name} onChange={(e) => setName(e.target.value)} />
         </Field>
@@ -97,7 +98,7 @@ export function GeneralSettings() {
         <SaveBar />
       </Section>
 
-      <Section title="Logo">
+      <Section title="Logo" card>
         <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
           <div style={{
             width: 56, height: 56, borderRadius: 10,
@@ -116,6 +117,7 @@ export function GeneralSettings() {
         title="Danger zone"
         subtitle="These actions are irreversible. Make sure you've exported anything important."
         danger
+        card
       >
         <DangerRow
           label="Archive workspace"
@@ -138,7 +140,7 @@ export function MembersSettings() {
   const [filter, setFilter] = useState('');
   const [showInvite, setShowInvite] = useState(false);
   const [inviteEmail, setInviteEmail] = useState('');
-  const [inviteRole, setInviteRole] = useState<'admin' | 'member'>('member');
+  const [inviteRole, setInviteRole] = useState<WorkspaceRole>('write');
 
   const filtered = MEMBERS.filter((m) => {
     if (!filter) return true;
@@ -151,6 +153,7 @@ export function MembersSettings() {
       <Section
         title={`Members · ${MEMBERS.length}`}
         subtitle="Anyone in the workspace. Admins can invite, change roles, and deactivate."
+        card
       >
         <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 12 }}>
           <div style={{ position: 'relative', flex: 1 }}>
@@ -216,7 +219,7 @@ export function MembersSettings() {
           role={inviteRole}
           onEmail={setInviteEmail}
           onRole={setInviteRole}
-          onSend={() => { setShowInvite(false); setInviteEmail(''); setInviteRole('member'); }}
+          onSend={() => { setShowInvite(false); setInviteEmail(''); setInviteRole('write'); }}
           onClose={() => setShowInvite(false)}
         />
       )}
@@ -224,7 +227,7 @@ export function MembersSettings() {
   );
 }
 
-function RoleSelect({ value, disabled }: { value: 'admin' | 'member'; disabled?: boolean }) {
+function RoleSelect({ value, disabled }: { value: WorkspaceRole; disabled?: boolean }) {
   return (
     <select
       defaultValue={value}
@@ -233,16 +236,17 @@ function RoleSelect({ value, disabled }: { value: 'admin' | 'member'; disabled?:
       style={{ width: 'auto', padding: '0 6px' }}
     >
       <option value="admin">admin</option>
-      <option value="member">member</option>
+      <option value="write">write</option>
+      <option value="read">read</option>
     </select>
   );
 }
 
 interface InviteModalProps {
   email: string;
-  role: 'admin' | 'member';
+  role: WorkspaceRole;
   onEmail: (v: string) => void;
-  onRole: (v: 'admin' | 'member') => void;
+  onRole: (v: WorkspaceRole) => void;
   onSend: () => void;
   onClose: () => void;
 }
@@ -270,10 +274,11 @@ function InviteModal({ email, role, onEmail, onRole, onSend, onClose }: InviteMo
           <select
             className="input"
             value={role}
-            onChange={(e) => onRole(e.target.value as 'admin' | 'member')}
+            onChange={(e) => onRole(e.target.value as WorkspaceRole)}
           >
-            <option value="member">member — can view and edit</option>
-            <option value="admin">admin — can also manage settings, members, workflows</option>
+            <option value="read">read — view-only access</option>
+            <option value="write">write — view and edit issues, projects, workflows</option>
+            <option value="admin">admin — also manage settings, members, and roles</option>
           </select>
         </Field>
         <Hint>An invite link will be emailed; in this prototype it isn't actually sent.</Hint>
@@ -298,7 +303,7 @@ export function ProfileSettings() {
 
   return (
     <>
-      <Section title="Account" subtitle="Information about you, visible to other members of this workspace.">
+      <Section title="Account" subtitle="Information about you, visible to other members of this workspace." card>
         <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginBottom: 16 }}>
           <Avatar name={name} size={56} />
           <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
@@ -316,7 +321,7 @@ export function ProfileSettings() {
         <SaveBar />
       </Section>
 
-      <Section title="Password">
+      <Section title="Password" card>
         <Field label="Current password">
           <input type="password" className="input" autoComplete="current-password" />
         </Field>
@@ -331,7 +336,7 @@ export function ProfileSettings() {
         </div>
       </Section>
 
-      <Section title="Sign out" subtitle="Sign out of this device. You can sign back in any time.">
+      <Section title="Sign out" subtitle="Sign out of this device. You can sign back in any time." card>
         <button onClick={() => navigate('/login')} className="btn">
           <Icon name="power" size={13} />Sign out
         </button>
@@ -341,28 +346,6 @@ export function ProfileSettings() {
 }
 
 // --- Helpers ---
-
-interface SectionProps {
-  title: string;
-  subtitle?: string;
-  danger?: boolean;
-  children: ReactNode;
-}
-function Section({ title, subtitle, danger, children }: SectionProps) {
-  return (
-    <section style={{ marginBottom: 32 }}>
-      <h2 style={{
-        fontSize: 14, fontWeight: 600, margin: 0,
-        color: danger ? 'var(--blocked)' : 'var(--fg)',
-      }}>{title}</h2>
-      {subtitle && <p style={{ fontSize: 12.5, color: 'var(--fg-muted)', margin: '4px 0 12px' }}>{subtitle}</p>}
-      {!subtitle && <div style={{ height: 12 }} />}
-      <div className="card" style={{ padding: 16, borderColor: danger ? '#fecaca' : 'var(--border-muted)' }}>
-        {children}
-      </div>
-    </section>
-  );
-}
 
 function SaveBar() {
   return (

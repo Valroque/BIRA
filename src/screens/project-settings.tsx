@@ -4,6 +4,7 @@ import { useNavigate } from 'react-router-dom';
 import { Icon } from '../components/icons';
 import { TopBar, Tabs, TypeChip, projectTabs, useWorkspaceContext } from '../components/shell';
 import { Field, Hint, DangerRow } from '../components/forms';
+import { Section } from '../components/section';
 import {
   WORKFLOWS, ISSUE_TYPE_NAMES, DEFAULT_PROJECT_WORKFLOWS,
   type IssueTypeLetter,
@@ -38,7 +39,7 @@ export function ProjectSettingsPage() {
 
       <div className="scroll" style={{ flex: 1, overflow: 'auto', padding: '24px 28px' }}>
         <div style={{ maxWidth: 720 }}>
-          <Section title="Project details">
+          <Section title="Project details" card>
             <Field label="Name">
               <input className="input" value={name} onChange={(e) => setName(e.target.value)} />
             </Field>
@@ -69,6 +70,7 @@ export function ProjectSettingsPage() {
           <Section
             title="Workflow assignments"
             subtitle="Each issue type uses one workflow. Multiple workflows can exist for the same type — different projects can pick different ones."
+            card
           >
             <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
               {TYPE_ORDER.map((type) => {
@@ -116,7 +118,7 @@ export function ProjectSettingsPage() {
             </div>
           </Section>
 
-          <Section title="Danger zone" danger>
+          <Section title="Danger zone" danger card>
             <DangerRow
               label="Archive project"
               description="Hide the project. Existing issues remain but the project disappears from sidebars."
@@ -131,19 +133,6 @@ export function ProjectSettingsPage() {
         </div>
       </div>
     </div>
-  );
-}
-
-function Section({ title, subtitle, danger, children }: { title: string; subtitle?: string; danger?: boolean; children: React.ReactNode }) {
-  return (
-    <section style={{ marginBottom: 28 }}>
-      <h2 style={{ fontSize: 14, fontWeight: 600, margin: 0, color: danger ? 'var(--blocked)' : 'var(--fg)' }}>{title}</h2>
-      {subtitle && <p style={{ fontSize: 12.5, color: 'var(--fg-muted)', margin: '4px 0 12px' }}>{subtitle}</p>}
-      {!subtitle && <div style={{ height: 12 }} />}
-      <div className="card" style={{ padding: 16, borderColor: danger ? '#fecaca' : 'var(--border-muted)' }}>
-        {children}
-      </div>
-    </section>
   );
 }
 

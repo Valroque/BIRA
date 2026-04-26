@@ -7,6 +7,7 @@ import { Link, useNavigate, useParams } from 'react-router-dom';
 import { Icon } from '../components/icons';
 import { TopBar, Avatar, useWorkspaceContext } from '../components/shell';
 import { Modal, ModalHeader, ModalBody, ModalFooter } from '../components/modal';
+import { Section } from '../components/section';
 import { ErrorState } from '../components/states';
 import {
   TEAMS, MEMBERS,
@@ -268,8 +269,14 @@ function MemberRow({ member, first, onRemove }: { member: Member; first?: boolea
         <div style={{ fontSize: 11.5, color: 'var(--fg-muted)' }}>{member.email}</div>
       </div>
       <span className="pill" style={{
-        background: member.role === 'admin' ? 'var(--accent-muted)' : 'var(--bg-muted)',
-        color: member.role === 'admin' ? 'var(--accent-active)' : 'var(--fg-muted)',
+        background:
+          member.role === 'admin' ? 'var(--accent-muted)' :
+          member.role === 'write' ? 'var(--done-bg)' :
+          'var(--bg-muted)',
+        color:
+          member.role === 'admin' ? 'var(--accent-active)' :
+          member.role === 'write' ? 'var(--done)' :
+          'var(--fg-muted)',
       }}>{member.role}</span>
       <button onClick={onRemove} className="btn btn-ghost btn-sm" data-tip="Remove from team" style={{ width: 28, padding: 0 }}>
         <Icon name="x" size={13} color="var(--fg-muted)" />
@@ -386,24 +393,6 @@ export function AvatarStack({ members, max = 5, size = 22 }: { members: Member[]
         </span>
       )}
     </span>
-  );
-}
-
-function Section({
-  title, subtitle, action, children,
-}: {
-  title: string; subtitle?: string; action?: React.ReactNode; children: React.ReactNode;
-}) {
-  return (
-    <section style={{ marginBottom: 28 }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: subtitle ? 4 : 12 }}>
-        <h2 style={{ fontSize: 14, fontWeight: 600, margin: 0 }}>{title}</h2>
-        <div style={{ flex: 1 }} />
-        {action}
-      </div>
-      {subtitle && <p style={{ fontSize: 12.5, color: 'var(--fg-muted)', margin: '0 0 12px' }}>{subtitle}</p>}
-      {children}
-    </section>
   );
 }
 
