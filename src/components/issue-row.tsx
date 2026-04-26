@@ -6,6 +6,7 @@ import { Link } from 'react-router-dom';
 import type { Issue, Project } from '../fixtures';
 import { useProjects } from '../state/projects';
 import { Avatar, Priority as PriorityIcon, StatusDot, STATUSES, TypeChip } from './shell';
+import { ProjectChip } from './project-chip';
 
 // ---------------------------------------------------------------------------
 // Shared layout (widths + order)
@@ -208,20 +209,10 @@ function renderCell(
         );
       }
       return (
-        <span
-          title={project.name}
-          style={{
-            display: 'inline-flex', alignItems: 'center', gap: 4,
-            height: 18, padding: '0 6px', borderRadius: 3,
-            background: project.bg, color: project.color,
-            fontSize: 11, fontWeight: 600,
-            overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-            minWidth: 0, alignSelf: 'center', justifySelf: 'start',
-          }}
-        >
-          <span style={{ width: 5, height: 5, borderRadius: 3, background: 'currentColor', marginRight: 1, flexShrink: 0 }} />
-          {project.name}
-        </span>
+        <ProjectChip
+          project={project}
+          style={{ alignSelf: 'center', justifySelf: 'start' }}
+        />
       );
     }
     case 'title': {

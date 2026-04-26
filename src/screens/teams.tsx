@@ -8,6 +8,7 @@ import { Icon } from '../components/icons';
 import { TopBar, Avatar, useWorkspaceContext } from '../components/shell';
 import { Modal, ModalHeader, ModalBody, ModalFooter } from '../components/modal';
 import { Section } from '../components/section';
+import { ProjectBadge } from '../components/project-chip';
 import { ErrorState } from '../components/states';
 import {
   TEAMS, MEMBERS,
@@ -225,12 +226,7 @@ function TeamDetail({ team, workspace }: { team: Team; workspace: string }) {
                       borderTop: i === 0 ? 'none' : '1px solid var(--border-muted)',
                     }}
                   >
-                    <span style={{
-                      width: 28, height: 28, borderRadius: 6,
-                      background: p.bg, color: p.color,
-                      display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-                      fontWeight: 700, fontSize: 12,
-                    }}>{p.letter}</span>
+                    <ProjectBadge project={p} size={28} radius={6} />
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <div style={{ fontSize: 13, fontWeight: 600 }}>{p.name}</div>
                       <div className="mono" style={{ fontSize: 11, color: 'var(--fg-faint)' }}>{p.key}</div>

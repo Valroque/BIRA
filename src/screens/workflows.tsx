@@ -5,6 +5,7 @@
 import { Link } from 'react-router-dom';
 import { Icon } from '../components/icons';
 import { TopBar, useWorkspaceContext } from '../components/shell';
+import { ProjectChip } from '../components/project-chip';
 import {
   WORKFLOWS, ISSUE_TYPE_NAMES,
   type IssueTypeLetter,
@@ -105,15 +106,9 @@ export function WorkflowsPage() {
                             <Link
                               key={p.slug}
                               to={`/${workspace}/${p.slug}/workflow`}
-                              style={{
-                                display: 'inline-flex', alignItems: 'center', gap: 4,
-                                padding: '2px 6px', borderRadius: 3,
-                                background: p.bg, color: p.color,
-                                fontSize: 11.5, fontWeight: 500, textDecoration: 'none',
-                              }}
+                              style={{ textDecoration: 'none' }}
                             >
-                              <span style={{ width: 5, height: 5, borderRadius: 3, background: 'currentColor' }} />
-                              {p.name}
+                              <ProjectChip project={p} />
                             </Link>
                           ))}
                           {usagePairs.length === 0 && (

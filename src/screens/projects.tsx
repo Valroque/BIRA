@@ -5,6 +5,7 @@ import { Icon } from '../components/icons';
 import { TopBar, Avatar, useWorkspaceContext } from '../components/shell';
 import { Modal, ModalHeader, ModalFooter } from '../components/modal';
 import { Field, Hint } from '../components/forms';
+import { ProjectBadge } from '../components/project-chip';
 import {
   CURRENT_USER, DEFAULT_PROJECT_WORKFLOWS, ISSUES, ISSUE_TYPE_NAMES, MEMBERS,
   RESERVED_PROJECT_SLUGS, TEAMS, WORKFLOWS,
@@ -12,10 +13,13 @@ import {
   type IssueTypeLetter, type Member, type Project,
 } from '../fixtures';
 import { useProjects } from '../state/projects';
+import { useWorkspaces } from '../state/workspaces';
 
 export function ProjectsPage() {
   const { workspace } = useWorkspaceContext();
   const { projects } = useProjects();
+  const { getWorkspace } = useWorkspaces();
+  const ws = getWorkspace(workspace);
   const [showCreate, setShowCreate] = useState(false);
   const [filter, setFilter] = useState('');
 
@@ -30,7 +34,7 @@ export function ProjectsPage() {
   return (
     <div className="bira" style={{ height: '100%', display: 'flex', flexDirection: 'column', background: 'var(--bg)' }}>
       <TopBar breadcrumbs={[
-        { label: 'Acme Robotics', to: `/${workspace}/projects` },
+        { label: ws?.name ?? workspace, to: `/${workspace}/projects` },
         'Projects',
       ]} />
       <div style={{ padding: '20px 28px 14px', borderBottom: '1px solid var(--border-muted)' }}>
@@ -72,7 +76,23 @@ export function ProjectsPage() {
             background: 'var(--bg-subtle)', borderRadius: 8,
           }}>
             <Icon name="folder" size={28} color="var(--fg-faint)" />
-            <div style={{ fontSize: 14, fontWeight: 600, marginTop: 10 }}>No projects match "{filter}"</div>
+            {projects.length === 0 ? (
+              <>
+                <div style={{ fontSize: 14, fontWeight: 600, marginTop: 10, color: 'var(--fg)' }}>
+                  No projects yet
+                </div>
+                <div style={{ fontSize: 12.5, marginTop: 4 }}>
+                  Create your first project to start tracking issues in this workspace.
+                </div>
+                <button onClick={() => setShowCreate(true)} className="btn btn-primary btn-sm" style={{ marginTop: 14 }}>
+                  <Icon name="plus" size={13} />New project
+                </button>
+              </>
+            ) : (
+              <div style={{ fontSize: 14, fontWeight: 600, marginTop: 10 }}>
+                No projects match "{filter}"
+              </div>
+            )}
           </div>
         )}
       </div>
@@ -103,12 +123,7 @@ function Group({ label, projects, workspace, dim }: { label: string; projects: P
               style={{ padding: 16, textDecoration: 'none', color: 'inherit' }}
             >
               <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
-                <div style={{
-                  width: 32, height: 32, borderRadius: 8,
-                  background: p.bg, color: p.color,
-                  display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  fontWeight: 700, fontSize: 14, fontFamily: 'var(--font-sans)',
-                }}>{p.letter}</div>
+                <ProjectBadge project={p} size={32} radius={8} />
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ fontSize: 14, fontWeight: 600 }}>{p.name}</div>
                   <div className="mono" style={{ fontSize: 11, color: 'var(--fg-faint)' }}>{p.key}</div>

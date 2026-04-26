@@ -5,6 +5,7 @@ import { useMemo, useRef, useState, type ReactNode } from 'react';
 import { Icon } from './icons';
 import { Avatar, StatusDot, STATUSES } from './shell';
 import { useDismiss } from './use-dismiss';
+import { ProjectBadge } from './project-chip';
 import {
   CURRENT_USER, ISSUES, type Issue, type Project,
 } from '../fixtures';
@@ -146,12 +147,7 @@ function projectFilterOptions(projects: Project[]): Option[] {
     searchText: p.name,
     label: (
       <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-        <span style={{
-          width: 14, height: 14, borderRadius: 3,
-          background: p.bg, color: p.color,
-          display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-          fontSize: 10, fontWeight: 700,
-        }}>{p.letter}</span>
+        <ProjectBadge project={p} />
         {p.name}
       </span>
     ),

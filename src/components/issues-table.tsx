@@ -27,6 +27,7 @@ import {
   type Filter, type Sort,
 } from './issue-filters';
 import { useDismiss } from './use-dismiss';
+import { ProjectBadge } from './project-chip';
 import { EmptyState } from './states';
 import { ISSUE_TYPE_NAMES, type Issue, type IssueTypeLetter, type Project } from '../fixtures';
 import { useProjects } from '../state/projects';
@@ -327,14 +328,7 @@ function deriveGroups(
       .filter((p) => filteredIssues.some((i) => i.project === p.slug))
       .map<Group>((p) => ({
         id: p.slug, label: p.name,
-        swatch: (
-          <span style={{
-            width: 14, height: 14, borderRadius: 3,
-            background: p.bg, color: p.color,
-            display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-            fontSize: 10, fontWeight: 700,
-          }}>{p.letter}</span>
-        ),
+        swatch: <ProjectBadge project={p} />,
         items: sortedIssues.filter((i) => i.project === p.slug),
       }));
   }
