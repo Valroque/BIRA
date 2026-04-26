@@ -1,28 +1,9 @@
 // Dropdown menus that live in the TopBar: notifications and the user menu.
-import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { useRef, useState, type ReactNode } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { Icon } from './icons';
 import { Avatar, KBD, useWorkspaceContext } from './shell';
-
-/**
- * Hook: close `setOpen(false)` when the user clicks outside the ref'd element
- * or presses Escape. Used by both menu components below.
- */
-function useDismiss(ref: React.RefObject<HTMLElement | null>, onClose: () => void, open: boolean) {
-  useEffect(() => {
-    if (!open) return;
-    const onDown = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) onClose();
-    };
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
-    window.addEventListener('mousedown', onDown);
-    window.addEventListener('keydown', onKey);
-    return () => {
-      window.removeEventListener('mousedown', onDown);
-      window.removeEventListener('keydown', onKey);
-    };
-  }, [open]);
-}
+import { useDismiss } from './use-dismiss';
 
 interface Notification {
   id: string;

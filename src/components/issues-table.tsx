@@ -8,7 +8,7 @@
 // the Project column auto-hides and 'project' is dropped from the picker.
 
 import {
-  useEffect, useMemo, useRef, useState,
+  useMemo, useRef, useState,
   type CSSProperties, type ReactNode,
 } from 'react';
 import { Icon } from './icons';
@@ -26,6 +26,7 @@ import {
   COLUMN_SORT_FIELD, newFilterId,
   type Filter, type Sort,
 } from './issue-filters';
+import { useDismiss } from './use-dismiss';
 import { EmptyState } from './states';
 import { ISSUE_TYPE_NAMES, type Issue, type IssueTypeLetter, type Project } from '../fixtures';
 import { useProjects } from '../state/projects';
@@ -602,20 +603,7 @@ interface ColumnsMenuProps {
 function ColumnsMenu({ layout, onLayoutChange, projectScoped = false }: ColumnsMenuProps) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (!open) return;
-    const onDown = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
-    };
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setOpen(false); };
-    window.addEventListener('mousedown', onDown);
-    window.addEventListener('keydown', onKey);
-    return () => {
-      window.removeEventListener('mousedown', onDown);
-      window.removeEventListener('keydown', onKey);
-    };
-  }, [open]);
+  useDismiss(ref, () => setOpen(false), open);
 
   const togglableColumns = projectScoped
     ? ALL_COLUMNS.filter((c) => c !== 'project')

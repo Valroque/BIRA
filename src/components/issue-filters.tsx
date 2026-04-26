@@ -1,9 +1,10 @@
 // Multi-select filter chips + "Add filter" picker for the workspace issue
 // lists. Each chip owns its own popover; the parent owns the filter array
 // and applies it via `applyFilters`.
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useMemo, useRef, useState, type ReactNode } from 'react';
 import { Icon } from './icons';
 import { Avatar, StatusDot, STATUSES } from './shell';
+import { useDismiss } from './use-dismiss';
 import {
   CURRENT_USER, ISSUES, type Issue, type Project,
 } from '../fixtures';
@@ -303,24 +304,6 @@ export function cycleSort(stack: Sort[], field: SortField): Sort[] {
     return next;
   }
   return stack.filter((s) => s.field !== field);
-}
-
-// ----- Dismiss-on-outside-click helper -----
-
-function useDismiss(ref: React.RefObject<HTMLElement | null>, close: () => void, open: boolean) {
-  useEffect(() => {
-    if (!open) return;
-    const onDown = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) close();
-    };
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') close(); };
-    window.addEventListener('mousedown', onDown);
-    window.addEventListener('keydown', onKey);
-    return () => {
-      window.removeEventListener('mousedown', onDown);
-      window.removeEventListener('keydown', onKey);
-    };
-  }, [open]);
 }
 
 // ----- Filter chip -----
