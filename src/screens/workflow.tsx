@@ -31,17 +31,64 @@ interface WorkflowGraphProps {
   width?: number | string;
   height?: number | string;
   onSelect?: (sel: Selection | null) => void;
+  /** Mutate a node's position (drag) or any other field. */
+  onUpdateNode?: (id: string, patch: Partial<GraphNode>) => void;
+  /** Append a new state. The caller is responsible for picking a sensible
+   *  starting position + status. */
+  onAddState?: () => void;
 }
 
-export function WorkflowGraph({ nodes, edges, selected, blockedEdgeId, width, height, onSelect }: WorkflowGraphProps) {
+const DRAG_THRESHOLD_PX = 4;  // movement under this is treated as a click
+
+export function WorkflowGraph({
+  nodes, edges, selected, blockedEdgeId, width, height,
+  onSelect, onUpdateNode, onAddState,
+}: WorkflowGraphProps) {
   const NODE_W = 140;
   const NODE_H = 56;
   const w = width ?? '100%';
   const h = height ?? '100%';
   // The SVG accepts string lengths, so '100%' just works for the dotted
   // pattern + edge layer. Nodes are absolutely positioned at fixed pixel
-  // coordinates regardless — the parent container's overflow handles the
-  // case where the viewport is smaller than the bounding box of all nodes.
+  // coordinates regardless — the scroll layer's overflow handles the case
+  // where the viewport is smaller than the bounding box of all nodes.
+
+  // Track the size of the bounding box so the SVG and dot pattern can extend
+  // to cover nodes positioned far from the origin (drag/create can take a
+  // node well to the right or below the initial viewport).
+  const contentW = Math.max(...nodes.map((n) => n.x + NODE_W + 40), 900);
+  const contentH = Math.max(...nodes.map((n) => n.y + NODE_H + 40), 540);
+
+  // mousedown → select (on click) OR drag (on movement past threshold).
+  const onNodePointerDown = (id: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    const node = nodes.find((n) => n.id === id);
+    if (!node) return;
+    const startX = e.clientX;
+    const startY = e.clientY;
+    const origX = node.x;
+    const origY = node.y;
+    let moved = false;
+
+    const onMove = (ev: MouseEvent) => {
+      const dx = ev.clientX - startX;
+      const dy = ev.clientY - startY;
+      if (!moved && Math.hypot(dx, dy) < DRAG_THRESHOLD_PX) return;
+      moved = true;
+      onUpdateNode?.(id, { x: Math.max(0, origX + dx), y: Math.max(0, origY + dy) });
+    };
+    const onUp = () => {
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup', onUp);
+      document.body.style.userSelect = '';
+      document.body.style.cursor = '';
+      if (!moved) onSelect?.({ type: 'node', id });
+    };
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
+    document.body.style.userSelect = 'none';
+    if (onUpdateNode) document.body.style.cursor = 'grabbing';
+  };
 
   const pathFor = (e: GraphEdge): string => {
     const a = nodes.find((n) => n.id === e.from);
@@ -85,22 +132,33 @@ export function WorkflowGraph({ nodes, edges, selected, blockedEdgeId, width, he
 
   return (
     <div
-      onClick={() => onSelect?.(null)}
       style={{
         position: 'relative', width: w, height: h,
         minHeight: 540,  // keep the toolbar/legend chrome legible even on short viewports
-        background: 'var(--bg-subtle)', overflow: 'auto', borderRadius: 6,
+        // overflow: visible on the outer frame so the chrome layer's tooltips
+        // (CSS pseudo-elements off the toolbar buttons) can extend without
+        // being clipped by the scroll layer.
+        overflow: 'visible', borderRadius: 6,
       }}
     >
+      {/* Scrolling content layer — dot pattern, edges, nodes. */}
+      <div
+        onClick={() => onSelect?.(null)}
+        className="scroll"
+        style={{
+          position: 'absolute', inset: 0, overflow: 'auto',
+          background: 'var(--bg-subtle)', borderRadius: 6,
+        }}
+      >
+        {/* Inner sized to the bounding box of all nodes so the dot pattern,
+            SVG, and node DOM all share the same coordinate space when scrolled. */}
+        <div style={{ position: 'relative', width: contentW, height: contentH }}>
       <div style={{
         position: 'absolute', inset: 0,
         backgroundImage: 'radial-gradient(circle, #d0d7de 1px, transparent 1px)',
         backgroundSize: '20px 20px', opacity: 0.6,
-        // Anchor the dot pattern to the SVG canvas so nodes positioned to the
-        // right of the viewport scroll into a properly-tiled background.
-        minWidth: '100%', minHeight: '100%',
       }} />
-      <svg width="100%" height="100%" style={{ position: 'absolute', inset: 0, overflow: 'visible' }}>
+      <svg width={contentW} height={contentH} style={{ position: 'absolute', inset: 0, overflow: 'visible' }}>
         <defs>
           <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
             <path d="M 0 0 L 10 5 L 0 10 z" fill="#59636e" />
@@ -163,17 +221,19 @@ export function WorkflowGraph({ nodes, edges, selected, blockedEdgeId, width, he
       {nodes.map((n) => {
         const status = STATUSES.find((s) => s.id === n.statusId);
         const isSel = selected?.type === 'node' && selected.id === n.id;
+        const draggable = !!onUpdateNode;
         return (
           <div
             key={n.id}
-            onClick={(ev) => { ev.stopPropagation(); onSelect?.({ type: 'node', id: n.id }); }}
+            onMouseDown={(ev) => onNodePointerDown(n.id, ev)}
             style={{
               position: 'absolute', left: n.x, top: n.y, width: NODE_W, height: NODE_H,
               background: 'var(--bg)',
               border: `${isSel ? 2 : 1}px solid ${isSel ? 'var(--accent)' : 'var(--border)'}`,
               borderRadius: 8, padding: '8px 10px', boxShadow: 'var(--shadow-sm)',
               display: 'flex', flexDirection: 'column', justifyContent: 'center', gap: 4,
-              cursor: onSelect ? 'pointer' : 'grab',
+              cursor: draggable ? 'grab' : (onSelect ? 'pointer' : 'default'),
+              userSelect: 'none',
             }}
           >
             <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
@@ -189,14 +249,26 @@ export function WorkflowGraph({ nodes, edges, selected, blockedEdgeId, width, he
           </div>
         );
       })}
+        </div>
+      </div>
 
+      {/* Chrome — rendered OUTSIDE the scroll layer so CSS-pseudo tooltips
+          (`[data-tip]:hover::after`) aren't clipped by the scroll container. */}
       {/* Toolbar overlay */}
       <div style={{
         position: 'absolute', top: 12, left: 12, display: 'flex', gap: 4,
         background: 'var(--bg)', border: '1px solid var(--border-muted)', borderRadius: 6,
-        padding: 3, boxShadow: 'var(--shadow-sm)',
+        padding: 3, boxShadow: 'var(--shadow-sm)', zIndex: 2,
       }}>
-        <button className="btn btn-ghost btn-sm" data-tip="Add state"><Icon name="plus" size={14} /></button>
+        <button
+          type="button"
+          className="btn btn-ghost btn-sm"
+          data-tip="Add state"
+          onClick={onAddState}
+          disabled={!onAddState}
+        >
+          <Icon name="plus" size={14} />
+        </button>
         <button className="btn btn-ghost btn-sm" data-tip="Auto-layout"><Icon name="layout" size={14} /></button>
         <div style={{ width: 1, background: 'var(--border-muted)', margin: '4px 2px' }} />
         <button className="btn btn-ghost btn-sm" data-tip="Undo"><Icon name="rotate" size={14} /></button>
@@ -206,7 +278,7 @@ export function WorkflowGraph({ nodes, edges, selected, blockedEdgeId, width, he
       <div style={{
         position: 'absolute', bottom: 12, right: 12, display: 'flex', flexDirection: 'column', gap: 4,
         background: 'var(--bg)', border: '1px solid var(--border-muted)', borderRadius: 6,
-        padding: 3, boxShadow: 'var(--shadow-sm)',
+        padding: 3, boxShadow: 'var(--shadow-sm)', zIndex: 2,
       }}>
         <button className="btn btn-ghost btn-sm"><Icon name="plus" size={13} /></button>
         <button className="btn btn-ghost btn-sm" style={{ fontSize: 10, fontWeight: 600 }}>100%</button>
@@ -217,7 +289,7 @@ export function WorkflowGraph({ nodes, edges, selected, blockedEdgeId, width, he
       <div style={{
         position: 'absolute', bottom: 12, left: 12,
         background: 'var(--bg)', border: '1px solid var(--border-muted)', borderRadius: 6,
-        padding: '6px 10px', boxShadow: 'var(--shadow-sm)',
+        padding: '6px 10px', boxShadow: 'var(--shadow-sm)', zIndex: 2,
         display: 'flex', gap: 12, alignItems: 'center', fontSize: 11, color: 'var(--fg-muted)',
       }}>
         <span style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
@@ -269,6 +341,32 @@ export function WorkflowEditor() {
     setNodes((prev) => prev.map((n) => (n.id === id ? { ...n, ...patch } : n)));
   const updateEdge = (id: string, patch: Partial<GraphEdge>) =>
     setEdges((prev) => prev.map((e) => (e.id === id ? { ...e, ...patch } : e)));
+
+  // Append a new state at a sensible spot — start near the top-left so the
+  // user always sees it appear in-viewport, then they can drag from there.
+  const addState = () => {
+    // Pick the first status that isn't already on the canvas; fall back to 'todo'.
+    const used = new Set(nodes.map((n) => n.statusId));
+    const free = STATUSES.find((s) => !used.has(s.id))?.id ?? 'todo';
+    const id = `n${Date.now().toString(36)}`;
+    const next: GraphNode = {
+      id, statusId: free, x: 60, y: 60, count: 0, rules: 0,
+    };
+    setNodes((prev) => [...prev, next]);
+    setSelected({ type: 'node', id });
+  };
+
+  // Delete a node + every edge that touches it, so the graph stays consistent.
+  const deleteNode = (id: string) => {
+    setNodes((prev) => prev.filter((n) => n.id !== id));
+    setEdges((prev) => prev.filter((e) => e.from !== id && e.to !== id));
+    setSelected(null);
+  };
+
+  const deleteEdge = (id: string) => {
+    setEdges((prev) => prev.filter((e) => e.id !== id));
+    setSelected(null);
+  };
 
   return (
     <div className="bira" style={{ height: '100%', display: 'flex', flexDirection: 'column', background: 'var(--bg)' }}>
@@ -348,6 +446,8 @@ export function WorkflowEditor() {
               edges={edges}
               selected={selected}
               onSelect={setSelected}
+              onUpdateNode={updateNode}
+              onAddState={addState}
             />
           </div>
         </div>
@@ -362,6 +462,8 @@ export function WorkflowEditor() {
           issueTypeName={ISSUE_TYPE_NAMES[type]}
           onUpdateNode={updateNode}
           onUpdateEdge={updateEdge}
+          onDeleteNode={deleteNode}
+          onDeleteEdge={deleteEdge}
         />
       </div>
     </div>
@@ -378,10 +480,13 @@ interface InspectorProps {
   issueTypeName: string;
   onUpdateNode: (id: string, patch: Partial<GraphNode>) => void;
   onUpdateEdge: (id: string, patch: Partial<GraphEdge>) => void;
+  onDeleteNode: (id: string) => void;
+  onDeleteEdge: (id: string) => void;
 }
 function Inspector({
   selected, nodes, edges, workspace, project,
-  workflowName, issueTypeName, onUpdateNode, onUpdateEdge,
+  workflowName, issueTypeName,
+  onUpdateNode, onUpdateEdge, onDeleteNode, onDeleteEdge,
 }: InspectorProps) {
   return (
     <div style={{
@@ -398,6 +503,7 @@ function Inspector({
         <NodeInspector
           node={nodes.find((n) => n.id === selected.id)!}
           onChange={(patch) => onUpdateNode(selected.id, patch)}
+          onDelete={() => onDeleteNode(selected.id)}
         />
       )}
       {selected?.type === 'edge' && (
@@ -407,6 +513,7 @@ function Inspector({
           workspace={workspace}
           project={project}
           onChange={(patch) => onUpdateEdge(selected.id, patch)}
+          onDelete={() => onDeleteEdge(selected.id)}
         />
       )}
     </div>
@@ -464,7 +571,13 @@ function NothingSelectedInspector({
   );
 }
 
-function NodeInspector({ node, onChange }: { node: GraphNode; onChange: (patch: Partial<GraphNode>) => void }) {
+function NodeInspector({
+  node, onChange, onDelete,
+}: {
+  node: GraphNode;
+  onChange: (patch: Partial<GraphNode>) => void;
+  onDelete: () => void;
+}) {
   const status = STATUSES.find((s) => s.id === node.statusId);
   return (
     <>
@@ -515,8 +628,13 @@ function NodeInspector({ node, onChange }: { node: GraphNode; onChange: (patch: 
         <div style={{ marginTop: 18, padding: 10, background: 'var(--bg-subtle)', borderRadius: 6, fontSize: 12, color: 'var(--fg-muted)' }}>
           <span className="tnum" style={{ fontWeight: 600, color: 'var(--fg)' }}>{node.count}</span> issues currently in this state.
         </div>
-        <button className="btn btn-danger btn-sm" style={{ marginTop: 12, width: '100%' }}>
-          <Icon name="trash" size={13} />Delete state…
+        <button
+          type="button"
+          onClick={onDelete}
+          className="btn btn-danger btn-sm"
+          style={{ marginTop: 12, width: '100%' }}
+        >
+          <Icon name="trash" size={13} />Delete state
         </button>
       </div>
     </>
@@ -529,8 +647,9 @@ interface EdgeInspectorProps {
   workspace: string;
   project: string;
   onChange: (patch: Partial<GraphEdge>) => void;
+  onDelete: () => void;
 }
-function EdgeInspector({ edge, nodes, workspace, project, onChange }: EdgeInspectorProps) {
+function EdgeInspector({ edge, nodes, workspace, project, onChange, onDelete }: EdgeInspectorProps) {
   const from = nodes.find((n) => n.id === edge.from);
   const to = nodes.find((n) => n.id === edge.to);
   const fromStatus = STATUSES.find((s) => s.id === from?.statusId);
@@ -622,7 +741,12 @@ function EdgeInspector({ edge, nodes, workspace, project, onChange }: EdgeInspec
           </label>
         </Field>
 
-        <button className="btn btn-danger btn-sm" style={{ marginTop: 12, width: '100%' }}>
+        <button
+          type="button"
+          onClick={onDelete}
+          className="btn btn-danger btn-sm"
+          style={{ marginTop: 12, width: '100%' }}
+        >
           <Icon name="trash" size={13} />Delete transition
         </button>
       </div>
