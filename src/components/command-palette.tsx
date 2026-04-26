@@ -5,6 +5,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Icon } from './icons';
 import { KBD, useWorkspaceContext } from './shell';
+import { Modal } from './modal';
 import { ISSUES } from '../fixtures';
 
 interface Command {
@@ -25,16 +26,12 @@ export function CommandPalette() {
   const inputRef = useRef<HTMLInputElement>(null);
 
   // Open with ⌘K / Ctrl+K, or by dispatching the `bira:cmdk` custom event
-  // (the TopBar search button uses that). Close with Esc.
+  // (the TopBar search button uses that). Modal handles its own Escape close.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
         e.preventDefault();
         setOpen((o) => !o);
-        return;
-      }
-      if (e.key === 'Escape' && open) {
-        setOpen(false);
       }
     };
     const onCmdk = () => setOpen((o) => !o);
@@ -44,7 +41,7 @@ export function CommandPalette() {
       window.removeEventListener('keydown', onKey);
       window.removeEventListener('bira:cmdk', onCmdk);
     };
-  }, [open]);
+  }, []);
 
   // Reset state when opened.
   useEffect(() => {
@@ -104,23 +101,14 @@ export function CommandPalette() {
   if (!open) return null;
 
   return (
-    <div
-      onClick={() => setOpen(false)}
-      style={{
-        position: 'fixed', inset: 0, zIndex: 100,
-        background: 'rgba(15,23,42,.4)',
-        display: 'flex', alignItems: 'flex-start', justifyContent: 'center',
-        padding: '10vh 24px',
-      }}
+    <Modal
+      onClose={() => setOpen(false)}
+      maxWidth={600}
+      align="top"
+      zIndex={100}
+      label="Command palette"
     >
-      <div
-        onClick={(e) => e.stopPropagation()}
-        style={{
-          width: '100%', maxWidth: 600, background: 'var(--bg)',
-          borderRadius: 12, boxShadow: 'var(--shadow-lg)', overflow: 'hidden',
-        }}
-      >
-        <div style={{
+      <div style={{
           display: 'flex', alignItems: 'center', gap: 10, padding: '10px 14px',
           borderBottom: '1px solid var(--border-muted)',
         }}>
@@ -199,7 +187,6 @@ export function CommandPalette() {
           <span><KBD k="↵" /> select</span>
           <span><KBD k="esc" /> close</span>
         </div>
-      </div>
-    </div>
+    </Modal>
   );
 }

@@ -4,6 +4,7 @@ import { useState, type ReactNode } from 'react';
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { Icon } from '../components/icons';
 import { TopBar, Avatar, useWorkspaceContext } from '../components/shell';
+import { Modal, ModalHeader, ModalBody, ModalFooter } from '../components/modal';
 import { MEMBERS, type Member } from '../fixtures';
 
 // --- Outer layout (header + secondary tab strip + outlet) ---
@@ -246,61 +247,44 @@ interface InviteModalProps {
 }
 function InviteModal({ email, role, onEmail, onRole, onSend, onClose }: InviteModalProps) {
   return (
-    <div
-      onClick={onClose}
-      style={{
-        position: 'fixed', inset: 0, background: 'rgba(15,23,42,.4)', zIndex: 60,
-        display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24,
-      }}
+    <Modal
+      onClose={onClose}
+      onSubmit={(e) => { e.preventDefault(); onSend(); }}
+      label="Invite a new member"
     >
-      <form
-        onSubmit={(e) => { e.preventDefault(); onSend(); }}
-        onClick={(e) => e.stopPropagation()}
-        style={{
-          width: '100%', maxWidth: 480, background: 'var(--bg)', borderRadius: 10,
-          boxShadow: 'var(--shadow-lg)', overflow: 'hidden',
-        }}
-      >
-        <div style={{ padding: '14px 18px', borderBottom: '1px solid var(--border-muted)', display: 'flex', alignItems: 'center', gap: 8 }}>
-          <span style={{ fontSize: 14, fontWeight: 600 }}>Invite a new member</span>
-          <div style={{ flex: 1 }} />
-          <button type="button" onClick={onClose} className="btn btn-ghost btn-sm" style={{ width: 24, padding: 0 }}>
-            <Icon name="x" size={13} />
-          </button>
-        </div>
-        <div style={{ padding: 18 }}>
-          <Field label="Email">
-            <input
-              autoFocus
-              type="email"
-              className="input"
-              value={email}
-              onChange={(e) => onEmail(e.target.value)}
-              placeholder="them@example.com"
-              required
-            />
-          </Field>
-          <Field label="Role">
-            <select
-              className="input"
-              value={role}
-              onChange={(e) => onRole(e.target.value as 'admin' | 'member')}
-            >
-              <option value="member">member — can view and edit</option>
-              <option value="admin">admin — can also manage settings, members, workflows</option>
-            </select>
-          </Field>
-          <Hint>An invite link will be emailed; in this prototype it isn't actually sent.</Hint>
-        </div>
-        <div style={{ padding: '10px 18px', borderTop: '1px solid var(--border-muted)', background: 'var(--bg-subtle)', display: 'flex', gap: 8 }}>
-          <div style={{ flex: 1 }} />
-          <button type="button" onClick={onClose} className="btn btn-sm">Cancel</button>
-          <button type="submit" disabled={!email} className="btn btn-primary btn-sm">
-            <Icon name="send" size={13} />Send invite
-          </button>
-        </div>
-      </form>
-    </div>
+      <ModalHeader title="Invite a new member" onClose={onClose} />
+      <ModalBody>
+        <Field label="Email">
+          <input
+            autoFocus
+            type="email"
+            className="input"
+            value={email}
+            onChange={(e) => onEmail(e.target.value)}
+            placeholder="them@example.com"
+            required
+          />
+        </Field>
+        <Field label="Role">
+          <select
+            className="input"
+            value={role}
+            onChange={(e) => onRole(e.target.value as 'admin' | 'member')}
+          >
+            <option value="member">member — can view and edit</option>
+            <option value="admin">admin — can also manage settings, members, workflows</option>
+          </select>
+        </Field>
+        <Hint>An invite link will be emailed; in this prototype it isn't actually sent.</Hint>
+      </ModalBody>
+      <ModalFooter>
+        <div style={{ flex: 1 }} />
+        <button type="button" onClick={onClose} className="btn btn-sm">Cancel</button>
+        <button type="submit" disabled={!email} className="btn btn-primary btn-sm">
+          <Icon name="send" size={13} />Send invite
+        </button>
+      </ModalFooter>
+    </Modal>
   );
 }
 

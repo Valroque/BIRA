@@ -3,6 +3,7 @@ import { useMemo, useState, type FormEvent } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { Icon } from '../components/icons';
 import { TopBar, Avatar, useWorkspaceContext } from '../components/shell';
+import { Modal, ModalHeader, ModalFooter } from '../components/modal';
 import {
   CURRENT_USER, DEFAULT_PROJECT_WORKFLOWS, ISSUES, ISSUE_TYPE_NAMES, MEMBERS,
   RESERVED_PROJECT_SLUGS, TEAMS, WORKFLOWS,
@@ -210,38 +211,16 @@ function CreateProjectModal({ onClose }: { onClose: () => void }) {
   };
 
   return (
-    <div
-      onClick={onClose}
-      style={{
-        position: 'fixed', inset: 0, zIndex: 60, background: 'rgba(15,23,42,.4)',
-        display: 'flex', alignItems: 'flex-start', justifyContent: 'center',
-        padding: '6vh 24px', overflow: 'auto',
-      }}
+    <Modal
+      onClose={onClose}
+      maxWidth={560}
+      maxHeight="88vh"
+      align="top"
+      onSubmit={submit}
+      label="New project"
     >
-      <form
-        onSubmit={submit}
-        onClick={(e) => e.stopPropagation()}
-        style={{
-          width: '100%', maxWidth: 560, background: 'var(--bg)', borderRadius: 10,
-          boxShadow: 'var(--shadow-lg)', display: 'flex', flexDirection: 'column',
-          maxHeight: '88vh',
-        }}
-      >
-        <header style={{
-          padding: '14px 18px', borderBottom: '1px solid var(--border-muted)',
-          display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0,
-        }}>
-          <span style={{ fontSize: 14, fontWeight: 600 }}>New project</span>
-          <div style={{ flex: 1 }} />
-          <button
-            type="button" onClick={onClose} className="btn btn-ghost btn-sm"
-            style={{ width: 24, padding: 0 }} data-tip="Close"
-          >
-            <Icon name="x" size={13} />
-          </button>
-        </header>
-
-        <div className="scroll" style={{ flex: 1, overflow: 'auto', padding: 18 }}>
+      <ModalHeader title="New project" onClose={onClose} />
+      <div className="scroll" style={{ flex: 1, overflow: 'auto', padding: 18 }}>
           <Field label="Name">
             <input
               autoFocus className="input"
@@ -386,18 +365,14 @@ function CreateProjectModal({ onClose }: { onClose: () => void }) {
           )}
         </div>
 
-        <footer style={{
-          padding: '10px 18px', borderTop: '1px solid var(--border-muted)',
-          background: 'var(--bg-subtle)', display: 'flex', gap: 8, flexShrink: 0,
-        }}>
+        <ModalFooter>
           <div style={{ flex: 1 }} />
           <button type="button" onClick={onClose} className="btn btn-sm">Cancel</button>
           <button type="submit" disabled={!canSubmit} className="btn btn-primary btn-sm">
             <Icon name="check" size={13} />Create project
           </button>
-        </footer>
-      </form>
-    </div>
+        </ModalFooter>
+    </Modal>
   );
 }
 

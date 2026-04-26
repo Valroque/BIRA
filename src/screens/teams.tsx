@@ -6,6 +6,7 @@ import { useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { Icon } from '../components/icons';
 import { TopBar, Avatar, useWorkspaceContext } from '../components/shell';
+import { Modal, ModalHeader, ModalBody, ModalFooter } from '../components/modal';
 import { ErrorState } from '../components/states';
 import {
   TEAMS, MEMBERS,
@@ -297,75 +298,54 @@ export function AddMembersModal({
   });
 
   return (
-    <div
-      onClick={onClose}
-      style={{
-        position: 'fixed', inset: 0, zIndex: 60, background: 'rgba(15,23,42,.4)',
-        display: 'flex', alignItems: 'flex-start', justifyContent: 'center',
-        padding: '10vh 24px',
-      }}
-    >
-      <div
-        onClick={(e) => e.stopPropagation()}
-        style={{
-          width: '100%', maxWidth: 480, background: 'var(--bg)', borderRadius: 10,
-          boxShadow: 'var(--shadow-lg)', overflow: 'hidden',
-        }}
-      >
-        <div style={{ padding: '14px 18px', borderBottom: '1px solid var(--border-muted)', display: 'flex', alignItems: 'center', gap: 8 }}>
-          <span style={{ fontSize: 14, fontWeight: 600 }}>{title}</span>
-          <div style={{ flex: 1 }} />
-          <button onClick={onClose} className="btn btn-ghost btn-sm" style={{ width: 24, padding: 0 }}>
-            <Icon name="x" size={13} />
-          </button>
-        </div>
-        <div style={{ padding: '10px 14px', borderBottom: '1px solid var(--border-muted)' }}>
-          <div style={{ position: 'relative' }}>
-            <span style={{ position: 'absolute', left: 8, top: '50%', transform: 'translateY(-50%)', color: 'var(--fg-faint)' }}>
-              <Icon name="search" size={13} />
-            </span>
-            <input
-              autoFocus
-              className="input input-sm"
-              value={filter}
-              onChange={(e) => setFilter(e.target.value)}
-              placeholder="Filter by name or email"
-              style={{ paddingLeft: 28 }}
-            />
-          </div>
-        </div>
-        <div className="scroll" style={{ maxHeight: 360, overflow: 'auto', padding: 6 }}>
-          {candidates.length === 0 && (
-            <div style={{ padding: '24px 12px', textAlign: 'center', color: 'var(--fg-muted)', fontSize: 13 }}>
-              {filter
-                ? `No matches for "${filter}".`
-                : 'Everyone is already added.'}
-            </div>
-          )}
-          {candidates.map((m) => (
-            <button
-              key={m.email}
-              onClick={() => onAdd(m.email)}
-              style={{
-                display: 'flex', alignItems: 'center', gap: 10,
-                width: '100%', padding: '8px 10px', borderRadius: 6,
-                border: 'none', cursor: 'pointer', background: 'transparent',
-                textAlign: 'left',
-              }}
-              onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--bg-subtle)'; }}
-              onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
-            >
-              <Avatar name={m.name} size={24} />
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontSize: 13, fontWeight: 500 }}>{m.name}</div>
-                <div style={{ fontSize: 11.5, color: 'var(--fg-muted)' }}>{m.email}</div>
-              </div>
-              <Icon name="plus" size={13} color="var(--fg-muted)" />
-            </button>
-          ))}
+    <Modal onClose={onClose} align="top" label={title}>
+      <ModalHeader title={title} onClose={onClose} />
+      <div style={{ padding: '10px 14px', borderBottom: '1px solid var(--border-muted)' }}>
+        <div style={{ position: 'relative' }}>
+          <span style={{ position: 'absolute', left: 8, top: '50%', transform: 'translateY(-50%)', color: 'var(--fg-faint)' }}>
+            <Icon name="search" size={13} />
+          </span>
+          <input
+            autoFocus
+            className="input input-sm"
+            value={filter}
+            onChange={(e) => setFilter(e.target.value)}
+            placeholder="Filter by name or email"
+            style={{ paddingLeft: 28 }}
+          />
         </div>
       </div>
-    </div>
+      <div className="scroll" style={{ maxHeight: 360, overflow: 'auto', padding: 6 }}>
+        {candidates.length === 0 && (
+          <div style={{ padding: '24px 12px', textAlign: 'center', color: 'var(--fg-muted)', fontSize: 13 }}>
+            {filter
+              ? `No matches for "${filter}".`
+              : 'Everyone is already added.'}
+          </div>
+        )}
+        {candidates.map((m) => (
+          <button
+            key={m.email}
+            onClick={() => onAdd(m.email)}
+            style={{
+              display: 'flex', alignItems: 'center', gap: 10,
+              width: '100%', padding: '8px 10px', borderRadius: 6,
+              border: 'none', cursor: 'pointer', background: 'transparent',
+              textAlign: 'left',
+            }}
+            onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--bg-subtle)'; }}
+            onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
+          >
+            <Avatar name={m.name} size={24} />
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontSize: 13, fontWeight: 500 }}>{m.name}</div>
+              <div style={{ fontSize: 11.5, color: 'var(--fg-muted)' }}>{m.email}</div>
+            </div>
+            <Icon name="plus" size={13} color="var(--fg-muted)" />
+          </button>
+        ))}
+      </div>
+    </Modal>
   );
 }
 
@@ -439,50 +419,37 @@ function CreateTeamModal({ onClose }: { onClose: () => void }) {
   };
 
   return (
-    <div
-      onClick={onClose}
-      style={{
-        position: 'fixed', inset: 0, zIndex: 60, background: 'rgba(15,23,42,.4)',
-        display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24,
-      }}
+    <Modal
+      onClose={onClose}
+      maxWidth={460}
+      label="New team"
+      onSubmit={(e) => { e.preventDefault(); onClose(); navigate(`/${workspace}/teams/${slug || 'team'}`); }}
     >
-      <form
-        onSubmit={(e) => { e.preventDefault(); onClose(); navigate(`/${workspace}/teams/${slug || 'team'}`); }}
-        onClick={(e) => e.stopPropagation()}
-        style={{ width: '100%', maxWidth: 460, background: 'var(--bg)', borderRadius: 10, boxShadow: 'var(--shadow-lg)', overflow: 'hidden' }}
-      >
-        <div style={{ padding: '14px 18px', borderBottom: '1px solid var(--border-muted)', display: 'flex', alignItems: 'center', gap: 8 }}>
-          <span style={{ fontSize: 14, fontWeight: 600 }}>New team</span>
-          <div style={{ flex: 1 }} />
-          <button type="button" onClick={onClose} className="btn btn-ghost btn-sm" style={{ width: 24, padding: 0 }}>
-            <Icon name="x" size={13} />
-          </button>
-        </div>
-        <div style={{ padding: 18 }}>
-          <label style={{ display: 'block', marginBottom: 12 }}>
-            <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--fg-muted)', textTransform: 'uppercase', letterSpacing: 0.4, marginBottom: 4 }}>Name</div>
-            <input autoFocus className="input" value={name} onChange={(e) => onName(e.target.value)} placeholder="e.g. Mobile" required />
-          </label>
-          <label style={{ display: 'block', marginBottom: 12 }}>
-            <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--fg-muted)', textTransform: 'uppercase', letterSpacing: 0.4, marginBottom: 4 }}>Slug</div>
-            <input
-              className="input mono"
-              value={slug}
-              onChange={(e) => setSlug(e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, ''))}
-              placeholder="mobile"
-              required
-            />
-          </label>
-        </div>
-        <div style={{ padding: '10px 18px', borderTop: '1px solid var(--border-muted)', background: 'var(--bg-subtle)', display: 'flex', gap: 8 }}>
-          <div style={{ flex: 1 }} />
-          <button type="button" onClick={onClose} className="btn btn-sm">Cancel</button>
-          <button type="submit" disabled={!name || !slug} className="btn btn-primary btn-sm">
-            <Icon name="check" size={13} />Create team
-          </button>
-        </div>
-      </form>
-    </div>
+      <ModalHeader title="New team" onClose={onClose} />
+      <ModalBody>
+        <label style={{ display: 'block', marginBottom: 12 }}>
+          <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--fg-muted)', textTransform: 'uppercase', letterSpacing: 0.4, marginBottom: 4 }}>Name</div>
+          <input autoFocus className="input" value={name} onChange={(e) => onName(e.target.value)} placeholder="e.g. Mobile" required />
+        </label>
+        <label style={{ display: 'block', marginBottom: 12 }}>
+          <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--fg-muted)', textTransform: 'uppercase', letterSpacing: 0.4, marginBottom: 4 }}>Slug</div>
+          <input
+            className="input mono"
+            value={slug}
+            onChange={(e) => setSlug(e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, ''))}
+            placeholder="mobile"
+            required
+          />
+        </label>
+      </ModalBody>
+      <ModalFooter>
+        <div style={{ flex: 1 }} />
+        <button type="button" onClick={onClose} className="btn btn-sm">Cancel</button>
+        <button type="submit" disabled={!name || !slug} className="btn btn-primary btn-sm">
+          <Icon name="check" size={13} />Create team
+        </button>
+      </ModalFooter>
+    </Modal>
   );
 }
 

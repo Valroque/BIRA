@@ -6,6 +6,7 @@ import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Icon } from '../components/icons';
 import { TopBar, Tabs, Avatar, projectTabs, useWorkspaceContext } from '../components/shell';
+import { Modal, ModalHeader } from '../components/modal';
 import { AddMembersModal, AvatarStack, TeamBadge } from './teams';
 import {
   TEAMS,
@@ -209,79 +210,58 @@ function AddTeamModal({
   });
 
   return (
-    <div
-      onClick={onClose}
-      style={{
-        position: 'fixed', inset: 0, zIndex: 60, background: 'rgba(15,23,42,.4)',
-        display: 'flex', alignItems: 'flex-start', justifyContent: 'center',
-        padding: '10vh 24px',
-      }}
-    >
-      <div
-        onClick={(e) => e.stopPropagation()}
-        style={{
-          width: '100%', maxWidth: 480, background: 'var(--bg)', borderRadius: 10,
-          boxShadow: 'var(--shadow-lg)', overflow: 'hidden',
-        }}
-      >
-        <div style={{ padding: '14px 18px', borderBottom: '1px solid var(--border-muted)', display: 'flex', alignItems: 'center', gap: 8 }}>
-          <span style={{ fontSize: 14, fontWeight: 600 }}>Add a team</span>
-          <div style={{ flex: 1 }} />
-          <button onClick={onClose} className="btn btn-ghost btn-sm" style={{ width: 24, padding: 0 }}>
-            <Icon name="x" size={13} />
-          </button>
-        </div>
-        <div style={{ padding: '10px 14px', borderBottom: '1px solid var(--border-muted)' }}>
-          <div style={{ position: 'relative' }}>
-            <span style={{ position: 'absolute', left: 8, top: '50%', transform: 'translateY(-50%)', color: 'var(--fg-faint)' }}>
-              <Icon name="search" size={13} />
-            </span>
-            <input
-              autoFocus
-              className="input input-sm"
-              value={filter}
-              onChange={(e) => setFilter(e.target.value)}
-              placeholder="Filter teams"
-              style={{ paddingLeft: 28 }}
-            />
-          </div>
-        </div>
-        <div className="scroll" style={{ maxHeight: 360, overflow: 'auto', padding: 6 }}>
-          {candidates.length === 0 && (
-            <div style={{ padding: '24px 12px', textAlign: 'center', color: 'var(--fg-muted)', fontSize: 13 }}>
-              {filter ? `No teams match "${filter}".` : 'All teams are already added.'}
-            </div>
-          )}
-          {candidates.map((t) => {
-            const teamMembers = t.memberEmails.map(memberByEmail).filter((m): m is Member => !!m);
-            return (
-              <button
-                key={t.slug}
-                onClick={() => onAdd(t.slug)}
-                style={{
-                  display: 'flex', alignItems: 'center', gap: 10,
-                  width: '100%', padding: '8px 10px', borderRadius: 6,
-                  border: 'none', cursor: 'pointer', background: 'transparent',
-                  textAlign: 'left',
-                }}
-                onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--bg-subtle)'; }}
-                onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
-              >
-                <TeamBadge team={t} size={28} />
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontSize: 13, fontWeight: 500 }}>{t.name}</div>
-                  <div style={{ fontSize: 11.5, color: 'var(--fg-muted)' }}>
-                    <span className="tnum">{t.memberEmails.length}</span> members
-                  </div>
-                </div>
-                <AvatarStack members={teamMembers} max={3} size={18} />
-                <Icon name="plus" size={13} color="var(--fg-muted)" style={{ marginLeft: 6 }} />
-              </button>
-            );
-          })}
+    <Modal onClose={onClose} align="top" label="Add a team">
+      <ModalHeader title="Add a team" onClose={onClose} />
+      <div style={{ padding: '10px 14px', borderBottom: '1px solid var(--border-muted)' }}>
+        <div style={{ position: 'relative' }}>
+          <span style={{ position: 'absolute', left: 8, top: '50%', transform: 'translateY(-50%)', color: 'var(--fg-faint)' }}>
+            <Icon name="search" size={13} />
+          </span>
+          <input
+            autoFocus
+            className="input input-sm"
+            value={filter}
+            onChange={(e) => setFilter(e.target.value)}
+            placeholder="Filter teams"
+            style={{ paddingLeft: 28 }}
+          />
         </div>
       </div>
-    </div>
+      <div className="scroll" style={{ maxHeight: 360, overflow: 'auto', padding: 6 }}>
+        {candidates.length === 0 && (
+          <div style={{ padding: '24px 12px', textAlign: 'center', color: 'var(--fg-muted)', fontSize: 13 }}>
+            {filter ? `No teams match "${filter}".` : 'All teams are already added.'}
+          </div>
+        )}
+        {candidates.map((t) => {
+          const teamMembers = t.memberEmails.map(memberByEmail).filter((m): m is Member => !!m);
+          return (
+            <button
+              key={t.slug}
+              onClick={() => onAdd(t.slug)}
+              style={{
+                display: 'flex', alignItems: 'center', gap: 10,
+                width: '100%', padding: '8px 10px', borderRadius: 6,
+                border: 'none', cursor: 'pointer', background: 'transparent',
+                textAlign: 'left',
+              }}
+              onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--bg-subtle)'; }}
+              onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
+            >
+              <TeamBadge team={t} size={28} />
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 13, fontWeight: 500 }}>{t.name}</div>
+                <div style={{ fontSize: 11.5, color: 'var(--fg-muted)' }}>
+                  <span className="tnum">{t.memberEmails.length}</span> members
+                </div>
+              </div>
+              <AvatarStack members={teamMembers} max={3} size={18} />
+              <Icon name="plus" size={13} color="var(--fg-muted)" style={{ marginLeft: 6 }} />
+            </button>
+          );
+        })}
+      </div>
+    </Modal>
   );
 }
 
