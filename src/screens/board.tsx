@@ -6,6 +6,7 @@ import {
   StatusDot, TypeChip, Priority, Avatar, IssueId, STATUSES,
   projectTabs, useWorkspaceContext,
 } from '../components/shell';
+import { StatusPill } from '../components/status-pill';
 import {
   BoardConfigPanel, useBoardConfig, GROUP_BY_OPTIONS,
   type BoardColumn, type GroupBy,
@@ -661,18 +662,12 @@ export function BoardCard({ issue, workspace, project, selected, onToggleSelect,
         <TypeChip type={issue.type} />
         <IssueId id={issue.id} />
         {showStatus && statusMeta && (
-          <span
+          <StatusPill
+            status={issue.status}
             data-tip={statusMeta.name}
-            style={{
-              display: 'inline-flex', alignItems: 'center', gap: 4,
-              padding: '1px 6px 1px 5px', borderRadius: 10,
-              background: `var(--${issue.status}-bg)`, color: `var(--${issue.status})`,
-              fontSize: 10.5, fontWeight: 500,
-            }}
-          >
-            <StatusDot status={issue.status} size={8} />
-            {statusMeta.name}
-          </span>
+            dotSize={8}
+            style={{ padding: '1px 6px 1px 5px', fontSize: 10.5, gap: 4 }}
+          />
         )}
         <div style={{ flex: 1 }} />
         <Priority p={issue.priority} />

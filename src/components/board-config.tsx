@@ -6,9 +6,10 @@
 // duplicate across columns). Statuses that aren't in any column are hidden
 // from the board — surfaced as a small warning in the config panel.
 
-import { useCallback, useEffect, useState, type CSSProperties } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { Icon } from './icons';
 import { STATUSES, StatusDot, type StatusId } from './shell';
+import { StatusPill } from './status-pill';
 
 export interface BoardColumn {
   id: string;
@@ -245,9 +246,7 @@ export function BoardConfigPanel({ config, onChange, onReset, onClose }: PanelPr
               </div>
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
                 {unassigned.map((s) => (
-                  <span key={s.id} style={chipStyle(s.id)}>
-                    <StatusDot status={s.id} size={9} /> {s.name}
-                  </span>
+                  <StatusPill key={s.id} status={s.id} />
                 ))}
               </div>
             </div>
@@ -354,22 +353,24 @@ function ColumnEditor({
           const meta = STATUSES.find((x) => x.id === s);
           if (!meta) return null;
           return (
-            <span key={s} style={chipStyle(s)}>
-              <StatusDot status={s} size={9} />
-              <span>{meta.name}</span>
-              <button
-                type="button"
-                onClick={() => onRemoveStatus(s)}
-                aria-label={`Remove ${meta.name}`}
-                style={{
-                  background: 'transparent', border: 'none', padding: 0, marginLeft: 2,
-                  cursor: 'pointer', color: 'inherit', opacity: 0.6,
-                  display: 'inline-flex', alignItems: 'center',
-                }}
-              >
-                <Icon name="x" size={10} />
-              </button>
-            </span>
+            <StatusPill
+              key={s}
+              status={s}
+              trailing={
+                <button
+                  type="button"
+                  onClick={() => onRemoveStatus(s)}
+                  aria-label={`Remove ${meta.name}`}
+                  style={{
+                    background: 'transparent', border: 'none', padding: 0, marginLeft: 2,
+                    cursor: 'pointer', color: 'inherit', opacity: 0.6,
+                    display: 'inline-flex', alignItems: 'center',
+                  }}
+                >
+                  <Icon name="x" size={10} />
+                </button>
+              }
+            />
           );
         })}
         <button
@@ -442,13 +443,3 @@ function StatusPicker({
   );
 }
 
-function chipStyle(status: StatusId): CSSProperties {
-  return {
-    display: 'inline-flex', alignItems: 'center', gap: 5,
-    padding: '2px 6px 2px 7px', borderRadius: 10,
-    background: `var(--${status}-bg)`, color: `var(--${status})`,
-    fontSize: 11.5, fontWeight: 500,
-    border: `1px solid var(--${status})`,
-    borderColor: 'transparent',
-  };
-}
