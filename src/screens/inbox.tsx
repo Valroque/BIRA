@@ -3,9 +3,12 @@ import { Link } from 'react-router-dom';
 import { TopBar, Tabs, useWorkspaceContext } from '../components/shell';
 import { EmptyState } from '../components/states';
 import { Icon } from '../components/icons';
+import { useProjects } from '../state/projects';
 
 export function InboxPage() {
   const { workspace } = useWorkspaceContext();
+  const { projects } = useProjects();
+  const firstProject = projects.find((p) => p.status === 'active') ?? projects[0];
   return (
     <div className="bira" style={{ height: '100%', display: 'flex', flexDirection: 'column', background: 'var(--bg)' }}>
       <TopBar breadcrumbs={[
@@ -25,15 +28,15 @@ export function InboxPage() {
           icon="inbox"
           title="You're all caught up"
           description="No new mentions, assignments, or replies. Notifications will appear here when other members tag you."
-          action={
+          action={firstProject ? (
             <Link
-              to={`/${workspace}/comet/board`}
+              to={`/${workspace}/${firstProject.slug}/board`}
               className="btn btn-sm"
               style={{ textDecoration: 'none' }}
             >
               <Icon name="board" size={13} />Open the board
             </Link>
-          }
+          ) : null}
         />
       </div>
     </div>

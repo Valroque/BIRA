@@ -4,21 +4,24 @@ import { useNavigate } from 'react-router-dom';
 import { Icon } from '../components/icons';
 import { TopBar, Tabs, TypeChip, projectTabs, useWorkspaceContext } from '../components/shell';
 import {
-  WORKFLOWS, PROJECT_WORKFLOWS, ISSUE_TYPE_NAMES, PROJECT_INFO,
-  type IssueTypeLetter, type ProjectSlug,
+  WORKFLOWS, ISSUE_TYPE_NAMES, DEFAULT_PROJECT_WORKFLOWS,
+  type IssueTypeLetter,
 } from '../fixtures';
+import { useProjects } from '../state/projects';
 
 const TYPE_ORDER: IssueTypeLetter[] = ['T', 'B', 'S', 'E'];
 
 export function ProjectSettingsPage() {
   const { workspace, project } = useWorkspaceContext();
   const navigate = useNavigate();
-  const projectSlug = (project as ProjectSlug) in PROJECT_INFO ? (project as ProjectSlug) : 'comet';
-  const projectInfo = PROJECT_INFO[projectSlug];
-  const [name, setName] = useState(projectInfo.name);
-  const [key, setKey] = useState(projectInfo.key);
-  const [description, setDescription] = useState('Internal issue tracker. Self-hostable, role-aware, opinionated about workflows.');
-  const [assignments, setAssignments] = useState<Record<IssueTypeLetter, string>>(PROJECT_WORKFLOWS[projectSlug]);
+  const { getProject } = useProjects();
+  const projectInfo = getProject(project);
+  const [name, setName] = useState(projectInfo?.name ?? project);
+  const [key, setKey] = useState(projectInfo?.key ?? '');
+  const [description, setDescription] = useState(projectInfo?.description ?? '');
+  const [assignments, setAssignments] = useState<Record<IssueTypeLetter, string>>(
+    projectInfo?.workflows ?? DEFAULT_PROJECT_WORKFLOWS,
+  );
 
   const setAssignment = (type: IssueTypeLetter, workflowId: string) =>
     setAssignments((prev) => ({ ...prev, [type]: workflowId }));
@@ -27,7 +30,7 @@ export function ProjectSettingsPage() {
     <div className="bira" style={{ height: '100%', display: 'flex', flexDirection: 'column', background: 'var(--bg)' }}>
       <TopBar breadcrumbs={[
         { label: 'Acme Robotics', to: `/${workspace}/projects` },
-        { label: projectInfo.name, to: `/${workspace}/${project}` },
+        { label: projectInfo?.name ?? project, to: `/${workspace}/${project}` },
         'Settings',
       ]} />
       <Tabs active="settings" tabs={projectTabs(workspace, project)} />

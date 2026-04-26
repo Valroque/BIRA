@@ -1,28 +1,156 @@
-// Demo data used by the prototype. No real persistence.
+// Demo data used by the prototype. No real persistence beyond what the
+// `ProjectsProvider` writes to localStorage for user-created projects.
 
-export type ProjectSlug = 'comet' | 'orbit' | 'atlas';
+// ---------------------------------------------------------------------------
+// Issue types + statuses (data only — UI rendering lives in shell.tsx)
+// ---------------------------------------------------------------------------
 
-export interface ProjectInfo {
-  slug: ProjectSlug;
+export type IssueTypeLetter = 'T' | 'B' | 'S' | 'E';
+
+export const ISSUE_TYPE_NAMES: Record<IssueTypeLetter, string> = {
+  T: 'Task', B: 'Bug', S: 'Story', E: 'Epic',
+};
+
+// ---------------------------------------------------------------------------
+// Projects
+// ---------------------------------------------------------------------------
+
+export interface Project {
+  /** URL slug. Lowercase a-z, 0-9, dashes. Unique per workspace. */
+  slug: string;
   name: string;
-  /** Used as the prefix in issue IDs (CMT, ORB, ATL). */
+  /** Prefix for issue IDs (CMT, ORB, ATL). Unique per workspace, ≤4 chars. */
   key: string;
   /** Letter shown inside the small project chip. */
   letter: string;
-  /** Color of the chip background — picked from the accent palette. */
+  /** Foreground color of the chip — drawn from `PROJECT_PALETTE`. */
   color: string;
+  /** Background color of the chip — pairs with `color`. */
   bg: string;
+  description: string;
+  status: 'active' | 'archived';
+  /** ISO timestamp. Set when the project was created. */
+  createdAt: string;
+  /** Email of the workspace member who created the project. */
+  createdByEmail: string;
+  /** Per-issue-type workflow assignment. */
+  workflows: Record<IssueTypeLetter, string>;
+  /** Slugs of teams whose members inherit access to this project. */
+  teamSlugs: string[];
+  /** Emails of individuals with explicit access (in addition to team members). */
+  userEmails: string[];
 }
 
-export const PROJECT_INFO: Record<ProjectSlug, ProjectInfo> = {
-  comet: { slug: 'comet', name: 'Comet', key: 'CMT', letter: 'C', color: '#4f46e5', bg: '#e0e7ff' },
-  orbit: { slug: 'orbit', name: 'Orbit', key: 'ORB', letter: 'O', color: '#0891b2', bg: '#cffafe' },
-  atlas: { slug: 'atlas', name: 'Atlas', key: 'ATL', letter: 'A', color: '#16a34a', bg: '#dcfce7' },
-};
+/**
+ * Kept as a string alias so existing import sites keep compiling. Runtime
+ * narrowing now goes through `useProjects().getProject(slug)`.
+ */
+export type ProjectSlug = string;
+
+/**
+ * Color palette used to auto-pick a chip color when a user creates a new
+ * project. Seeded projects pick a hand-chosen entry from the same palette.
+ */
+export const PROJECT_PALETTE: Array<{ color: string; bg: string }> = [
+  { color: '#4f46e5', bg: '#e0e7ff' }, // indigo
+  { color: '#0891b2', bg: '#cffafe' }, // cyan
+  { color: '#16a34a', bg: '#dcfce7' }, // green
+  { color: '#ea580c', bg: '#fed7aa' }, // orange
+  { color: '#9333ea', bg: '#f3e8ff' }, // purple
+  { color: '#db2777', bg: '#fce7f3' }, // pink
+  { color: '#ca8a04', bg: '#fef3c7' }, // amber
+  { color: '#0d9488', bg: '#ccfbf1' }, // teal
+];
+
+/** Stable hash → palette index. Same slug always picks the same color. */
+export function pickProjectColor(slug: string): { color: string; bg: string } {
+  let h = 0;
+  for (let i = 0; i < slug.length; i++) {
+    h = ((h << 5) - h) + slug.charCodeAt(i);
+    h |= 0;
+  }
+  return PROJECT_PALETTE[Math.abs(h) % PROJECT_PALETTE.length];
+}
+
+/**
+ * Workspace-default seed projects. Shaped exactly like what the create-project
+ * form produces, so seeded projects render identically to user-added ones.
+ */
+export const SEED_PROJECTS: Project[] = [
+  {
+    slug: 'comet',
+    name: 'Comet',
+    key: 'CMT',
+    letter: 'C',
+    color: '#4f46e5',
+    bg: '#e0e7ff',
+    description: 'Internal issue tracker. Self-hostable, role-aware, opinionated about workflows.',
+    status: 'active',
+    createdAt: '2025-09-12T10:30:00.000Z',
+    createdByEmail: 'jordan@acme.com',
+    workflows: { T: 'default', B: 'default', S: 'default', E: 'epic-coarse' },
+    teamSlugs: ['backend', 'frontend'],
+    userEmails: ['priya@acme.com'],
+  },
+  {
+    slug: 'orbit',
+    name: 'Orbit',
+    key: 'ORB',
+    letter: 'O',
+    color: '#0891b2',
+    bg: '#cffafe',
+    description: 'Customer-facing dashboard and analytics.',
+    status: 'active',
+    createdAt: '2025-10-04T14:15:00.000Z',
+    createdByEmail: 'jordan@acme.com',
+    workflows: { T: 'default', B: 'default', S: 'default', E: 'epic-coarse' },
+    teamSlugs: ['frontend'],
+    userEmails: ['sam@acme.com'],
+  },
+  {
+    slug: 'atlas',
+    name: 'Atlas',
+    key: 'ATL',
+    letter: 'A',
+    color: '#16a34a',
+    bg: '#dcfce7',
+    description: 'Map / geospatial features for the platform.',
+    status: 'active',
+    createdAt: '2025-11-21T09:00:00.000Z',
+    createdByEmail: 'maya@acme.com',
+    workflows: { T: 'default', B: 'default', S: 'default', E: 'epic-detailed' },
+    teamSlugs: ['backend', 'design'],
+    userEmails: ['priya@acme.com'],
+  },
+  {
+    slug: 'halo',
+    name: 'Halo',
+    key: 'HAL',
+    letter: 'H',
+    color: '#6b7280',
+    bg: '#f3f4f6',
+    description: 'Deprecated. Kept for reference only.',
+    status: 'archived',
+    createdAt: '2024-03-15T12:00:00.000Z',
+    createdByEmail: 'jordan@acme.com',
+    workflows: { T: 'default', B: 'default', S: 'default', E: 'epic-coarse' },
+    teamSlugs: [],
+    userEmails: [],
+  },
+];
+
+/** Slugs that can't be used for projects because they're route-reserved. */
+export const RESERVED_PROJECT_SLUGS = new Set<string>([
+  'inbox', 'my-issues', 'all-issues', 'projects', 'workflows', 'teams', 'settings',
+]);
+
+// ---------------------------------------------------------------------------
+// Issues
+// ---------------------------------------------------------------------------
 
 export interface Issue {
   id: string;
-  type: 'T' | 'B' | 'S' | 'E';
+  type: IssueTypeLetter;
   title: string;
   status: 'backlog' | 'todo' | 'in-progress' | 'in-review' | 'done' | 'canceled';
   priority: 'urgent' | 'high' | 'med' | 'low' | 'none';
@@ -68,7 +196,10 @@ export const ISSUES: Issue[] = [
   { id: 'ATL-98',  project: 'atlas', type: 'T', title: 'Tile server health check endpoint', status: 'done', priority: 'med', assignee: 'Sam Park', labels: ['ops'], updated: '6d ago', estimate: 2 },
 ];
 
-/** Current user (mocked for the prototype). */
+// ---------------------------------------------------------------------------
+// Current user
+// ---------------------------------------------------------------------------
+
 export const CURRENT_USER = {
   name: 'Jordan Lee',
   email: 'jordan@acme.com',
@@ -76,7 +207,7 @@ export const CURRENT_USER = {
 };
 
 // ---------------------------------------------------------------------------
-// Workspace members + teams + project access
+// Workspace members + teams
 // ---------------------------------------------------------------------------
 
 export interface Member {
@@ -135,40 +266,16 @@ export const TEAMS: Team[] = [
 
 export const teamBySlug = (slug: string) => TEAMS.find((t) => t.slug === slug);
 
-/** Per-project access — a mix of explicit individuals (by email) + whole teams. */
-export interface ProjectAccess {
-  /** Slugs of teams that have access to the project. */
-  teamSlugs: string[];
-  /** Emails of individuals with explicit access (in addition to team members). */
-  userEmails: string[];
-}
-
-export const PROJECT_MEMBERS: Record<ProjectSlug, ProjectAccess> = {
-  comet: { teamSlugs: ['backend', 'frontend'], userEmails: ['priya@acme.com'] },
-  orbit: { teamSlugs: ['frontend'],            userEmails: ['sam@acme.com'] },
-  atlas: { teamSlugs: ['backend', 'design'],   userEmails: ['priya@acme.com'] },
-};
-
 /** Effective members of a project (deduped union of team members + explicit users). */
-export function projectEffectiveMembers(project: ProjectSlug): Member[] {
-  const access = PROJECT_MEMBERS[project];
-  const emails = new Set<string>(access.userEmails);
-  for (const slug of access.teamSlugs) {
+export function projectEffectiveMembers(project: Project): Member[] {
+  const emails = new Set<string>(project.userEmails);
+  for (const slug of project.teamSlugs) {
     const team = teamBySlug(slug);
     if (team) team.memberEmails.forEach((e) => emails.add(e));
   }
   return Array.from(emails)
     .map((e) => memberByEmail(e))
     .filter((m): m is Member => !!m && m.status === 'active');
-}
-
-/** Reverse-lookup: which projects has this team been added to. */
-export function projectsForTeam(slug: string): ProjectSlug[] {
-  const out: ProjectSlug[] = [];
-  (Object.keys(PROJECT_MEMBERS) as ProjectSlug[]).forEach((p) => {
-    if (PROJECT_MEMBERS[p].teamSlugs.includes(slug)) out.push(p);
-  });
-  return out;
 }
 
 // ---------------------------------------------------------------------------
@@ -179,8 +286,6 @@ export function projectsForTeam(slug: string): ProjectSlug[] {
 // one workflow id. Two projects can share a workflow or each pick a different
 // one. The fixture below intentionally gives Epic two flavors so the editor
 // shows different graphs for Comet/Orbit vs Atlas.
-
-export type IssueTypeLetter = 'T' | 'B' | 'S' | 'E';
 
 export interface WorkflowNode {
   id: string;
@@ -271,24 +376,10 @@ export const WORKFLOWS: Record<string, WorkflowDef> = {
   },
 };
 
-/** Maps each (project, issue_type) pair to a workflow id. */
-export const PROJECT_WORKFLOWS: Record<ProjectSlug, Record<IssueTypeLetter, string>> = {
-  comet: { T: 'default', B: 'default', S: 'default', E: 'epic-coarse' },
-  orbit: { T: 'default', B: 'default', S: 'default', E: 'epic-coarse' },
-  atlas: { T: 'default', B: 'default', S: 'default', E: 'epic-detailed' },
+/**
+ * Default workflow assignment for a brand-new project. Tasks/Bugs/Stories
+ * use the standard six-state flow; Epics use the loose three-state flow.
+ */
+export const DEFAULT_PROJECT_WORKFLOWS: Record<IssueTypeLetter, string> = {
+  T: 'default', B: 'default', S: 'default', E: 'epic-coarse',
 };
-
-export const ISSUE_TYPE_NAMES: Record<IssueTypeLetter, string> = {
-  T: 'Task', B: 'Bug', S: 'Story', E: 'Epic',
-};
-
-/** Reverse-lookup: which (project, issue_type) pairs use this workflow id. */
-export function projectsUsingWorkflow(workflowId: string) {
-  const pairs: { project: ProjectSlug; type: IssueTypeLetter }[] = [];
-  (Object.keys(PROJECT_WORKFLOWS) as ProjectSlug[]).forEach((p) => {
-    (Object.keys(PROJECT_WORKFLOWS[p]) as IssueTypeLetter[]).forEach((t) => {
-      if (PROJECT_WORKFLOWS[p][t] === workflowId) pairs.push({ project: p, type: t });
-    });
-  });
-  return pairs;
-}

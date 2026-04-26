@@ -14,7 +14,8 @@ import {
   FilterChip, AddFilterButton, applyFilters, newFilterId, type Filter,
 } from '../components/issue-filters';
 import { AvatarStack } from './teams';
-import { ISSUES, projectEffectiveMembers, type Issue, type ProjectSlug, PROJECT_INFO } from '../fixtures';
+import { ISSUES, projectEffectiveMembers, type Issue } from '../fixtures';
+import { useProjects } from '../state/projects';
 
 const PRIORITY_LABEL: Record<Issue['priority'], string> = {
   urgent: 'Urgent', high: 'High', med: 'Medium', low: 'Low', none: 'No priority',
@@ -37,8 +38,9 @@ const DEMO_SELECTED = ['CMT-241', 'CMT-238', 'CMT-237', 'CMT-235', 'CMT-234'];
 
 export function BoardView({ selectedCount, showBulkBar = true }: BoardViewProps) {
   const { workspace, project } = useWorkspaceContext();
-  const projectSlug = (project as ProjectSlug) in PROJECT_INFO ? (project as ProjectSlug) : 'comet';
-  const members = projectEffectiveMembers(projectSlug);
+  const { getProject } = useProjects();
+  const projectInfo = getProject(project);
+  const members = projectInfo ? projectEffectiveMembers(projectInfo) : [];
   const { config, setConfig, reset } = useBoardConfig(workspace, project);
   const [configOpen, setConfigOpen] = useState(false);
   const [filters, setFilters] = useState<Filter[]>([]);
@@ -78,7 +80,7 @@ export function BoardView({ selectedCount, showBulkBar = true }: BoardViewProps)
     <div className="bira" style={{ height: '100%', display: 'flex', flexDirection: 'column', background: 'var(--bg)' }}>
       <TopBar breadcrumbs={[
         { label: 'Acme Robotics', to: `/${workspace}/projects` },
-        { label: 'Comet', to: `/${workspace}/${project}` },
+        { label: projectInfo?.name ?? project, to: `/${workspace}/${project}` },
         'Board',
       ]} />
       <Tabs active="board" tabs={projectTabs(workspace, project)} />

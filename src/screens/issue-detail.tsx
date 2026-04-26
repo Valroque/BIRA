@@ -4,6 +4,7 @@ import { Icon } from '../components/icons';
 import { TopBar, TypeChip, IssueId, StatusDot, Priority, Avatar, STATUSES, useWorkspaceContext } from '../components/shell';
 import { AttachmentRow, renderRichText, useComposer, type Attachment } from '../components/composer';
 import { CURRENT_USER, ISSUES, type Issue } from '../fixtures';
+import { useProjects } from '../state/projects';
 
 const STATUS_LABEL: Record<Issue['status'], string> = {
   backlog: 'Backlog',
@@ -21,6 +22,8 @@ const PRIORITY_LABEL: Record<Issue['priority'], string> = {
 export function IssueDetailPage() {
   const { key } = useParams<{ key: string }>();
   const { workspace, project } = useWorkspaceContext();
+  const { getProject } = useProjects();
+  const projectInfo = getProject(project);
   const issue = key ? ISSUES.find((i) => i.id === key) : undefined;
 
   if (!issue) {
@@ -28,7 +31,7 @@ export function IssueDetailPage() {
       <div className="bira" style={{ height: '100%', display: 'flex', flexDirection: 'column', background: 'var(--bg)' }}>
         <TopBar breadcrumbs={[
           { label: 'Acme Robotics', to: `/${workspace}/projects` },
-          { label: 'Comet', to: `/${workspace}/${project}` },
+          { label: projectInfo?.name ?? project, to: `/${workspace}/${project}` },
           { label: 'Issues', to: `/${workspace}/${project}/list` },
           key ?? '?',
         ]} />
@@ -63,6 +66,11 @@ export function IssueDetailPage() {
  */
 function IssueDetail({ issue = ISSUES[0] }: { issue?: Issue }) {
   const { workspace, project } = useWorkspaceContext();
+  const { getProject } = useProjects();
+  // Inner detail: drive everything off the issue's owning project rather than
+  // the URL slug, so the breadcrumb is right even when this is rendered inside
+  // the design-canvas with a default issue.
+  const owningProject = getProject(issue.project) ?? getProject(project);
   // Reporter is not in the fixture model — fall back to a project-relevant default.
   const reporter = 'Jordan Lee';
   const blocked = issue.status === 'in-review';
@@ -71,7 +79,7 @@ function IssueDetail({ issue = ISSUES[0] }: { issue?: Issue }) {
     <div className="bira" style={{ height: '100%', display: 'flex', flexDirection: 'column', background: 'var(--bg)' }}>
       <TopBar breadcrumbs={[
         { label: 'Acme Robotics', to: `/${workspace}/projects` },
-        { label: 'Comet', to: `/${workspace}/${project}` },
+        { label: owningProject?.name ?? project, to: `/${workspace}/${project}` },
         { label: 'Issues', to: `/${workspace}/${project}/list` },
         issue.id,
       ]} />
@@ -243,7 +251,8 @@ function IssueDetail({ issue = ISSUES[0] }: { issue?: Issue }) {
           </Meta>
           <Meta label="Project">
             <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-              <Icon name="folder" size={13} color="var(--fg-muted)" />Comet
+              <Icon name="folder" size={13} color="var(--fg-muted)" />
+              {owningProject?.name ?? issue.project}
             </span>
           </Meta>
           {/* Drift fix: removed Sprint and Estimate metas (sprint/velocity out of v1 scope). */}

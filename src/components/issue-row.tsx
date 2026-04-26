@@ -3,8 +3,8 @@
 // so the row works regardless of which page is rendering it.
 import { useEffect, useState, type CSSProperties, type MouseEvent, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
-import type { Issue } from '../fixtures';
-import { PROJECT_INFO } from '../fixtures';
+import type { Issue, Project } from '../fixtures';
+import { useProjects } from '../state/projects';
 import { Avatar, Priority as PriorityIcon, StatusDot, STATUSES, TypeChip } from './shell';
 
 // ---------------------------------------------------------------------------
@@ -166,7 +166,12 @@ const PRIORITY_LABELS: Record<Issue['priority'], string> = {
   urgent: 'Urgent', high: 'High', med: 'Medium', low: 'Low', none: 'No priority',
 };
 
-function renderCell(colId: ColumnId, issue: Issue, showProject: boolean): ReactNode {
+function renderCell(
+  colId: ColumnId,
+  issue: Issue,
+  showProject: boolean,
+  project: Project | undefined,
+): ReactNode {
   switch (colId) {
     case 'id': {
       return (
@@ -195,7 +200,13 @@ function renderCell(colId: ColumnId, issue: Issue, showProject: boolean): ReactN
       );
     }
     case 'project': {
-      const project = PROJECT_INFO[issue.project];
+      if (!project) {
+        return (
+          <span style={{ fontSize: 11, color: 'var(--fg-faint)', fontStyle: 'italic' }}>
+            {issue.project}
+          </span>
+        );
+      }
       return (
         <span
           title={project.name}
@@ -296,6 +307,8 @@ export function ListRow(props: ListRowProps) {
   const { issue, workspace, selected, onToggleSelect, showProject, order, visible, columns } = props;
   // Always call the hook; props can override its values.
   const [layout] = useColumnLayout();
+  const { getProject } = useProjects();
+  const project = getProject(issue.project);
   const effectiveOrder = order ?? layout.order;
   const effectiveVisible = visible ?? layout.visible;
   const effectiveColumns = columns ?? buildRowColumns(layout.widths, effectiveOrder, effectiveVisible, !!showProject);
@@ -329,7 +342,7 @@ export function ListRow(props: ListRowProps) {
         readOnly={!onToggleSelect}
       />
       {visibleOrder.map((colId) => (
-        <CellWrapper key={colId}>{renderCell(colId, issue, !!showProject)}</CellWrapper>
+        <CellWrapper key={colId}>{renderCell(colId, issue, !!showProject, project)}</CellWrapper>
       ))}
       <span aria-hidden="true" />
     </Link>

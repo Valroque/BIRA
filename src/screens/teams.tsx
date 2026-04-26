@@ -8,10 +8,11 @@ import { Icon } from '../components/icons';
 import { TopBar, Avatar, useWorkspaceContext } from '../components/shell';
 import { ErrorState } from '../components/states';
 import {
-  TEAMS, MEMBERS, PROJECT_INFO,
-  teamBySlug, memberByEmail, projectsForTeam,
+  TEAMS, MEMBERS,
+  teamBySlug, memberByEmail,
   type Member, type Team,
 } from '../fixtures';
+import { useProjects } from '../state/projects';
 
 // ----- Index -----
 
@@ -78,6 +79,7 @@ export function TeamsPage() {
 }
 
 function TeamCard({ team, workspace }: { team: Team; workspace: string }) {
+  const { projectsForTeam } = useProjects();
   const projects = projectsForTeam(team.slug);
   return (
     <Link
@@ -140,6 +142,7 @@ export function TeamDetailPage() {
 }
 
 function TeamDetail({ team, workspace }: { team: Team; workspace: string }) {
+  const { projectsForTeam } = useProjects();
   const [memberEmails, setMemberEmails] = useState<string[]>(team.memberEmails);
   const [showAddMember, setShowAddMember] = useState(false);
 
@@ -210,32 +213,29 @@ function TeamDetail({ team, workspace }: { team: Team; workspace: string }) {
               </div>
             ) : (
               <div className="card" style={{ padding: 0 }}>
-                {projects.map((slug, i) => {
-                  const p = PROJECT_INFO[slug];
-                  return (
-                    <Link
-                      key={slug}
-                      to={`/${workspace}/${slug}/members`}
-                      style={{
-                        display: 'flex', alignItems: 'center', gap: 12,
-                        padding: '12px 14px', textDecoration: 'none', color: 'inherit',
-                        borderTop: i === 0 ? 'none' : '1px solid var(--border-muted)',
-                      }}
-                    >
-                      <span style={{
-                        width: 28, height: 28, borderRadius: 6,
-                        background: p.bg, color: p.color,
-                        display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-                        fontWeight: 700, fontSize: 12,
-                      }}>{p.letter}</span>
-                      <div style={{ flex: 1, minWidth: 0 }}>
-                        <div style={{ fontSize: 13, fontWeight: 600 }}>{p.name}</div>
-                        <div className="mono" style={{ fontSize: 11, color: 'var(--fg-faint)' }}>{p.key}</div>
-                      </div>
-                      <Icon name="chevronRight" size={13} color="var(--fg-faint)" />
-                    </Link>
-                  );
-                })}
+                {projects.map((p, i) => (
+                  <Link
+                    key={p.slug}
+                    to={`/${workspace}/${p.slug}/members`}
+                    style={{
+                      display: 'flex', alignItems: 'center', gap: 12,
+                      padding: '12px 14px', textDecoration: 'none', color: 'inherit',
+                      borderTop: i === 0 ? 'none' : '1px solid var(--border-muted)',
+                    }}
+                  >
+                    <span style={{
+                      width: 28, height: 28, borderRadius: 6,
+                      background: p.bg, color: p.color,
+                      display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                      fontWeight: 700, fontSize: 12,
+                    }}>{p.letter}</span>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: 13, fontWeight: 600 }}>{p.name}</div>
+                      <div className="mono" style={{ fontSize: 11, color: 'var(--fg-faint)' }}>{p.key}</div>
+                    </div>
+                    <Icon name="chevronRight" size={13} color="var(--fg-faint)" />
+                  </Link>
+                ))}
               </div>
             )}
           </Section>

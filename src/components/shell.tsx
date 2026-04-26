@@ -5,6 +5,7 @@ import { Link, useParams } from 'react-router-dom';
 import { Icon } from './icons';
 import { NotificationsButton, UserMenu } from './topbar-menus';
 import { ISSUES, CURRENT_USER, TEAMS } from '../fixtures';
+import { useProjects } from '../state/projects';
 
 /** Read workspace + project from the URL with sensible defaults for routes that don't have them. */
 export function useWorkspaceContext() {
@@ -151,6 +152,11 @@ interface SidebarProps {
 export const Sidebar = ({ collapsed = false, active = '' }: SidebarProps) => {
   const w = collapsed ? 52 : 232;
   const { workspace } = useWorkspaceContext();
+  const { projects } = useProjects();
+  // Active projects render in the sidebar; archived ones are reachable via
+  // the All-projects page only. Sub-items (Board / Issues / Workflow) expand
+  // under whichever project the URL is currently scoped to.
+  const sidebarProjects = projects.filter((p) => p.status === 'active');
 
   /**
    * Sidebar Item.
@@ -255,12 +261,26 @@ export const Sidebar = ({ collapsed = false, active = '' }: SidebarProps) => {
 
         <Section label="Projects">
           <Item id="all-projects" icon="grid" label="All projects" to={`/${workspace}/projects`} />
-          <Item id="comet" icon="folderOpen" label="Comet" to={`/${workspace}/comet`} />
-          <Item id="comet-board" icon="board" label="Board" indent={1} to={`/${workspace}/comet/board`} />
-          <Item id="comet-list" icon="list" label="Issues" indent={1} to={`/${workspace}/comet/list`} />
-          <Item id="comet-workflow" icon="workflow" label="Workflow" indent={1} to={`/${workspace}/comet/workflow`} />
-          <Item id="orbit" icon="folder" label="Orbit" to={`/${workspace}/orbit`} />
-          <Item id="atlas" icon="folder" label="Atlas" to={`/${workspace}/atlas`} />
+          {sidebarProjects.map((p) => {
+            const isActive = active === p.slug || active.startsWith(`${p.slug}-`);
+            return (
+              <Fragment key={p.slug}>
+                <Item
+                  id={p.slug}
+                  icon={isActive ? 'folderOpen' : 'folder'}
+                  label={p.name}
+                  to={`/${workspace}/${p.slug}`}
+                />
+                {isActive && (
+                  <>
+                    <Item id={`${p.slug}-board`}    icon="board"    label="Board"    indent={1} to={`/${workspace}/${p.slug}/board`} />
+                    <Item id={`${p.slug}-list`}     icon="list"     label="Issues"   indent={1} to={`/${workspace}/${p.slug}/list`} />
+                    <Item id={`${p.slug}-workflow`} icon="workflow" label="Workflow" indent={1} to={`/${workspace}/${p.slug}/workflow`} />
+                  </>
+                )}
+              </Fragment>
+            );
+          })}
         </Section>
 
         <Section label="Workspace">

@@ -8,19 +8,19 @@ import { Icon } from '../components/icons';
 import { TopBar, Tabs, Avatar, projectTabs, useWorkspaceContext } from '../components/shell';
 import { AddMembersModal, AvatarStack, TeamBadge } from './teams';
 import {
-  TEAMS, PROJECT_INFO, PROJECT_MEMBERS,
+  TEAMS,
   teamBySlug, memberByEmail,
-  type Member, type Team, type ProjectSlug,
+  type Member, type Team,
 } from '../fixtures';
+import { useProjects } from '../state/projects';
 
 export function ProjectMembersPage() {
   const { workspace, project } = useWorkspaceContext();
-  const projectSlug = (project as ProjectSlug) in PROJECT_INFO ? (project as ProjectSlug) : 'comet';
-  const projectInfo = PROJECT_INFO[projectSlug];
-  const initial = PROJECT_MEMBERS[projectSlug];
+  const { getProject } = useProjects();
+  const projectInfo = getProject(project);
 
-  const [teamSlugs, setTeamSlugs] = useState<string[]>(initial.teamSlugs);
-  const [userEmails, setUserEmails] = useState<string[]>(initial.userEmails);
+  const [teamSlugs, setTeamSlugs] = useState<string[]>(projectInfo?.teamSlugs ?? []);
+  const [userEmails, setUserEmails] = useState<string[]>(projectInfo?.userEmails ?? []);
   const [showAddTeam, setShowAddTeam] = useState(false);
   const [showAddMember, setShowAddMember] = useState(false);
 
@@ -43,7 +43,7 @@ export function ProjectMembersPage() {
     <div className="bira" style={{ height: '100%', display: 'flex', flexDirection: 'column', background: 'var(--bg)' }}>
       <TopBar breadcrumbs={[
         { label: 'Acme Robotics', to: `/${workspace}/projects` },
-        { label: projectInfo.name, to: `/${workspace}/${project}` },
+        { label: projectInfo?.name ?? project, to: `/${workspace}/${project}` },
         'Members',
       ]} />
       <Tabs active="members" tabs={projectTabs(workspace, project)} />
@@ -132,7 +132,7 @@ export function ProjectMembersPage() {
         <AddMembersModal
           // Exclude users who already have access (via any team or explicitly).
           excludeEmails={Array.from(effectiveEmails)}
-          title={`Add member to ${projectInfo.name}`}
+          title={`Add member to ${projectInfo?.name ?? project}`}
           onAdd={(email) => addUser(email)}
           onClose={() => setShowAddMember(false)}
         />

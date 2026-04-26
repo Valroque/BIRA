@@ -6,26 +6,26 @@ import { Link } from 'react-router-dom';
 import { Icon } from '../components/icons';
 import { TopBar, useWorkspaceContext } from '../components/shell';
 import {
-  WORKFLOWS, PROJECT_WORKFLOWS, PROJECT_INFO, ISSUE_TYPE_NAMES, projectsUsingWorkflow,
-  type IssueTypeLetter, type ProjectSlug,
+  WORKFLOWS, ISSUE_TYPE_NAMES,
+  type IssueTypeLetter,
 } from '../fixtures';
+import { useProjects } from '../state/projects';
 
 const TYPE_ORDER: IssueTypeLetter[] = ['T', 'B', 'S', 'E'];
 
 export function WorkflowsPage() {
   const { workspace } = useWorkspaceContext();
+  const { projects, projectsUsingWorkflow } = useProjects();
 
   // Group workflows by which issue type they serve. A workflow appears under
   // any issue type that any project uses it for.
   const groups = TYPE_ORDER.map((type) => {
     const ids = new Set<string>();
-    (Object.keys(PROJECT_WORKFLOWS) as ProjectSlug[]).forEach((p) => {
-      ids.add(PROJECT_WORKFLOWS[p][type]);
-    });
+    for (const p of projects) ids.add(p.workflows[type]);
     return {
       type,
       typeName: ISSUE_TYPE_NAMES[type],
-      workflows: Array.from(ids).map((id) => WORKFLOWS[id]),
+      workflows: Array.from(ids).map((id) => WORKFLOWS[id]).filter(Boolean),
     };
   });
 
@@ -65,8 +65,8 @@ export function WorkflowsPage() {
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                 {g.workflows.map((wf) => {
                   const usagePairs = projectsUsingWorkflow(wf.id).filter((p) => p.type === g.type);
-                  // Pick the first project that uses this workflow → this drives the editor's URL.
-                  const firstProject = usagePairs[0]?.project ?? 'comet';
+                  // Pick the first project that uses this workflow → drives the editor's URL.
+                  const firstProject = usagePairs[0]?.project;
                   return (
                     <div
                       key={wf.id + g.type}
@@ -101,34 +101,42 @@ export function WorkflowsPage() {
                           Used by
                         </div>
                         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
-                          {usagePairs.map(({ project }) => {
-                            const p = PROJECT_INFO[project];
-                            return (
-                              <Link
-                                key={project}
-                                to={`/${workspace}/${project}/workflow`}
-                                style={{
-                                  display: 'inline-flex', alignItems: 'center', gap: 4,
-                                  padding: '2px 6px', borderRadius: 3,
-                                  background: p.bg, color: p.color,
-                                  fontSize: 11.5, fontWeight: 500, textDecoration: 'none',
-                                }}
-                              >
-                                <span style={{ width: 5, height: 5, borderRadius: 3, background: 'currentColor' }} />
-                                {p.name}
-                              </Link>
-                            );
-                          })}
+                          {usagePairs.map(({ project: p }) => (
+                            <Link
+                              key={p.slug}
+                              to={`/${workspace}/${p.slug}/workflow`}
+                              style={{
+                                display: 'inline-flex', alignItems: 'center', gap: 4,
+                                padding: '2px 6px', borderRadius: 3,
+                                background: p.bg, color: p.color,
+                                fontSize: 11.5, fontWeight: 500, textDecoration: 'none',
+                              }}
+                            >
+                              <span style={{ width: 5, height: 5, borderRadius: 3, background: 'currentColor' }} />
+                              {p.name}
+                            </Link>
+                          ))}
+                          {usagePairs.length === 0 && (
+                            <span style={{ fontSize: 11.5, color: 'var(--fg-faint)', fontStyle: 'italic' }}>
+                              Not used by any project
+                            </span>
+                          )}
                         </div>
                       </div>
-                      <Link
-                        to={`/${workspace}/${firstProject}/workflow`}
-                        className="btn btn-sm"
-                        style={{ textDecoration: 'none' }}
-                        data-tip={`Open editor in ${PROJECT_INFO[firstProject].name}'s context`}
-                      >
-                        <Icon name="edit" size={12} />Edit
-                      </Link>
+                      {firstProject ? (
+                        <Link
+                          to={`/${workspace}/${firstProject.slug}/workflow`}
+                          className="btn btn-sm"
+                          style={{ textDecoration: 'none' }}
+                          data-tip={`Open editor in ${firstProject.name}'s context`}
+                        >
+                          <Icon name="edit" size={12} />Edit
+                        </Link>
+                      ) : (
+                        <button className="btn btn-sm" disabled data-tip="Not assigned to any project">
+                          <Icon name="edit" size={12} />Edit
+                        </button>
+                      )}
                     </div>
                   );
                 })}

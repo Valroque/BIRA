@@ -2,14 +2,17 @@ import { Link } from 'react-router-dom';
 import { TopBar, Tabs, projectTabs, useWorkspaceContext } from '../components/shell';
 import { ListRow } from '../components/issue-row';
 import { ISSUES } from '../fixtures';
+import { useProjects } from '../state/projects';
 
 export function ProjectOverviewPage() {
   const { workspace, project } = useWorkspaceContext();
+  const { getProject } = useProjects();
+  const projectInfo = getProject(project);
   return (
     <div className="bira" style={{ height: '100%', display: 'flex', flexDirection: 'column', background: 'var(--bg)' }}>
       <TopBar breadcrumbs={[
         { label: 'Acme Robotics', to: `/${workspace}/projects` },
-        'Comet',
+        projectInfo?.name ?? project,
       ]} />
       <Tabs active="overview" tabs={projectTabs(workspace, project)} />
 
@@ -17,15 +20,23 @@ export function ProjectOverviewPage() {
         <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 4 }}>
           <div style={{
             width: 36, height: 36, borderRadius: 8,
-            background: 'var(--accent-muted)', color: 'var(--accent)',
+            background: projectInfo?.bg ?? 'var(--accent-muted)',
+            color: projectInfo?.color ?? 'var(--accent)',
             display: 'flex', alignItems: 'center', justifyContent: 'center',
             fontWeight: 700, fontSize: 16,
-          }}>C</div>
-          <h1 style={{ fontSize: 22, fontWeight: 600, letterSpacing: -0.4, margin: 0 }}>Comet</h1>
-          <span className="pill">Active</span>
+          }}>{projectInfo?.letter ?? '?'}</div>
+          <h1 style={{ fontSize: 22, fontWeight: 600, letterSpacing: -0.4, margin: 0 }}>
+            {projectInfo?.name ?? project}
+          </h1>
+          <span className="pill" style={projectInfo?.status === 'archived'
+            ? { background: 'var(--bg-muted)', color: 'var(--fg-muted)' }
+            : undefined}
+          >
+            {projectInfo?.status === 'archived' ? 'Archived' : 'Active'}
+          </span>
         </div>
         <p style={{ fontSize: 13.5, color: 'var(--fg-muted)', margin: '0 0 24px', maxWidth: 540 }}>
-          Internal issue tracker. Self-hostable, role-aware, opinionated about workflows.
+          {projectInfo?.description ?? 'No description.'}
         </p>
 
         {/* Drift fix: replaced "Velocity 34 pts 14d avg" (sprint-flavored) with a sprint-agnostic "Done (7d)". */}

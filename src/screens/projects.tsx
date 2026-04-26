@@ -3,32 +3,16 @@ import { useState, type FormEvent } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { Icon } from '../components/icons';
 import { TopBar, useWorkspaceContext } from '../components/shell';
-
-interface Project {
-  id: string;
-  name: string;
-  key: string;
-  description: string;
-  open: number;
-  members: number;
-  status: 'active' | 'archived';
-  /** Slug for the URL. */
-  slug: string;
-}
-
-const PROJECTS: Project[] = [
-  { id: 'p1', name: 'Comet', key: 'CMT', slug: 'comet', description: 'Internal issue tracker, role-aware workflows.', open: 98, members: 6, status: 'active' },
-  { id: 'p2', name: 'Orbit', key: 'ORB', slug: 'orbit', description: 'Customer-facing dashboard and analytics.', open: 38, members: 4, status: 'active' },
-  { id: 'p3', name: 'Atlas', key: 'ATL', slug: 'atlas', description: 'Map / geospatial features for the platform.', open: 142, members: 7, status: 'active' },
-  { id: 'p4', name: 'Halo',  key: 'HAL', slug: 'halo',  description: 'Deprecated. Kept for reference only.', open: 0, members: 0, status: 'archived' },
-];
+import { ISSUES, projectEffectiveMembers, type Project } from '../fixtures';
+import { useProjects } from '../state/projects';
 
 export function ProjectsPage() {
   const { workspace } = useWorkspaceContext();
+  const { projects } = useProjects();
   const [showCreate, setShowCreate] = useState(false);
   const [filter, setFilter] = useState('');
 
-  const filtered = PROJECTS.filter((p) => {
+  const filtered = projects.filter((p) => {
     if (!filter) return true;
     const f = filter.toLowerCase();
     return p.name.toLowerCase().includes(f) || p.key.toLowerCase().includes(f);
@@ -99,37 +83,43 @@ function Group({ label, projects, workspace, dim }: { label: string; projects: P
         textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 10,
       }}>{label} · {projects.length}</div>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 12 }}>
-        {projects.map((p) => (
-          <Link
-            key={p.id}
-            to={`/${workspace}/${p.slug}`}
-            className="card"
-            style={{ padding: 16, textDecoration: 'none', color: 'inherit' }}
-          >
-            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
-              <div style={{
-                width: 32, height: 32, borderRadius: 8,
-                background: 'var(--accent-muted)', color: 'var(--accent)',
-                display: 'flex', alignItems: 'center', justifyContent: 'center',
-                fontWeight: 700, fontSize: 14, fontFamily: 'var(--font-sans)',
-              }}>{p.name[0]}</div>
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontSize: 14, fontWeight: 600 }}>{p.name}</div>
-                <div className="mono" style={{ fontSize: 11, color: 'var(--fg-faint)' }}>{p.key}</div>
+        {projects.map((p) => {
+          const open = ISSUES.filter(
+            (i) => i.project === p.slug && i.status !== 'done' && i.status !== 'canceled',
+          ).length;
+          const memberCount = projectEffectiveMembers(p).length;
+          return (
+            <Link
+              key={p.slug}
+              to={`/${workspace}/${p.slug}`}
+              className="card"
+              style={{ padding: 16, textDecoration: 'none', color: 'inherit' }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
+                <div style={{
+                  width: 32, height: 32, borderRadius: 8,
+                  background: p.bg, color: p.color,
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  fontWeight: 700, fontSize: 14, fontFamily: 'var(--font-sans)',
+                }}>{p.letter}</div>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 14, fontWeight: 600 }}>{p.name}</div>
+                  <div className="mono" style={{ fontSize: 11, color: 'var(--fg-faint)' }}>{p.key}</div>
+                </div>
+                {p.status === 'archived' && (
+                  <span className="pill" style={{ background: 'var(--bg-muted)' }}>Archived</span>
+                )}
               </div>
-              {p.status === 'archived' && (
-                <span className="pill" style={{ background: 'var(--bg-muted)' }}>Archived</span>
-              )}
-            </div>
-            <p style={{ fontSize: 12.5, color: 'var(--fg-muted)', margin: '0 0 12px', lineHeight: 1.5, minHeight: 36 }}>
-              {p.description}
-            </p>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 12, fontSize: 11.5, color: 'var(--fg-muted)' }}>
-              <span><span className="tnum" style={{ color: 'var(--fg)', fontWeight: 600 }}>{p.open}</span> open</span>
-              <span><span className="tnum" style={{ color: 'var(--fg)', fontWeight: 600 }}>{p.members}</span> members</span>
-            </div>
-          </Link>
-        ))}
+              <p style={{ fontSize: 12.5, color: 'var(--fg-muted)', margin: '0 0 12px', lineHeight: 1.5, minHeight: 36 }}>
+                {p.description}
+              </p>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12, fontSize: 11.5, color: 'var(--fg-muted)' }}>
+                <span><span className="tnum" style={{ color: 'var(--fg)', fontWeight: 600 }}>{open}</span> open</span>
+                <span><span className="tnum" style={{ color: 'var(--fg)', fontWeight: 600 }}>{memberCount}</span> members</span>
+              </div>
+            </Link>
+          );
+        })}
       </div>
     </section>
   );

@@ -3,11 +3,12 @@ import { Link } from 'react-router-dom';
 import { Icon } from '../components/icons';
 import { TopBar, Tabs, Toolbar, Chip, StatusDot, TypeChip, STATUSES, projectTabs, useWorkspaceContext } from '../components/shell';
 import {
-  WORKFLOWS, PROJECT_WORKFLOWS, ISSUE_TYPE_NAMES, projectsUsingWorkflow, PROJECT_INFO,
-  type IssueTypeLetter, type ProjectSlug,
+  WORKFLOWS, ISSUE_TYPE_NAMES, DEFAULT_PROJECT_WORKFLOWS,
+  type IssueTypeLetter,
   type WorkflowNode as GraphNode,
   type WorkflowEdge as GraphEdge,
 } from '../fixtures';
+import { useProjects } from '../state/projects';
 
 // --- Generic graph renderer used by editor + variants ---
 
@@ -219,15 +220,16 @@ export function WorkflowPage() {
 
 export function WorkflowEditor() {
   const { workspace, project } = useWorkspaceContext();
-  const projectSlug = (project as ProjectSlug) in PROJECT_WORKFLOWS ? (project as ProjectSlug) : 'comet';
-  const projectInfo = PROJECT_INFO[projectSlug];
+  const { getProject, projectsUsingWorkflow } = useProjects();
+  const projectInfo = getProject(project);
+  const workflows = projectInfo?.workflows ?? DEFAULT_PROJECT_WORKFLOWS;
 
   const [type, setType] = useState<IssueTypeLetter>('T');
   // Reset selection whenever the user switches issue type — the graph just changed.
   const [selected, setSelected] = useState<Selection | null>(null);
   const onSwitchType = (next: IssueTypeLetter) => { setType(next); setSelected(null); };
 
-  const workflowId = PROJECT_WORKFLOWS[projectSlug][type];
+  const workflowId = workflows[type];
   const workflow = WORKFLOWS[workflowId];
   const usage = projectsUsingWorkflow(workflowId);
 
@@ -235,7 +237,7 @@ export function WorkflowEditor() {
     <div className="bira" style={{ height: '100%', display: 'flex', flexDirection: 'column', background: 'var(--bg)' }}>
       <TopBar breadcrumbs={[
         { label: 'Acme Robotics', to: `/${workspace}/projects` },
-        { label: projectInfo.name, to: `/${workspace}/${project}` },
+        { label: projectInfo?.name ?? project, to: `/${workspace}/${project}` },
         'Workflow',
       ]} />
       <div style={{ display: 'flex', flex: 1, minHeight: 0 }}>

@@ -18,7 +18,8 @@ import {
   type Filter, type Sort,
 } from '../components/issue-filters';
 import { EmptyState } from '../components/states';
-import { ISSUES, PROJECT_INFO, CURRENT_USER, type Issue, type ProjectSlug } from '../fixtures';
+import { ISSUES, CURRENT_USER, type Issue } from '../fixtures';
+import { useProjects } from '../state/projects';
 
 type GroupKey = 'status' | 'project' | 'assignee';
 
@@ -46,6 +47,7 @@ interface WorkspaceIssuesViewProps {
 
 function WorkspaceIssuesView(props: WorkspaceIssuesViewProps) {
   const { workspace } = useWorkspaceContext();
+  const { projects } = useProjects();
   const [groupBy, setGroupBy] = useState<GroupKey>(props.defaultGroup);
   const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set());
   const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set());
@@ -115,15 +117,13 @@ function WorkspaceIssuesView(props: WorkspaceIssuesViewProps) {
         .filter((g) => g.items.length > 0);
     }
     if (groupBy === 'project') {
-      // Iterate PROJECT_INFO in its declaration order rather than reading the
+      // Iterate projects in their declaration / creation order rather than the
       // first-seen slug from filtered/sorted issues — that's what kept the
       // group order shifting when the sort changed.
-      const slugs = (Object.keys(PROJECT_INFO) as ProjectSlug[])
-        .filter((slug) => filteredIssues.some((i) => i.project === slug));
-      return slugs.map<Group>((slug) => {
-        const p = PROJECT_INFO[slug];
-        return {
-          id: slug, label: p.name,
+      return projects
+        .filter((p) => filteredIssues.some((i) => i.project === p.slug))
+        .map<Group>((p) => ({
+          id: p.slug, label: p.name,
           swatch: (
             <span style={{
               width: 14, height: 14, borderRadius: 3,
@@ -132,9 +132,8 @@ function WorkspaceIssuesView(props: WorkspaceIssuesViewProps) {
               fontSize: 10, fontWeight: 700,
             }}>{p.letter}</span>
           ),
-          items: sortedIssues.filter((i) => i.project === slug),
-        };
-      });
+          items: sortedIssues.filter((i) => i.project === p.slug),
+        }));
     }
     // assignee — alphabetical, also sort-independent
     const names = Array.from(new Set(filteredIssues.map((i) => i.assignee))).sort();
@@ -143,7 +142,7 @@ function WorkspaceIssuesView(props: WorkspaceIssuesViewProps) {
       swatch: <Avatar name={n} size={16} />,
       items: sortedIssues.filter((i) => i.assignee === n),
     }));
-  }, [groupBy, filteredIssues, sortedIssues]);
+  }, [groupBy, filteredIssues, sortedIssues, projects]);
 
   return (
     <div className="bira" style={{ height: '100%', display: 'flex', flexDirection: 'column', background: 'var(--bg)' }}>

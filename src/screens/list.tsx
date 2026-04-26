@@ -5,6 +5,7 @@ import { TopBar, Tabs, Toolbar, Chip, StatusDot, STATUSES, projectTabs, useWorks
 import { ListRow } from '../components/issue-row';
 import { EmptyState } from '../components/states';
 import { ISSUES } from '../fixtures';
+import { useProjects } from '../state/projects';
 
 export function ListPage() {
   return <ListView />;
@@ -12,6 +13,8 @@ export function ListPage() {
 
 export function ListView() {
   const { workspace, project } = useWorkspaceContext();
+  const { getProject } = useProjects();
+  const projectInfo = getProject(project);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set(['CMT-241', 'CMT-238', 'CMT-234']));
   const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set());
 
@@ -38,7 +41,7 @@ export function ListView() {
     <div className="bira" style={{ height: '100%', display: 'flex', flexDirection: 'column', background: 'var(--bg)' }}>
       <TopBar breadcrumbs={[
         { label: 'Acme Robotics', to: `/${workspace}/projects` },
-        { label: 'Comet', to: `/${workspace}/${project}` },
+        { label: projectInfo?.name ?? project, to: `/${workspace}/${project}` },
         'Issues',
       ]} />
       <Tabs active="issues" tabs={projectTabs(workspace, project)} />

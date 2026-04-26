@@ -5,8 +5,9 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Icon } from './icons';
 import { Avatar, StatusDot, STATUSES } from './shell';
 import {
-  CURRENT_USER, ISSUES, PROJECT_INFO, type Issue, type ProjectSlug,
+  CURRENT_USER, ISSUES, type Issue, type Project,
 } from '../fixtures';
+import { useProjects } from '../state/projects';
 
 export type FilterType = 'status' | 'project' | 'assignee' | 'label' | 'priority' | 'type';
 
@@ -80,26 +81,11 @@ export const FILTER_DEFS: Record<FilterType, FilterDef> = {
     renderValue: (v) => STATUSES.find((s) => s.id === v)?.name ?? v,
   },
   project: {
+    // Project options are computed per render by `FilterChip` so newly-created
+    // projects show up automatically. The empty list here is just a fallback.
     type: 'project', label: 'Project', icon: 'folder',
-    options: () => (Object.keys(PROJECT_INFO) as ProjectSlug[]).map((p) => {
-      const info = PROJECT_INFO[p];
-      return {
-        value: p,
-        searchText: info.name,
-        label: (
-          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-            <span style={{
-              width: 14, height: 14, borderRadius: 3,
-              background: info.bg, color: info.color,
-              display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-              fontSize: 10, fontWeight: 700,
-            }}>{info.letter}</span>
-            {info.name}
-          </span>
-        ),
-      };
-    }),
-    renderValue: (v) => PROJECT_INFO[v as ProjectSlug]?.name ?? v,
+    options: () => [],
+    renderValue: (v) => v,
   },
   assignee: {
     type: 'assignee', label: 'Assignee', icon: 'user',
@@ -151,6 +137,25 @@ export const FILTER_DEFS: Record<FilterType, FilterDef> = {
 };
 
 const ALL_FILTER_TYPES: FilterType[] = ['status', 'project', 'assignee', 'label', 'priority', 'type'];
+
+/** Build the option list for the project filter from the live projects list. */
+function projectFilterOptions(projects: Project[]): Option[] {
+  return projects.map((p) => ({
+    value: p.slug,
+    searchText: p.name,
+    label: (
+      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+        <span style={{
+          width: 14, height: 14, borderRadius: 3,
+          background: p.bg, color: p.color,
+          display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+          fontSize: 10, fontWeight: 700,
+        }}>{p.letter}</span>
+        {p.name}
+      </span>
+    ),
+  }));
+}
 
 // ===========================================================================
 // Sort
@@ -328,12 +333,22 @@ interface FilterChipProps {
 
 export function FilterChip({ filter, onChange, onRemove }: FilterChipProps) {
   const def = FILTER_DEFS[filter.type];
+  const { projects } = useProjects();
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState('');
   const ref = useRef<HTMLDivElement>(null);
   useDismiss(ref, () => setOpen(false), open);
 
-  const options = useMemo(() => def.options(), [def]);
+  // Project options are derived from the live projects list; everything else
+  // uses the static def. `renderValue` for the chip preview follows the same
+  // pattern so newly-added projects render with the right name + chip.
+  const options = useMemo(() => {
+    if (filter.type === 'project') return projectFilterOptions(projects);
+    return def.options();
+  }, [def, filter.type, projects]);
+  const renderValue = filter.type === 'project'
+    ? (v: string) => projects.find((p) => p.slug === v)?.name ?? v
+    : def.renderValue;
   const filteredOptions = !search.trim()
     ? options
     : options.filter((o) => o.searchText.toLowerCase().includes(search.toLowerCase()));
@@ -350,10 +365,10 @@ export function FilterChip({ filter, onChange, onRemove }: FilterChipProps) {
   const valuePreview: ReactNode = activeCount === 0
     ? <span style={{ color: 'var(--fg-muted)' }}>Any</span>
     : activeCount === 1
-      ? <strong>{def.renderValue(filter.values[0])}</strong>
+      ? <strong>{renderValue(filter.values[0])}</strong>
       : (
         <span>
-          <strong>{def.renderValue(filter.values[0])}</strong>
+          <strong>{renderValue(filter.values[0])}</strong>
           <span style={{ marginLeft: 4, color: 'var(--fg-muted)' }}>+{activeCount - 1}</span>
         </span>
       );

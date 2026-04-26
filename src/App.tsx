@@ -1,6 +1,7 @@
 import { BrowserRouter, Routes, Route, Navigate, Outlet, useLocation, useParams, Link } from 'react-router-dom';
 import { AppShell } from './components/app-shell';
 import { ErrorState } from './components/states';
+import { useProjects } from './state/projects';
 import { LoginPage } from './screens/login';
 import { ProjectOverviewPage } from './screens/project-overview';
 import { BoardPage } from './screens/board';
@@ -23,8 +24,13 @@ import { DesignCanvasPage } from './screens/design-canvas';
 
 function WorkspaceLayout() {
   const { pathname } = useLocation();
-  // Derive the highlighted sidebar item from the URL.
-  let sidebarActive = 'comet';
+  const { project } = useParams<{ project?: string }>();
+
+  // Derive the highlighted sidebar item from the URL. Project-scoped pages
+  // produce ids like `${slug}` (overview/settings/members) or
+  // `${slug}-board` / `-list` / `-workflow` so the sidebar can highlight
+  // the matching sub-item under arbitrary project slugs.
+  let sidebarActive = '';
   if (pathname.endsWith('/inbox')) sidebarActive = 'inbox';
   else if (pathname.endsWith('/my-issues')) sidebarActive = 'my-issues';
   else if (pathname.endsWith('/all-issues')) sidebarActive = 'all-issues';
@@ -37,13 +43,15 @@ function WorkspaceLayout() {
   else if (pathname.endsWith('/teams')) sidebarActive = 'all-teams';
   // Workspace-level settings (not project-scoped) → bottom Settings item.
   else if (/^\/[^/]+\/settings(\/|$)/.test(pathname)) sidebarActive = 'settings';
-  // Project-level settings keep the project's "Comet" item highlighted.
-  else if (pathname.endsWith('/settings')) sidebarActive = 'comet';
-  else if (pathname.endsWith('/board')) sidebarActive = 'comet-board';
-  else if (pathname.endsWith('/list')) sidebarActive = 'comet-list';
-  else if (pathname.endsWith('/members')) sidebarActive = 'comet';
-  else if (pathname.includes('/workflow')) sidebarActive = 'comet-workflow';
-  else if (pathname.includes('/issue/')) sidebarActive = 'comet-list';
+  else if (project) {
+    if (pathname.endsWith('/board')) sidebarActive = `${project}-board`;
+    else if (pathname.endsWith('/list')) sidebarActive = `${project}-list`;
+    else if (pathname.includes('/workflow')) sidebarActive = `${project}-workflow`;
+    else if (pathname.includes('/issue/')) sidebarActive = `${project}-list`;
+    // overview / members / project-settings → highlight the project itself.
+    else sidebarActive = project;
+  }
+
   return (
     <AppShell sidebarActive={sidebarActive}>
       <Outlet />
@@ -51,10 +59,13 @@ function WorkspaceLayout() {
   );
 }
 
-/** /:workspace → redirect to /:workspace/comet (the only project in fixtures). */
+/** /:workspace → redirect to the first active project (or to the projects list if there are none). */
 function WorkspaceHomeRedirect() {
   const { workspace } = useParams<{ workspace: string }>();
-  return <Navigate to={`/${workspace}/comet`} replace />;
+  const { projects } = useProjects();
+  const first = projects.find((p) => p.status === 'active') ?? projects[0];
+  const target = first ? `/${workspace}/${first.slug}` : `/${workspace}/projects`;
+  return <Navigate to={target} replace />;
 }
 
 function NotFound() {
@@ -67,8 +78,8 @@ function NotFound() {
       }
       action={
         <div style={{ display: 'flex', gap: 8, justifyContent: 'center' }}>
-          <Link to="/acme/comet" className="btn btn-primary btn-sm" style={{ textDecoration: 'none' }}>
-            Back to Comet
+          <Link to="/acme/projects" className="btn btn-primary btn-sm" style={{ textDecoration: 'none' }}>
+            Back to projects
           </Link>
           <Link to="/login" className="btn btn-sm" style={{ textDecoration: 'none' }}>
             Switch workspace
