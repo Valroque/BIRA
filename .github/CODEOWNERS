@@ -1,0 +1,10 @@
+# Code owners for the BIRA repository.
+#
+# GitHub uses this file to auto-request reviews and to enforce the
+# "require review from Code Owners" branch protection rule.
+# See https://docs.github.com/repositories/managing-your-repositorys-settings-and-security/customizing-your-repository/about-code-owners
+#
+# The rightmost matching pattern wins. `*` is the catch-all.
+
+# Default — every file in the repo requires @Valroque approval.
+*       @Valroque
