@@ -1,8 +1,10 @@
-import { useEffect, useState, type ReactNode } from 'react';
-import { Link, useParams } from 'react-router-dom';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { Link, useNavigate, useParams } from 'react-router-dom';
 import { Icon } from '../components/icons';
 import { TopBar, TypeChip, IssueId, StatusDot, Priority, Avatar, STATUSES, useWorkspaceContext } from '../components/shell';
 import { AttachmentRow, renderRichText, useComposer, type Attachment } from '../components/composer';
+import { IssuePickerModal } from '../components/issue-picker';
+import { useDismiss } from '../components/use-dismiss';
 import { CURRENT_USER, ISSUES, issueById, themeById, type Issue } from '../fixtures';
 import { useProjects } from '../state/projects';
 
@@ -109,6 +111,55 @@ function IssueDetail({ issue = ISSUES[0] }: { issue?: Issue }) {
   useEffect(() => {
     try { localStorage.setItem(INSPECTOR_KEY, String(inspectorWidth)); } catch { /* ignore */ }
   }, [inspectorWidth]);
+
+  // Session-only relations the user adds via the inspector buttons. Refresh
+  // (or navigating to another issue) clears them — there's no issues
+  // provider with mutation today, and the prototype's other interactions
+  // (board reorders, comment composer) behave the same way.
+  const navigate = useNavigate();
+  const [addedChildren, setAddedChildren] = useState<string[]>([]);
+  const [addedRelated, setAddedRelated] = useState<string[]>([]);
+  // Picker mode is null when closed; set to 'child' or 'related' when open.
+  const [pickerMode, setPickerMode] = useState<null | 'child' | 'related'>(null);
+  const [childMenuOpen, setChildMenuOpen] = useState(false);
+  const childMenuRef = useRef<HTMLDivElement>(null);
+  useDismiss(childMenuRef, () => setChildMenuOpen(false), childMenuOpen);
+
+  // Reset session additions when navigating to a different issue.
+  useEffect(() => {
+    setAddedChildren([]);
+    setAddedRelated([]);
+    setPickerMode(null);
+    setChildMenuOpen(false);
+  }, [issue.id]);
+
+  const allChildren = [...(issue.children ?? []), ...addedChildren];
+  const allRelated = [...(issue.relatedTo ?? []), ...addedRelated];
+
+  // Valid child types per the v1 hierarchy:
+  //   Epic   → Story / Task / Bug
+  //   Story  → Task / Bug only
+  // (No epic-of-epic, no nested stories.)
+  const allowedChildTypes: Issue['type'][] =
+    issue.type === 'E' ? ['S', 'T', 'B']
+      : issue.type === 'S' ? ['T', 'B']
+        : [];
+
+  const goCreateChild = () => {
+    setChildMenuOpen(false);
+    navigate(`/${workspace}/${project}/issue/new?parent=${issue.id}`);
+  };
+  const openChildPicker = () => {
+    setChildMenuOpen(false);
+    setPickerMode('child');
+  };
+  const openRelatedPicker = () => setPickerMode('related');
+
+  const handlePickerSelect = (target: Issue) => {
+    if (pickerMode === 'child') setAddedChildren((prev) => [...prev, target.id]);
+    else if (pickerMode === 'related') setAddedRelated((prev) => [...prev, target.id]);
+    setPickerMode(null);
+  };
 
   const startInspectorResize = (e: React.MouseEvent) => {
     e.preventDefault();
@@ -356,12 +407,55 @@ function IssueDetail({ issue = ISSUES[0] }: { issue?: Issue }) {
             </Meta>
           )}
           {(issue.type === 'E' || issue.type === 'S') && (
-            <Meta label="Children">
-              <IssueList ids={issue.children ?? []} emptyText="No children yet" />
+            <Meta
+              label="Children"
+              extras={
+                <div ref={childMenuRef} style={{ position: 'relative' }}>
+                  <button
+                    type="button"
+                    onClick={() => setChildMenuOpen((o) => !o)}
+                    className="btn btn-ghost btn-sm"
+                    style={{ padding: '0 6px', height: 20, fontSize: 11 }}
+                    aria-label="Add child issue"
+                  >
+                    <Icon name="plus" size={11} /> Add
+                  </button>
+                  {childMenuOpen && (
+                    <div style={{
+                      position: 'absolute', top: '100%', right: 0, marginTop: 4,
+                      minWidth: 200, zIndex: 10,
+                      background: 'var(--bg)', border: '1px solid var(--border)',
+                      borderRadius: 6, boxShadow: 'var(--shadow-md)', overflow: 'hidden',
+                    }}>
+                      <ChildMenuItem icon="plus" onClick={goCreateChild}>
+                        Create new issue
+                      </ChildMenuItem>
+                      <ChildMenuItem icon="link" onClick={openChildPicker}>
+                        Link existing issue
+                      </ChildMenuItem>
+                    </div>
+                  )}
+                </div>
+              }
+            >
+              <IssueList ids={allChildren} emptyText="No children yet" />
             </Meta>
           )}
-          <Meta label="Related">
-            <IssueList ids={issue.relatedTo ?? []} emptyText="No related issues" />
+          <Meta
+            label="Related"
+            extras={
+              <button
+                type="button"
+                onClick={openRelatedPicker}
+                className="btn btn-ghost btn-sm"
+                style={{ padding: '0 6px', height: 20, fontSize: 11 }}
+                aria-label="Link an issue"
+              >
+                <Icon name="link" size={11} /> Link
+              </button>
+            }
+          >
+            <IssueList ids={allRelated} emptyText="No related issues" />
           </Meta>
           <Meta label="Themes">
             {issue.themes && issue.themes.length > 0 ? (
@@ -375,6 +469,31 @@ function IssueDetail({ issue = ISSUES[0] }: { issue?: Issue }) {
           </div>
         </aside>
       </div>
+      {pickerMode && (
+        <IssuePickerModal
+          title={pickerMode === 'child' ? 'Link child issue' : 'Link related issue'}
+          subtitle={
+            pickerMode === 'child'
+              ? `Pick an issue to link as a child of ${issue.id}. ${
+                  issue.type === 'E' ? 'Stories, Tasks, and Bugs are valid.' : 'Only Tasks and Bugs are valid children of a Story.'
+                }`
+              : 'Pick any issue to mark as related. Relates is symmetric.'
+          }
+          excludeIds={[
+            issue.id,
+            ...allChildren,
+            ...allRelated,
+            ...(issue.parent ? [issue.parent] : []),
+          ]}
+          filter={
+            pickerMode === 'child'
+              ? (i) => allowedChildTypes.includes(i.type)
+              : undefined
+          }
+          onSelect={handlePickerSelect}
+          onClose={() => setPickerMode(null)}
+        />
+      )}
     </div>
   );
 }
@@ -473,10 +592,13 @@ function TransOption({ status, label, trigger, blocked, reason }: TransOptionPro
   );
 }
 
-function Meta({ label, children }: { label: string; children: ReactNode }) {
+function Meta({ label, extras, children }: { label: string; extras?: ReactNode; children: ReactNode }) {
   return (
     <div style={{ marginBottom: 14 }}>
-      <div className="label-section" style={{ marginBottom: 6 }}>{label}</div>
+      <div style={{ display: 'flex', alignItems: 'center', minHeight: 18, marginBottom: 6 }}>
+        <div className="label-section">{label}</div>
+        {extras && <><div style={{ flex: 1 }} />{extras}</>}
+      </div>
       <div style={{ fontSize: 12.5, color: 'var(--fg)' }}>{children}</div>
     </div>
   );
@@ -531,6 +653,26 @@ function IssueList({ ids, emptyText }: { ids: string[]; emptyText: string }) {
     <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
       {ids.map((id) => <IssueLink key={id} id={id} />)}
     </div>
+  );
+}
+
+function ChildMenuItem({ icon, onClick, children }: { icon: string; onClick: () => void; children: ReactNode }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      style={{
+        display: 'flex', alignItems: 'center', gap: 8, width: '100%',
+        padding: '8px 10px', textAlign: 'left',
+        background: 'transparent', border: 'none', cursor: 'pointer',
+        fontSize: 12.5, color: 'var(--fg)',
+      }}
+      onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--bg-subtle)'; }}
+      onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
+    >
+      <Icon name={icon} size={12} color="var(--fg-muted)" />
+      <span>{children}</span>
+    </button>
   );
 }
 
@@ -624,7 +766,7 @@ const FEED_ITEMS: FeedItem[] = [
 type FeedTab = 'all' | 'comments';
 
 function ActivityFeed() {
-  const [tab, setTab] = useState<FeedTab>('all');
+  const [tab, setTab] = useState<FeedTab>('comments');
   const counts = {
     all: FEED_ITEMS.length,
     comments: FEED_ITEMS.filter((i) => i.kind === 'comment').length,

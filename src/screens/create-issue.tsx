@@ -1,8 +1,9 @@
-import { useEffect, useState, type FormEvent, type ReactNode } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useEffect, useMemo, useState, type FormEvent, type ReactNode } from 'react';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Icon } from '../components/icons';
 import { TypeChip, StatusDot, Priority, Avatar, KBD, useWorkspaceContext } from '../components/shell';
 import { AttachmentRow, useComposer } from '../components/composer';
+import { issueById, type Issue } from '../fixtures';
 
 const TYPES = [
   { t: 'T', name: 'Task', color: 'var(--type-task)', bg: 'var(--type-task-bg)' },
@@ -13,12 +14,46 @@ const TYPES = [
 
 type TypeChar = typeof TYPES[number]['t'];
 
+// Hierarchy rules — only types valid as a *child* of the given parent.
+//   Epic   → S / T / B
+//   Story  → T / B
+//   Task / Bug → none (leaf)
+// When no parent is set, all types are creatable (top-level new issue).
+const ALL_TYPES: TypeChar[] = ['T', 'B', 'S', 'E'];
+function allowedTypesFor(parent: Issue | null): TypeChar[] {
+  if (!parent) return ALL_TYPES;
+  if (parent.type === 'E') return ['S', 'T', 'B'];
+  if (parent.type === 'S') return ['T', 'B'];
+  return [];
+}
+
 export function CreateIssuePage() {
   const navigate = useNavigate();
   const { workspace, project } = useWorkspaceContext();
+  const [searchParams] = useSearchParams();
   const close = () => navigate(-1);
-  const [type, setType] = useState<TypeChar>('B');
   const desc = useComposer();
+
+  // Optional `?parent=ISSUE-ID` URL param. When set + valid, the form shows
+  // the parent as a read-only chip and restricts type choices to the valid
+  // child types for that parent. Invalid / unknown ids are ignored — the
+  // user gets the unconstrained form rather than an error wall.
+  const parent = useMemo<Issue | null>(() => {
+    const raw = searchParams.get('parent');
+    if (!raw) return null;
+    const target = issueById(raw);
+    if (!target) return null;
+    if (target.type !== 'E' && target.type !== 'S') return null; // leaves can't be parents
+    return target;
+  }, [searchParams]);
+
+  const allowedTypes = useMemo(() => allowedTypesFor(parent), [parent]);
+  const [type, setType] = useState<TypeChar>(() => allowedTypes[0] ?? 'B');
+  // If the parent changes (e.g. user opens the form from a different issue),
+  // ensure the currently-selected type is still allowed.
+  useEffect(() => {
+    if (!allowedTypes.includes(type)) setType(allowedTypes[0] ?? 'B');
+  }, [allowedTypes, type]);
 
   // Submit lands on a real issue's detail page (the closest thing the prototype
   // can do without persistence).
@@ -71,15 +106,41 @@ export function CreateIssuePage() {
           <KBD k="esc" />
         </div>
         <div style={{ padding: '16px 18px' }}>
-          {/* Type selector — segmented */}
+          {/* Parent context — only when launched via "+ Add child" from
+              another issue. Read-only; clear by closing the modal. */}
+          {parent && (
+            <div style={{
+              display: 'flex', alignItems: 'center', gap: 6, marginBottom: 12,
+              padding: '6px 8px', borderRadius: 6,
+              background: 'var(--bg-subtle)', border: '1px solid var(--border-muted)',
+              fontSize: 12, color: 'var(--fg-muted)',
+            }}>
+              <Icon name="link" size={12} />
+              <span>Parent</span>
+              <TypeChip type={parent.type} />
+              <span className="mono" style={{ color: 'var(--fg-muted)' }}>{parent.id}</span>
+              <span style={{
+                color: 'var(--fg)', overflow: 'hidden',
+                textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+              }}>{parent.title}</span>
+            </div>
+          )}
+          {/* Type selector — segmented. Disallowed types (per parent's
+              hierarchy rules) render dim and unclickable. */}
           <div style={{ display: 'flex', gap: 6, marginBottom: 14 }}>
             {TYPES.map((x) => {
               const active = type === x.t;
+              const allowed = allowedTypes.includes(x.t);
+              const tip = !allowed && parent
+                ? `${x.name} can't be a child of ${parent.type === 'E' ? 'an Epic' : 'a Story'}`
+                : undefined;
               return (
                 <button
                   key={x.t}
                   type="button"
-                  onClick={() => setType(x.t)}
+                  onClick={() => allowed && setType(x.t)}
+                  disabled={!allowed}
+                  data-tip={tip}
                   className="btn btn-sm"
                   style={{
                     gap: 6, height: 30,
@@ -87,6 +148,8 @@ export function CreateIssuePage() {
                     borderColor: active ? x.color : 'var(--border)',
                     color: active ? x.color : 'var(--fg)',
                     fontWeight: active ? 600 : 500,
+                    opacity: allowed ? 1 : 0.4,
+                    cursor: allowed ? 'pointer' : 'not-allowed',
                   }}
                 >
                   <TypeChip type={x.t} /> {x.name}
