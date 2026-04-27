@@ -103,8 +103,10 @@ function IssueDetail({ issue = ISSUES[0] }: { issue?: Issue }) {
   // the URL slug, so the breadcrumb is right even when this is rendered inside
   // the design-canvas with a default issue.
   const owningProject = getProject(issue.project) ?? getProject(project);
-  // Reporter is not in the fixture model — fall back to a project-relevant default.
-  const reporter = 'Jordan Lee';
+  // Reporter isn't on the fixture model — surface the current user as a
+  // mock so the profile link goes somewhere real.
+  const reporter = CURRENT_USER.name;
+  const reporterEmail = CURRENT_USER.email;
   const blocked = issue.status === 'in-review';
 
   const [inspectorWidth, setInspectorWidth] = useState<number>(loadInspectorWidth);
@@ -119,22 +121,24 @@ function IssueDetail({ issue = ISSUES[0] }: { issue?: Issue }) {
   const navigate = useNavigate();
   const [addedChildren, setAddedChildren] = useState<string[]>([]);
   const [addedRelated, setAddedRelated] = useState<string[]>([]);
-  // Picker mode is null when closed; set to 'child' or 'related' when open.
-  const [pickerMode, setPickerMode] = useState<null | 'child' | 'related'>(null);
-  const [childMenuOpen, setChildMenuOpen] = useState(false);
-  const childMenuRef = useRef<HTMLDivElement>(null);
-  useDismiss(childMenuRef, () => setChildMenuOpen(false), childMenuOpen);
+  // undefined = no override, fall through to issue.parent;
+  // string     = user picked a new parent;
+  // null       = user explicitly cleared the parent.
+  const [parentOverride, setParentOverride] = useState<string | null | undefined>(undefined);
+  // Picker mode is null when closed; set to 'child', 'related', or 'parent'.
+  const [pickerMode, setPickerMode] = useState<null | 'child' | 'related' | 'parent'>(null);
 
   // Reset session additions when navigating to a different issue.
   useEffect(() => {
     setAddedChildren([]);
     setAddedRelated([]);
+    setParentOverride(undefined);
     setPickerMode(null);
-    setChildMenuOpen(false);
   }, [issue.id]);
 
   const allChildren = [...(issue.children ?? []), ...addedChildren];
   const allRelated = [...(issue.relatedTo ?? []), ...addedRelated];
+  const effectiveParent = parentOverride === undefined ? (issue.parent ?? null) : parentOverride;
 
   // Valid child types per the v1 hierarchy:
   //   Epic   → Story / Task / Bug
@@ -144,20 +148,27 @@ function IssueDetail({ issue = ISSUES[0] }: { issue?: Issue }) {
     issue.type === 'E' ? ['S', 'T', 'B']
       : issue.type === 'S' ? ['T', 'B']
         : [];
+  // Inverse of the hierarchy: which types are valid parents of this issue.
+  //   Story        → Epic only
+  //   Task / Bug   → Epic or Story
+  //   Epic         → no parent (the row is hidden, but keep the list empty)
+  const allowedParentTypes: Issue['type'][] =
+    issue.type === 'S' ? ['E']
+      : (issue.type === 'T' || issue.type === 'B') ? ['E', 'S']
+        : [];
 
   const goCreateChild = () => {
-    setChildMenuOpen(false);
     navigate(`/${workspace}/${project}/issue/new?parent=${issue.id}`);
   };
-  const openChildPicker = () => {
-    setChildMenuOpen(false);
-    setPickerMode('child');
-  };
+  const openChildPicker = () => setPickerMode('child');
   const openRelatedPicker = () => setPickerMode('related');
+  const openParentPicker = () => setPickerMode('parent');
+  const clearParent = () => setParentOverride(null);
 
   const handlePickerSelect = (target: Issue) => {
     if (pickerMode === 'child') setAddedChildren((prev) => [...prev, target.id]);
     else if (pickerMode === 'related') setAddedRelated((prev) => [...prev, target.id]);
+    else if (pickerMode === 'parent') setParentOverride(target.id);
     setPickerMode(null);
   };
 
@@ -200,8 +211,15 @@ function IssueDetail({ issue = ISSUES[0] }: { issue?: Issue }) {
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
               <TypeChip type={issue.type} />
               <IssueId id={issue.id} />
+              <CopyLinkButton
+                url={`${window.location.origin}/${workspace}/${issue.project}/issue/${issue.id}`}
+              />
               <span style={{ fontSize: 11, color: 'var(--fg-faint)' }}>·</span>
-              <span style={{ fontSize: 11, color: 'var(--fg-muted)' }}>opened by {reporter} · 2 days ago</span>
+              <span style={{ fontSize: 11, color: 'var(--fg-muted)' }}>
+                opened by{' '}
+                <MemberLink workspace={workspace} name={reporter} email={reporterEmail} />
+                {' · 2 days ago'}
+              </span>
             </div>
             <h1 style={{
               fontSize: 22, fontWeight: 600, letterSpacing: -0.3, lineHeight: 1.3,
@@ -257,7 +275,7 @@ function IssueDetail({ issue = ISSUES[0] }: { issue?: Issue }) {
                           padding: '2px 6px', background: '#fee2e2', borderRadius: 3,
                           fontFamily: 'var(--font-mono)', fontSize: 11.5, color: '#991b1b',
                         }}>
-                          release_notes <span style={{ color: '#dc2626' }}>empty</span>
+                          estimate <span style={{ color: '#dc2626' }}>empty</span>
                         </span>
                         <span style={{
                           display: 'inline-flex', alignItems: 'center', gap: 6,
@@ -283,21 +301,28 @@ function IssueDetail({ issue = ISSUES[0] }: { issue?: Issue }) {
               </div>
             )}
 
-            <div style={{ marginTop: 22, fontSize: 14, color: 'var(--fg)', lineHeight: 1.65 }}>
-              <p>
-                Saving the workflow editor's view state (filter chips, expanded sections) writes through a debounced
-                effect. When a state node is reordered <em>while a filter is active</em>, the persisted slot order is
-                computed from the visible subset and reapplied to the full set on reload — silently dropping nodes
-                that were filtered out.
-              </p>
-              <p style={{ marginTop: 12, fontWeight: 600, color: 'var(--fg)' }}>Repro</p>
-              <ol style={{ paddingLeft: 22, marginTop: 6, color: 'var(--fg-muted)' }}>
-                <li>Open <code style={codeStyle}>/comet/workflow</code></li>
-                <li>Apply filter <code style={codeStyle}>type:terminal</code></li>
-                <li>Drag any visible node to a new position</li>
-                <li>Reload — non-terminal states are missing from the saved order</li>
-              </ol>
-            </div>
+            {/*
+              Description is editable in-session: the textarea writes back to
+              local component state but not to the fixture, matching the
+              prototype's other UI-only mutations (board reorders, addedChildren).
+              `key={issue.id}` resets the editor when navigating between issues.
+            */}
+            <EditableDescription key={issue.id} initial={issue.description ?? ''} />
+
+            {/*
+              Linked issues — sits between the description and activity so child
+              and related links are reachable without hunting in the inspector.
+              Mirrors the inspector's add/link affordances; renders fuller cards
+              (status + assignee) since the main column has the room.
+            */}
+            <LinkedIssuesPanel
+              issue={issue}
+              childIds={allChildren}
+              relatedIds={allRelated}
+              onCreateChild={goCreateChild}
+              onLinkChild={openChildPicker}
+              onLinkRelated={openRelatedPicker}
+            />
 
             {/* Activity */}
             <ActivityFeed />
@@ -365,9 +390,17 @@ function IssueDetail({ issue = ISSUES[0] }: { issue?: Issue }) {
             </span>
           </Meta>
           <Meta label="Reporter">
-            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+            <Link
+              to={`/${workspace}/u/${encodeURIComponent(reporterEmail)}`}
+              style={{
+                display: 'inline-flex', alignItems: 'center', gap: 6,
+                color: 'var(--fg)', textDecoration: 'none',
+              }}
+              onMouseEnter={(e) => { e.currentTarget.style.textDecoration = 'underline'; }}
+              onMouseLeave={(e) => { e.currentTarget.style.textDecoration = 'none'; }}
+            >
               <Avatar name={reporter} size={20} /><span>{reporter}</span>
-            </span>
+            </Link>
           </Meta>
           <Meta label="Project">
             <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
@@ -400,43 +433,49 @@ function IssueDetail({ issue = ISSUES[0] }: { issue?: Issue }) {
               leaves (Task / Bug) cannot have children (so the Children Meta
               is hidden). For others, an empty state explains the gap. */}
           {issue.type !== 'E' && (
-            <Meta label="Parent">
-              {issue.parent
-                ? <IssueLink id={issue.parent} />
-                : <NotSet />}
+            <Meta
+              label="Parent"
+              extras={
+                <button
+                  type="button"
+                  onClick={openParentPicker}
+                  className="btn btn-ghost btn-sm"
+                  style={{ padding: '0 6px', height: 20, fontSize: 11 }}
+                  aria-label={effectiveParent ? 'Change parent' : 'Set parent'}
+                >
+                  <Icon name="link" size={11} /> {effectiveParent ? 'Change' : 'Set'}
+                </button>
+              }
+            >
+              {effectiveParent ? (
+                <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                  <IssueLink id={effectiveParent} />
+                  <button
+                    type="button"
+                    onClick={clearParent}
+                    aria-label="Clear parent"
+                    data-tip="Clear parent"
+                    style={{
+                      display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                      width: 16, height: 16, padding: 0, borderRadius: 3,
+                      background: 'transparent', border: 'none', cursor: 'pointer',
+                      color: 'var(--fg-faint)',
+                    }}
+                    onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--bg-muted)'; e.currentTarget.style.color = 'var(--fg)'; }}
+                    onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'var(--fg-faint)'; }}
+                  >
+                    <Icon name="x" size={11} />
+                  </button>
+                </span>
+              ) : (
+                <NotSet />
+              )}
             </Meta>
           )}
           {(issue.type === 'E' || issue.type === 'S') && (
             <Meta
               label="Children"
-              extras={
-                <div ref={childMenuRef} style={{ position: 'relative' }}>
-                  <button
-                    type="button"
-                    onClick={() => setChildMenuOpen((o) => !o)}
-                    className="btn btn-ghost btn-sm"
-                    style={{ padding: '0 6px', height: 20, fontSize: 11 }}
-                    aria-label="Add child issue"
-                  >
-                    <Icon name="plus" size={11} /> Add
-                  </button>
-                  {childMenuOpen && (
-                    <div style={{
-                      position: 'absolute', top: '100%', right: 0, marginTop: 4,
-                      minWidth: 200, zIndex: 10,
-                      background: 'var(--bg)', border: '1px solid var(--border)',
-                      borderRadius: 6, boxShadow: 'var(--shadow-md)', overflow: 'hidden',
-                    }}>
-                      <ChildMenuItem icon="plus" onClick={goCreateChild}>
-                        Create new issue
-                      </ChildMenuItem>
-                      <ChildMenuItem icon="link" onClick={openChildPicker}>
-                        Link existing issue
-                      </ChildMenuItem>
-                    </div>
-                  )}
-                </div>
-              }
+              extras={<AddChildMenu onCreate={goCreateChild} onLink={openChildPicker} variant="compact" />}
             >
               <IssueList ids={allChildren} emptyText="No children yet" />
             </Meta>
@@ -471,24 +510,34 @@ function IssueDetail({ issue = ISSUES[0] }: { issue?: Issue }) {
       </div>
       {pickerMode && (
         <IssuePickerModal
-          title={pickerMode === 'child' ? 'Link child issue' : 'Link related issue'}
+          title={
+            pickerMode === 'child' ? 'Link child issue'
+              : pickerMode === 'related' ? 'Link related issue'
+                : 'Set parent issue'
+          }
           subtitle={
             pickerMode === 'child'
               ? `Pick an issue to link as a child of ${issue.id}. ${
                   issue.type === 'E' ? 'Stories, Tasks, and Bugs are valid.' : 'Only Tasks and Bugs are valid children of a Story.'
                 }`
-              : 'Pick any issue to mark as related. Relates is symmetric.'
+              : pickerMode === 'related'
+                ? 'Pick any issue to mark as related. Relates is symmetric.'
+                : `Pick the parent of ${issue.id}. ${
+                    issue.type === 'S' ? 'Only Epics are valid parents of a Story.' : 'Epics and Stories are valid parents of a Task or Bug.'
+                  }`
           }
           excludeIds={[
             issue.id,
             ...allChildren,
             ...allRelated,
-            ...(issue.parent ? [issue.parent] : []),
+            ...(effectiveParent ? [effectiveParent] : []),
           ]}
           filter={
             pickerMode === 'child'
               ? (i) => allowedChildTypes.includes(i.type)
-              : undefined
+              : pickerMode === 'parent'
+                ? (i) => allowedParentTypes.includes(i.type)
+                : undefined
           }
           onSelect={handlePickerSelect}
           onClose={() => setPickerMode(null)}
@@ -497,14 +546,6 @@ function IssueDetail({ issue = ISSUES[0] }: { issue?: Issue }) {
     </div>
   );
 }
-
-const codeStyle = {
-  background: 'var(--bg-muted)',
-  padding: '1px 5px',
-  borderRadius: 3,
-  fontFamily: 'var(--font-mono)',
-  fontSize: 12,
-};
 
 type RuleType = 'role' | 'assignee_only' | 'reporter_only' | 'required_fields' | 'not_self';
 
@@ -618,6 +659,393 @@ function NotSet() {
 }
 
 /**
+ * Inline person reference — name styled to read like body text in muted
+ * surroundings (e.g. "opened by …") and underline on hover so it's
+ * obviously clickable. Email is encoded so `@` and `.` survive routing
+ * in case any environment is picky.
+ */
+function MemberLink({ workspace, name, email }: { workspace: string; name: string; email: string }) {
+  return (
+    <Link
+      to={`/${workspace}/u/${encodeURIComponent(email)}`}
+      style={{ color: 'var(--fg)', fontWeight: 500, textDecoration: 'none' }}
+      onMouseEnter={(e) => { e.currentTarget.style.textDecoration = 'underline'; }}
+      onMouseLeave={(e) => { e.currentTarget.style.textDecoration = 'none'; }}
+    >
+      {name}
+    </Link>
+  );
+}
+
+/**
+ * Inline-editable issue description.
+ *
+ * View mode renders the saved value through `renderRichText` (so triple-
+ * backtick code blocks survive); empty state offers an "Add a description"
+ * affordance. Edit mode is a textarea with Save / Cancel + ⌘+Enter / Esc.
+ *
+ * State is local to this mount — saving updates what the user sees but does
+ * not write back to the fixture. The parent passes `key={issue.id}` so
+ * navigating to a different issue resets the editor cleanly.
+ */
+function EditableDescription({ initial }: { initial: string }) {
+  const [value, setValue] = useState(initial);
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState('');
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  // Selection to restore after `setDraft` commits — toolbar/shortcut ops
+  // mutate the value through state, which would otherwise reset the caret.
+  const pendingSelection = useRef<[number, number] | null>(null);
+
+  useEffect(() => {
+    if (!editing) return;
+    const ta = textareaRef.current;
+    if (ta) {
+      ta.focus();
+      ta.setSelectionRange(ta.value.length, ta.value.length);
+    }
+    // Bind Escape at the window level so it cancels even if the user has
+    // clicked outside the textarea (focus on a button, body, etc.). The
+    // textarea's own onKeyDown can't see those.
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        setEditing(false);
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [editing]);
+
+  useEffect(() => {
+    if (!editing || !pendingSelection.current) return;
+    const ta = textareaRef.current;
+    if (!ta) return;
+    const [s, e] = pendingSelection.current;
+    pendingSelection.current = null;
+    ta.focus();
+    ta.setSelectionRange(s, e);
+  }, [draft, editing]);
+
+  const applyEdit = (
+    op: (v: string, s: number, e: number) => { value: string; selStart: number; selEnd: number },
+  ) => {
+    const ta = textareaRef.current;
+    if (!ta) return;
+    const result = op(ta.value, ta.selectionStart, ta.selectionEnd);
+    pendingSelection.current = [result.selStart, result.selEnd];
+    setDraft(result.value);
+  };
+
+  // Toggle inline wrap. If the selection is already enclosed by the markers,
+  // strip them; otherwise insert them around the selection.
+  const wrap = (open: string, close: string = open) => applyEdit((v, s, e) => {
+    const already =
+      s >= open.length && e + close.length <= v.length &&
+      v.slice(s - open.length, s) === open &&
+      v.slice(e, e + close.length) === close;
+    if (already) {
+      return {
+        value: v.slice(0, s - open.length) + v.slice(s, e) + v.slice(e + close.length),
+        selStart: s - open.length,
+        selEnd: e - open.length,
+      };
+    }
+    return {
+      value: v.slice(0, s) + open + v.slice(s, e) + close + v.slice(e),
+      selStart: s + open.length,
+      selEnd: e + open.length,
+    };
+  });
+
+  // Toggle a per-line prefix across every line touched by the selection.
+  // If every line already has the prefix, remove it; otherwise add it.
+  const linePrefix = (prefix: string) => applyEdit((v, s, e) => {
+    const lineStart = v.lastIndexOf('\n', s - 1) + 1;
+    const eolIdx = v.indexOf('\n', e);
+    const lineEnd = eolIdx === -1 ? v.length : eolIdx;
+    const block = v.slice(lineStart, lineEnd);
+    const lines = block.split('\n');
+    const allHavePrefix = lines.length > 0 && lines.every((l) => l.startsWith(prefix));
+    const next = allHavePrefix
+      ? lines.map((l) => l.slice(prefix.length)).join('\n')
+      : lines.map((l) => prefix + l).join('\n');
+    return {
+      value: v.slice(0, lineStart) + next + v.slice(lineEnd),
+      selStart: lineStart,
+      selEnd: lineEnd + (next.length - block.length),
+    };
+  });
+
+  const insertCodeBlock = () => applyEdit((v, s, e) => {
+    const sel = v.slice(s, e);
+    const fence = '```\n' + sel + '\n```';
+    return {
+      value: v.slice(0, s) + fence + v.slice(e),
+      selStart: s + 4,
+      selEnd: s + 4 + sel.length,
+    };
+  });
+
+  const insertLink = () => {
+    const url = window.prompt('Link URL');
+    if (!url) return;
+    applyEdit((v, s, e) => {
+      const sel = v.slice(s, e) || 'link';
+      const md = `[${sel}](${url})`;
+      return {
+        value: v.slice(0, s) + md + v.slice(e),
+        selStart: s + 1,
+        selEnd: s + 1 + sel.length,
+      };
+    });
+  };
+
+  const startEdit = () => {
+    setDraft(value);
+    setEditing(true);
+  };
+  const save = () => {
+    setValue(draft);
+    setEditing(false);
+  };
+  const cancel = () => setEditing(false);
+
+  return (
+    <section style={{ marginTop: 22 }}>
+      <div style={{ display: 'flex', alignItems: 'center', minHeight: 22, marginBottom: 8 }}>
+        <span className="label-section">Description</span>
+        <div style={{ flex: 1 }} />
+        {!editing && value.trim() && (
+          <button
+            type="button"
+            onClick={startEdit}
+            className="btn btn-ghost btn-sm"
+            data-tip="Edit description"
+            aria-label="Edit description"
+            style={{ width: 26, height: 22, padding: 0 }}
+          >
+            <Icon name="edit" size={12} color="var(--fg-muted)" />
+          </button>
+        )}
+      </div>
+
+      {editing ? (
+        <>
+          {/*
+            No `overflow: hidden` here — the toolbar's data-tip tooltips
+            sit above the buttons via a CSS pseudo-element, and clipping
+            the wrapper would chop them off (see CLAUDE.md tooltip note).
+          */}
+          <div style={{
+            border: '1px solid var(--accent)',
+            borderRadius: 8,
+            background: 'var(--bg)',
+            boxShadow: '0 0 0 3px var(--accent-muted)',
+          }}>
+            <div style={{
+              display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 1,
+              padding: '5px 8px',
+              borderBottom: '1px solid var(--border-muted)',
+              borderRadius: '7px 7px 0 0',
+              background: 'var(--bg-subtle)',
+            }}>
+              <FmtBtn label="B" tip="Bold (⌘B)" onPress={() => wrap('**')} fontWeight={700} />
+              <FmtBtn label="I" tip="Italic (⌘I)" onPress={() => wrap('_')} fontStyle="italic" />
+              <FmtBtn label="S" tip="Strike (⌘⇧X)" onPress={() => wrap('~')} textDecoration="line-through" />
+              <FmtBtn label="<>" tip="Inline code (⌘⇧C)" onPress={() => wrap('`')} mono />
+              <FmtBtn icon="link" tip="Link (⌘K)" onPress={insertLink} />
+              <FmtSep />
+              <FmtBtn label="H1" tip="Heading 1" onPress={() => linePrefix('# ')} />
+              <FmtBtn label="H2" tip="Heading 2" onPress={() => linePrefix('## ')} />
+              <FmtBtn label="H3" tip="Heading 3" onPress={() => linePrefix('### ')} />
+              <FmtSep />
+              <FmtBtn icon="list" tip="Bulleted list" onPress={() => linePrefix('- ')} />
+              <FmtBtn label="1." tip="Numbered list" onPress={() => linePrefix('1. ')} mono />
+              <FmtBtn label={'“ ”'} tip="Quote" onPress={() => linePrefix('> ')} />
+              <FmtBtn label="```" tip="Code block" onPress={insertCodeBlock} mono />
+            </div>
+            <textarea
+              ref={textareaRef}
+              value={draft}
+              onChange={(e) => setDraft(e.target.value)}
+              onKeyDown={(e) => {
+                if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
+                  e.preventDefault();
+                  save();
+                  return;
+                }
+                if (e.metaKey || e.ctrlKey) {
+                  const k = e.key.toLowerCase();
+                  if (!e.shiftKey && k === 'b') { e.preventDefault(); wrap('**'); return; }
+                  if (!e.shiftKey && k === 'i') { e.preventDefault(); wrap('_'); return; }
+                  if (!e.shiftKey && k === 'k') { e.preventDefault(); insertLink(); return; }
+                  if (e.shiftKey && k === 'x') { e.preventDefault(); wrap('~'); return; }
+                  if (e.shiftKey && k === 'c') { e.preventDefault(); wrap('`'); return; }
+                }
+                // Escape is handled at the window level so it works even when
+                // focus has moved off the textarea.
+              }}
+              rows={Math.max(8, draft.split('\n').length + 1)}
+              placeholder="Describe the issue. Markdown: **bold**, _italic_, ~strike~, `code`, # heading, > quote, - list, ```fence```."
+              style={{
+                width: '100%', display: 'block',
+                border: 'none',
+                padding: '12px 14px',
+                fontSize: 14, color: 'var(--fg)', background: 'transparent',
+                fontFamily: 'var(--font-sans)', lineHeight: 1.65,
+                outline: 'none', resize: 'vertical',
+                boxSizing: 'border-box',
+              }}
+            />
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 10 }}>
+            <button type="button" className="btn btn-primary btn-sm" onClick={save}>
+              Save
+            </button>
+            <button type="button" className="btn btn-sm" onClick={cancel}>
+              Cancel
+            </button>
+            <span style={{ marginLeft: 4, fontSize: 11, color: 'var(--fg-faint)' }}>
+              ⌘+Enter to save · Esc to cancel
+            </span>
+          </div>
+        </>
+      ) : value.trim() ? (
+        <div style={{ fontSize: 14, color: 'var(--fg)', lineHeight: 1.65 }}>
+          {renderRichText(value)}
+        </div>
+      ) : (
+        <button
+          type="button"
+          onClick={startEdit}
+          style={{
+            display: 'flex', alignItems: 'center', gap: 8, width: '100%',
+            padding: '14px 16px',
+            border: '1px dashed var(--border)', borderRadius: 8,
+            background: 'transparent', color: 'var(--fg-muted)',
+            fontSize: 13, cursor: 'pointer', textAlign: 'left',
+            transition: 'background .12s, border-color .12s',
+          }}
+          onMouseEnter={(e) => {
+            e.currentTarget.style.background = 'var(--bg-subtle)';
+            e.currentTarget.style.borderColor = 'var(--fg-faint)';
+          }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.background = 'transparent';
+            e.currentTarget.style.borderColor = 'var(--border)';
+          }}
+        >
+          <Icon name="plus" size={13} />Add a description
+        </button>
+      )}
+    </section>
+  );
+}
+
+// Slack-style toolbar button. `onMouseDown.preventDefault()` keeps focus in
+// the textarea so the current selection survives the click.
+function FmtBtn({
+  label,
+  icon,
+  tip,
+  onPress,
+  fontWeight,
+  fontStyle,
+  textDecoration,
+  mono,
+}: {
+  label?: string;
+  icon?: string;
+  tip: string;
+  onPress: () => void;
+  fontWeight?: number;
+  fontStyle?: string;
+  textDecoration?: string;
+  mono?: boolean;
+}) {
+  return (
+    <button
+      type="button"
+      onMouseDown={(e) => e.preventDefault()}
+      onClick={onPress}
+      data-tip={tip}
+      aria-label={tip}
+      style={{
+        display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+        minWidth: 26, height: 24, padding: '0 6px', borderRadius: 4,
+        background: 'transparent', border: 'none', cursor: 'pointer',
+        color: 'var(--fg-muted)',
+        fontSize: 12, fontWeight, fontStyle, textDecoration,
+        fontFamily: mono ? 'var(--font-mono)' : 'inherit',
+      }}
+      onMouseEnter={(e) => {
+        e.currentTarget.style.background = 'var(--bg-muted)';
+        e.currentTarget.style.color = 'var(--fg)';
+      }}
+      onMouseLeave={(e) => {
+        e.currentTarget.style.background = 'transparent';
+        e.currentTarget.style.color = 'var(--fg-muted)';
+      }}
+    >
+      {icon ? <Icon name={icon} size={13} /> : label}
+    </button>
+  );
+}
+
+function FmtSep() {
+  return (
+    <span
+      aria-hidden="true"
+      style={{ width: 1, height: 16, background: 'var(--border-muted)', margin: '0 4px' }}
+    />
+  );
+}
+
+/**
+ * JIRA-style copy-link affordance. The icon swaps to a check for ~1.5s
+ * after a successful copy so the user gets passive confirmation without
+ * a toast system.
+ */
+function CopyLinkButton({ url }: { url: string }) {
+  const [copied, setCopied] = useState(false);
+  const timerRef = useRef<number | null>(null);
+
+  useEffect(() => () => {
+    if (timerRef.current !== null) window.clearTimeout(timerRef.current);
+  }, []);
+
+  const onClick = async () => {
+    try {
+      await navigator.clipboard.writeText(url);
+      setCopied(true);
+      if (timerRef.current !== null) window.clearTimeout(timerRef.current);
+      timerRef.current = window.setTimeout(() => setCopied(false), 1500);
+    } catch {
+      // navigator.clipboard requires a secure context; fail silently in dev
+      // edge cases (file://, http://, etc.). The button stays usable.
+    }
+  };
+
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="btn btn-ghost btn-sm"
+      data-tip={copied ? 'Copied!' : 'Copy link to issue'}
+      aria-label="Copy link to issue"
+      style={{ width: 22, height: 22, padding: 0 }}
+    >
+      <Icon
+        name={copied ? 'check' : 'copy'}
+        size={12}
+        color={copied ? 'var(--done)' : 'var(--fg-muted)'}
+      />
+    </button>
+  );
+}
+
+/**
  * A single issue rendered as a Link with type chip + id + title. Falls back
  * to plain text if the referenced issue isn't in the fixture (would only
  * happen if a relation went stale).
@@ -653,6 +1081,220 @@ function IssueList({ ids, emptyText }: { ids: string[]; emptyText: string }) {
     <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
       {ids.map((id) => <IssueLink key={id} id={id} />)}
     </div>
+  );
+}
+
+/**
+ * Trigger + dropdown for "Create new issue" / "Link existing issue".
+ * Owns its own open/close state so it can be dropped into multiple
+ * surfaces (inspector, main-column linked-issues panel) without the
+ * parent juggling refs.
+ *
+ * `variant="compact"` matches the inspector's tighter row chrome;
+ * the default is a normal `btn btn-sm`.
+ */
+function AddChildMenu({
+  onCreate,
+  onLink,
+  variant = 'default',
+}: {
+  onCreate: () => void;
+  onLink: () => void;
+  variant?: 'default' | 'compact';
+}) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  useDismiss(ref, () => setOpen(false), open);
+
+  const triggerProps = variant === 'compact'
+    ? {
+        className: 'btn btn-ghost btn-sm',
+        style: { padding: '0 6px', height: 20, fontSize: 11 } as const,
+        iconSize: 11,
+      }
+    : {
+        className: 'btn btn-sm',
+        style: undefined,
+        iconSize: 12,
+      };
+
+  return (
+    <div ref={ref} style={{ position: 'relative' }}>
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        className={triggerProps.className}
+        style={triggerProps.style}
+        aria-label="Add child issue"
+        aria-haspopup="menu"
+        aria-expanded={open}
+      >
+        <Icon name="plus" size={triggerProps.iconSize} /> Add
+      </button>
+      {open && (
+        <div
+          role="menu"
+          style={{
+            position: 'absolute', top: '100%', right: 0, marginTop: 4,
+            minWidth: 200, zIndex: 10,
+            background: 'var(--bg)', border: '1px solid var(--border)',
+            borderRadius: 6, boxShadow: 'var(--shadow-md)', overflow: 'hidden',
+          }}
+        >
+          <ChildMenuItem icon="plus" onClick={() => { setOpen(false); onCreate(); }}>
+            Create new issue
+          </ChildMenuItem>
+          <ChildMenuItem icon="link" onClick={() => { setOpen(false); onLink(); }}>
+            Link existing issue
+          </ChildMenuItem>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * Main-column block that surfaces hierarchy + relates without forcing
+ * the user into the inspector. Children section only appears for issue
+ * types that *can* have children (Epic, Story); Related is universal.
+ */
+function LinkedIssuesPanel({
+  issue,
+  childIds,
+  relatedIds,
+  onCreateChild,
+  onLinkChild,
+  onLinkRelated,
+}: {
+  issue: Issue;
+  childIds: string[];
+  relatedIds: string[];
+  onCreateChild: () => void;
+  onLinkChild: () => void;
+  onLinkRelated: () => void;
+}) {
+  const showChildren = issue.type === 'E' || issue.type === 'S';
+  const childEmpty = issue.type === 'E'
+    ? 'No child issues yet. Break this epic down into stories, tasks, or bugs.'
+    : 'No child issues yet. Add the tasks or bugs that make up this story.';
+  return (
+    <section style={{ marginTop: 28 }}>
+      {showChildren && (
+        <LinkedSection
+          label="Child issues"
+          count={childIds.length}
+          ids={childIds}
+          emptyText={childEmpty}
+          action={<AddChildMenu onCreate={onCreateChild} onLink={onLinkChild} />}
+        />
+      )}
+      <LinkedSection
+        label="Related issues"
+        count={relatedIds.length}
+        ids={relatedIds}
+        emptyText="No related issues linked yet."
+        action={
+          <button
+            type="button"
+            onClick={onLinkRelated}
+            className="btn btn-sm"
+            aria-label="Link a related issue"
+          >
+            <Icon name="link" size={12} /> Link issue
+          </button>
+        }
+      />
+    </section>
+  );
+}
+
+function LinkedSection({
+  label,
+  count,
+  ids,
+  emptyText,
+  action,
+}: {
+  label: string;
+  count: number;
+  ids: string[];
+  emptyText: string;
+  action: ReactNode;
+}) {
+  return (
+    <div style={{ marginBottom: 22 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 10 }}>
+        <span className="label-section">{label}</span>
+        <span
+          className="tnum"
+          style={{
+            display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+            minWidth: 18, height: 16, padding: '0 5px', borderRadius: 8,
+            fontSize: 10, fontWeight: 600,
+            background: 'var(--bg-muted)', color: 'var(--fg-muted)',
+          }}
+        >{count}</span>
+        <div style={{ flex: 1 }} />
+        {action}
+      </div>
+      {ids.length === 0 ? (
+        <div style={{
+          padding: '14px 12px', textAlign: 'center',
+          fontSize: 12.5, color: 'var(--fg-muted)',
+          border: '1px dashed var(--border-muted)', borderRadius: 6,
+        }}>{emptyText}</div>
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+          {ids.map((id) => <LinkedIssueCard key={id} id={id} />)}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function LinkedIssueCard({ id }: { id: string }) {
+  const { workspace } = useWorkspaceContext();
+  const target = issueById(id);
+  if (!target) {
+    return (
+      <div style={{
+        padding: '8px 10px',
+        border: '1px solid var(--border-muted)', borderRadius: 6,
+        fontSize: 12, color: 'var(--fg-muted)',
+      }}>
+        <span className="mono">{id}</span> — not found
+      </div>
+    );
+  }
+  return (
+    <Link
+      to={`/${workspace}/${target.project}/issue/${target.id}`}
+      style={{
+        display: 'flex', alignItems: 'center', gap: 10, minWidth: 0,
+        padding: '8px 10px',
+        border: '1px solid var(--border-muted)', borderRadius: 6,
+        background: 'var(--bg)',
+        color: 'var(--fg)', textDecoration: 'none',
+        transition: 'border-color .12s, background .12s',
+      }}
+      onMouseEnter={(e) => {
+        e.currentTarget.style.borderColor = 'var(--border)';
+        e.currentTarget.style.background = 'var(--bg-subtle)';
+      }}
+      onMouseLeave={(e) => {
+        e.currentTarget.style.borderColor = 'var(--border-muted)';
+        e.currentTarget.style.background = 'var(--bg)';
+      }}
+    >
+      <StatusDot status={target.status} size={10} />
+      <TypeChip type={target.type} />
+      <span className="mono" style={{ color: 'var(--fg-muted)', flexShrink: 0, fontSize: 12 }}>{target.id}</span>
+      <span style={{
+        flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+        fontSize: 13,
+      }}>{target.title}</span>
+      <Avatar name={target.assignee} size={20} />
+    </Link>
   );
 }
 
@@ -695,7 +1337,7 @@ function ThemeChip({ id }: { id: string }) {
 // --- Activity feed with All / Comments tab filter (JIRA-style) ---
 
 type FeedItem =
-  | { kind: 'comment'; who: string; when: string; body: ReactNode }
+  | { kind: 'comment'; who: string; when: string; body: ReactNode; edited?: boolean; editedWhen?: string }
   | { kind: 'event'; who: string; when: string; verb: string; from?: string; to?: string; detail?: ReactNode; icon?: string };
 
 // Tiny inline SVG used as a demo screenshot in the seeded comment, so the
@@ -729,6 +1371,7 @@ const DEMO_ATTACHMENTS: Attachment[] = [
 const FEED_ITEMS: FeedItem[] = [
   {
     kind: 'comment', who: 'Maya Chen', when: '2h ago',
+    edited: true, editedWhen: '1h ago',
     body: (
       <div style={{ fontSize: 13, color: 'var(--fg)', lineHeight: 1.55 }}>
         Pushed a fix that gates persistence on the unfiltered set. Want a second pair of eyes on the
@@ -808,7 +1451,13 @@ function ActivityFeed() {
 
       {filtered.map((item, i) =>
         item.kind === 'comment' ? (
-          <Activity key={i} who={item.who} when={item.when}>{item.body}</Activity>
+          <Activity
+            key={i}
+            who={item.who}
+            when={item.when}
+            edited={item.edited}
+            editedWhen={item.editedWhen}
+          >{item.body}</Activity>
         ) : (
           <ActivityEvent
             key={i}
@@ -920,7 +1569,15 @@ function FeedCount({ n, active }: { n: number; active: boolean }) {
   );
 }
 
-function Activity({ who, when, children }: { who: string; when: string; children: ReactNode }) {
+function Activity({
+  who, when, edited, editedWhen, children,
+}: {
+  who: string;
+  when: string;
+  edited?: boolean;
+  editedWhen?: string;
+  children: ReactNode;
+}) {
   const isSelf = who === CURRENT_USER.name;
   return (
     <div style={{ display: 'flex', gap: 10, marginBottom: 14, alignItems: 'flex-start' }}>
@@ -945,6 +1602,17 @@ function Activity({ who, when, children }: { who: string; when: string; children
             }}>You</span>
           )}
           <span style={{ color: isSelf ? 'var(--accent-active)' : 'var(--fg-muted)', opacity: isSelf ? 0.75 : 1 }}>· {when}</span>
+          {edited && (
+            <span
+              className="pill"
+              data-tip={editedWhen ? `Edited ${editedWhen}` : 'This comment was edited'}
+              style={{
+                background: 'var(--bg-muted)', color: 'var(--fg-muted)',
+                fontSize: 10, padding: '1px 5px', fontWeight: 500,
+                fontStyle: 'italic', letterSpacing: 0.1,
+              }}
+            >edited</span>
+          )}
           {isSelf && (
             <>
               <div style={{ flex: 1 }} />

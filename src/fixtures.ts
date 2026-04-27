@@ -141,7 +141,7 @@ export const SEED_PROJECTS: Project[] = [
 
 /** Slugs that can't be used for projects because they're route-reserved. */
 export const RESERVED_PROJECT_SLUGS = new Set<string>([
-  'inbox', 'my-issues', 'all-issues', 'projects', 'workflows', 'teams', 'settings',
+  'inbox', 'my-issues', 'all-issues', 'projects', 'workflows', 'teams', 'settings', 'u',
 ]);
 
 // ---------------------------------------------------------------------------
@@ -192,6 +192,13 @@ export interface Issue {
    * both sides are stored.
    */
   themes?: string[];
+  /**
+   * Long-form body of the issue. Rendered with `renderRichText` so triple-
+   * backtick fenced code blocks survive; everything else is plain text with
+   * preserved whitespace. Optional — issues without a description fall to
+   * an "Add a description" empty state.
+   */
+  description?: string;
 }
 
 // Today (in this prototype's reference frame) is 2026-04-27. Dates below are
@@ -203,7 +210,22 @@ export interface Issue {
 // too — there's no auto-mirroring.
 export const ISSUES: Issue[] = [
   // --- Comet ---
-  { id: 'CMT-241', project: 'comet', type: 'B', title: 'Reorder of states corrupts saved view state when filter is active', status: 'in-review', priority: 'urgent', assignee: 'Maya Chen', labels: ['regression', 'workflow'], updated: '2h ago', estimate: 3, startDate: '2026-04-22', endDate: '2026-04-29', relatedTo: ['CMT-229'], themes: ['THM-2'] },
+  { id: 'CMT-241', project: 'comet', type: 'B', title: 'Reorder of states corrupts saved view state when filter is active', status: 'in-review', priority: 'urgent', assignee: 'Maya Chen', labels: ['regression', 'workflow'], updated: '2h ago', estimate: 3, startDate: '2026-04-22', endDate: '2026-04-29', relatedTo: ['CMT-229'], themes: ['THM-2'], description: `Saving the workflow editor's view state (filter chips, expanded sections) writes through a debounced effect. When a state node is reordered while a filter is active, the persisted slot order is computed from the visible subset and reapplied to the full set on reload — silently dropping nodes that were filtered out.
+
+Repro:
+1. Open /comet/workflow
+2. Apply filter type:terminal
+3. Drag any visible node to a new position
+4. Reload — non-terminal states are missing from the saved order
+
+Suspected fix is to reorder over the *full* set, not the filtered subset:
+
+\`\`\`ts
+const persist = debounce((view) => {
+  const next = mergeOrder(allNodes, view.visibleOrder);
+  storage.set('workflow:order', next);
+}, 250);
+\`\`\`` },
   { id: 'CMT-238', project: 'comet', type: 'S', title: 'Allow workspace admins to fork the default workflow per project', status: 'in-progress', priority: 'high', assignee: 'Jordan Lee', labels: ['workflow', 'admin'], updated: '4h ago', estimate: 8, startDate: '2026-04-15', endDate: '2026-05-08' },
   { id: 'CMT-237', project: 'comet', type: 'T', title: 'Document the 5 transition rule types in /help', status: 'todo', priority: 'med', assignee: 'Priya Rao', labels: ['docs'], updated: 'yesterday', estimate: 2, endDate: '2026-05-04', parent: 'CMT-232', themes: ['THM-2'] },
   { id: 'CMT-235', project: 'comet', type: 'B', title: 'Self-loop edges render outside node hit area at zoom < 60%', status: 'todo', priority: 'low', assignee: 'Maya Chen', labels: ['workflow'], updated: '2d ago', estimate: 1, themes: ['THM-2'] },

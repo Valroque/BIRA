@@ -20,6 +20,7 @@ import { WorkflowsPage } from './screens/workflows';
 import { InboxPage } from './screens/inbox';
 import { MyIssuesPage, AllIssuesPage } from './screens/workspace-issues';
 import { TeamsPage, TeamDetailPage } from './screens/teams';
+import { MemberProfilePage } from './screens/member-profile';
 import { ProjectMembersPage } from './screens/project-members';
 import { DesignCanvasPage } from './screens/design-canvas';
 
@@ -116,6 +117,7 @@ export default function App() {
           <Route path="/:workspace/workflows" element={<WorkflowsPage />} />
           <Route path="/:workspace/teams" element={<TeamsPage />} />
           <Route path="/:workspace/teams/:teamSlug" element={<TeamDetailPage />} />
+          <Route path="/:workspace/u/:email" element={<MemberProfilePage />} />
           <Route path="/:workspace/:project" element={<ProjectOverviewPage />} />
           <Route path="/:workspace/:project/members" element={<ProjectMembersPage />} />
           <Route path="/:workspace/:project/settings" element={<ProjectSettingsPage />} />
