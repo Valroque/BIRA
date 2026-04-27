@@ -1,9 +1,9 @@
-import { useState, type ReactNode } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { Icon } from '../components/icons';
 import { TopBar, TypeChip, IssueId, StatusDot, Priority, Avatar, STATUSES, useWorkspaceContext } from '../components/shell';
 import { AttachmentRow, renderRichText, useComposer, type Attachment } from '../components/composer';
-import { CURRENT_USER, ISSUES, type Issue } from '../fixtures';
+import { CURRENT_USER, ISSUES, issueById, themeById, type Issue } from '../fixtures';
 import { useProjects } from '../state/projects';
 
 const STATUS_LABEL: Record<Issue['status'], string> = {
@@ -18,6 +18,36 @@ const STATUS_LABEL: Record<Issue['status'], string> = {
 const PRIORITY_LABEL: Record<Issue['priority'], string> = {
   urgent: 'Urgent', high: 'High', med: 'Medium', low: 'Low', none: 'No priority',
 };
+
+// Right inspector width: persisted so the user's preferred size sticks
+// across navigations and reloads. Bounds keep it useful on small screens
+// without letting it crowd out the issue body.
+const INSPECTOR_KEY = 'bira:issue-inspector-width';
+const INSPECTOR_MIN = 240;
+const INSPECTOR_MAX = 540;
+const INSPECTOR_DEFAULT = 280;
+
+function loadInspectorWidth(): number {
+  try {
+    const raw = localStorage.getItem(INSPECTOR_KEY);
+    if (!raw) return INSPECTOR_DEFAULT;
+    const n = Number.parseInt(raw, 10);
+    if (Number.isNaN(n)) return INSPECTOR_DEFAULT;
+    return Math.min(INSPECTOR_MAX, Math.max(INSPECTOR_MIN, n));
+  } catch {
+    return INSPECTOR_DEFAULT;
+  }
+}
+
+const MONTHS_SHORT = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+// Parse the ISO `YYYY-MM-DD` field directly (no `new Date(iso)`), so the
+// rendered date doesn't shift in non-UTC timezones.
+function formatISODate(iso: string): string {
+  const [y, m, d] = iso.split('-').map(Number);
+  if (!y || !m || !d) return iso;
+  return `${MONTHS_SHORT[m - 1]} ${d}, ${y}`;
+}
 
 export function IssueDetailPage() {
   const { key } = useParams<{ key: string }>();
@@ -74,6 +104,35 @@ function IssueDetail({ issue = ISSUES[0] }: { issue?: Issue }) {
   // Reporter is not in the fixture model — fall back to a project-relevant default.
   const reporter = 'Jordan Lee';
   const blocked = issue.status === 'in-review';
+
+  const [inspectorWidth, setInspectorWidth] = useState<number>(loadInspectorWidth);
+  useEffect(() => {
+    try { localStorage.setItem(INSPECTOR_KEY, String(inspectorWidth)); } catch { /* ignore */ }
+  }, [inspectorWidth]);
+
+  const startInspectorResize = (e: React.MouseEvent) => {
+    e.preventDefault();
+    const startX = e.clientX;
+    const startWidth = inspectorWidth;
+    // Handle sits on the inspector's LEFT edge, so dragging left grows it.
+    const move = (ev: MouseEvent) => {
+      const next = Math.max(
+        INSPECTOR_MIN,
+        Math.min(INSPECTOR_MAX, Math.round(startWidth - (ev.clientX - startX))),
+      );
+      setInspectorWidth(next);
+    };
+    const up = () => {
+      document.removeEventListener('mousemove', move);
+      document.removeEventListener('mouseup', up);
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+    };
+    document.addEventListener('mousemove', move);
+    document.addEventListener('mouseup', up);
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
+  };
 
   return (
     <div className="bira" style={{ height: '100%', display: 'flex', flexDirection: 'column', background: 'var(--bg)' }}>
@@ -194,11 +253,21 @@ function IssueDetail({ issue = ISSUES[0] }: { issue?: Issue }) {
           </div>
         </div>
 
-        {/* Right inspector */}
+        {/* Right inspector — drag the left edge to resize. */}
         <aside style={{
-          width: 280, borderLeft: '1px solid var(--border-muted)', background: 'var(--bg-subtle)',
-          flexShrink: 0, padding: 16, fontSize: 12,
+          width: inspectorWidth, borderLeft: '1px solid var(--border-muted)', background: 'var(--bg-subtle)',
+          flexShrink: 0, position: 'relative', fontSize: 12,
         }}>
+          {/* Invisible 6px drag strip straddling the left border. */}
+          <div
+            onMouseDown={startInspectorResize}
+            data-tip="Drag to resize"
+            style={{
+              position: 'absolute', top: 0, bottom: 0, left: -3, width: 6,
+              cursor: 'col-resize', zIndex: 2,
+            }}
+          />
+          <div className="scroll" style={{ height: '100%', overflow: 'auto', padding: 16 }}>
           <Meta label="Status">
             <button className="btn btn-sm" style={{
               width: '100%', justifyContent: 'flex-start',
@@ -266,17 +335,44 @@ function IssueDetail({ issue = ISSUES[0] }: { issue?: Issue }) {
               ))}
             </div>
           </Meta>
-          <Meta label="Linked">
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-              <Link
-                to={`/${workspace}/${project}/issue/CMT-238`}
-                style={{ display: 'flex', alignItems: 'center', gap: 5, color: 'var(--fg)', fontSize: 12, textDecoration: 'none' }}
-              >
-                <Icon name="link" size={12} color="var(--fg-muted)" />
-                Blocks <span className="mono" style={{ color: 'var(--fg-muted)' }}>CMT-238</span>
-              </Link>
-            </div>
+          <Meta label="Start date">
+            {issue.startDate
+              ? <DateValue iso={issue.startDate} />
+              : <NotSet />}
           </Meta>
+          <Meta label="Due date">
+            {issue.endDate
+              ? <DateValue iso={issue.endDate} />
+              : <NotSet />}
+          </Meta>
+          {/* Hierarchy. Epics have no parent (so the Parent Meta is hidden);
+              leaves (Task / Bug) cannot have children (so the Children Meta
+              is hidden). For others, an empty state explains the gap. */}
+          {issue.type !== 'E' && (
+            <Meta label="Parent">
+              {issue.parent
+                ? <IssueLink id={issue.parent} />
+                : <NotSet />}
+            </Meta>
+          )}
+          {(issue.type === 'E' || issue.type === 'S') && (
+            <Meta label="Children">
+              <IssueList ids={issue.children ?? []} emptyText="No children yet" />
+            </Meta>
+          )}
+          <Meta label="Related">
+            <IssueList ids={issue.relatedTo ?? []} emptyText="No related issues" />
+          </Meta>
+          <Meta label="Themes">
+            {issue.themes && issue.themes.length > 0 ? (
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+                {issue.themes.map((id) => <ThemeChip key={id} id={id} />)}
+              </div>
+            ) : (
+              <NotSet />
+            )}
+          </Meta>
+          </div>
         </aside>
       </div>
     </div>
@@ -383,6 +479,74 @@ function Meta({ label, children }: { label: string; children: ReactNode }) {
       <div className="label-section" style={{ marginBottom: 6 }}>{label}</div>
       <div style={{ fontSize: 12.5, color: 'var(--fg)' }}>{children}</div>
     </div>
+  );
+}
+
+function DateValue({ iso }: { iso: string }) {
+  return (
+    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+      <Icon name="calendar" size={13} color="var(--fg-muted)" />
+      <span>{formatISODate(iso)}</span>
+    </span>
+  );
+}
+
+function NotSet() {
+  return <span style={{ fontSize: 11.5, color: 'var(--fg-faint)' }}>Not set</span>;
+}
+
+/**
+ * A single issue rendered as a Link with type chip + id + title. Falls back
+ * to plain text if the referenced issue isn't in the fixture (would only
+ * happen if a relation went stale).
+ */
+function IssueLink({ id }: { id: string }) {
+  const { workspace } = useWorkspaceContext();
+  const target = issueById(id);
+  if (!target) {
+    return <span className="mono" style={{ fontSize: 11.5, color: 'var(--fg-muted)' }}>{id}</span>;
+  }
+  return (
+    <Link
+      to={`/${workspace}/${target.project}/issue/${target.id}`}
+      style={{
+        display: 'flex', alignItems: 'center', gap: 6, minWidth: 0,
+        color: 'var(--fg)', fontSize: 12, textDecoration: 'none',
+      }}
+    >
+      <TypeChip type={target.type} />
+      <span className="mono" style={{ color: 'var(--fg-muted)', flexShrink: 0 }}>{target.id}</span>
+      <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+        {target.title}
+      </span>
+    </Link>
+  );
+}
+
+function IssueList({ ids, emptyText }: { ids: string[]; emptyText: string }) {
+  if (ids.length === 0) {
+    return <span style={{ fontSize: 11.5, color: 'var(--fg-faint)' }}>{emptyText}</span>;
+  }
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+      {ids.map((id) => <IssueLink key={id} id={id} />)}
+    </div>
+  );
+}
+
+function ThemeChip({ id }: { id: string }) {
+  const t = themeById(id);
+  if (!t) {
+    return <span className="pill" style={{ background: 'var(--bg-muted)', color: 'var(--fg-muted)' }}>{id}</span>;
+  }
+  return (
+    <span
+      className="pill"
+      data-tip={t.description}
+      style={{ background: t.bg, color: t.color, fontWeight: 600 }}
+    >
+      {t.name}
+    </span>
   );
 }
 

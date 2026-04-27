@@ -10,6 +10,7 @@ import { useMemo, useState, type FormEvent } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { Icon } from '../components/icons';
 import { Field, Hint } from '../components/forms';
+import { TopBar } from '../components/shell';
 import {
   CURRENT_USER, RESERVED_WORKSPACE_SLUGS, pickProjectColor,
   type Workspace, type WorkspaceRole,
@@ -30,55 +31,60 @@ export function WorkspacesPage() {
   return (
     <div className="bira" style={{
       minHeight: '100%', display: 'flex', flexDirection: 'column',
-      alignItems: 'center', background: 'var(--bg-subtle)', padding: '48px 24px',
     }}>
-      <div style={{ width: '100%', maxWidth: 560 }}>
-        <Brand />
+      <TopBar breadcrumbs={['Workspaces']} showSearch={false} showNewIssue={false} />
+      <div style={{
+        flex: 1, display: 'flex', flexDirection: 'column',
+        alignItems: 'center', background: 'var(--bg-subtle)', padding: '48px 24px',
+      }}>
+        <div style={{ width: '100%', maxWidth: 560 }}>
+          <Brand />
 
-        <div style={{
-          display: 'flex', alignItems: 'flex-end', gap: 12, marginBottom: 14,
-        }}>
-          <div style={{ flex: 1 }}>
-            <h1 style={{ fontSize: 22, fontWeight: 600, letterSpacing: -0.4, margin: 0 }}>
-              Choose a workspace
-            </h1>
-            <p style={{ fontSize: 13, color: 'var(--fg-muted)', margin: '4px 0 0' }}>
-              Each workspace is a separate tenant with its own projects, teams, and members.
-            </p>
+          <div style={{
+            display: 'flex', alignItems: 'flex-end', gap: 12, marginBottom: 14,
+          }}>
+            <div style={{ flex: 1 }}>
+              <h1 style={{ fontSize: 22, fontWeight: 600, letterSpacing: -0.4, margin: 0 }}>
+                Choose a workspace
+              </h1>
+              <p style={{ fontSize: 13, color: 'var(--fg-muted)', margin: '4px 0 0' }}>
+                Each workspace is a separate tenant with its own projects, teams, and members.
+              </p>
+            </div>
+            {workspaces.length > 0 && (
+              <button onClick={() => setShowCreate(true)} className="btn btn-primary btn-sm">
+                <Icon name="plus" size={13} />New workspace
+              </button>
+            )}
           </div>
+
           {workspaces.length > 0 && (
-            <button onClick={() => setShowCreate(true)} className="btn btn-primary btn-sm">
-              <Icon name="plus" size={13} />New workspace
-            </button>
+            <div style={{ position: 'relative', marginBottom: 10 }}>
+              <span style={{
+                position: 'absolute', left: 8, top: '50%', transform: 'translateY(-50%)',
+                color: 'var(--fg-faint)', display: 'inline-flex',
+              }}>
+                <Icon name="search" size={13} />
+              </span>
+              <input
+                autoFocus
+                className="input input-sm"
+                value={filter}
+                onChange={(e) => setFilter(e.target.value)}
+                placeholder="Search workspaces by name"
+                style={{ paddingLeft: 28 }}
+              />
+            </div>
           )}
+
+          {workspaces.length === 0
+            ? <EmptyState onCreate={() => setShowCreate(true)} />
+            : filtered.length === 0
+              ? <NoMatch query={filter} />
+              : <WorkspaceList workspaces={filtered} />}
+
+          <Footer />
         </div>
-
-        {workspaces.length > 0 && (
-          <div style={{ position: 'relative', marginBottom: 10 }}>
-            <span style={{
-              position: 'absolute', left: 8, top: '50%', transform: 'translateY(-50%)',
-              color: 'var(--fg-faint)', display: 'inline-flex',
-            }}>
-              <Icon name="search" size={13} />
-            </span>
-            <input
-              autoFocus
-              className="input input-sm"
-              value={filter}
-              onChange={(e) => setFilter(e.target.value)}
-              placeholder="Search workspaces by name"
-              style={{ paddingLeft: 28 }}
-            />
-          </div>
-        )}
-
-        {workspaces.length === 0
-          ? <EmptyState onCreate={() => setShowCreate(true)} />
-          : filtered.length === 0
-            ? <NoMatch query={filter} />
-            : <WorkspaceList workspaces={filtered} />}
-
-        <Footer />
       </div>
 
       {showCreate && <CreateWorkspaceModal onClose={() => setShowCreate(false)} />}

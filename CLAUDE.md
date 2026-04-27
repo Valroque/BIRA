@@ -4,6 +4,12 @@ This file is the load-bearing brief for any Claude session working on BIRA.
 Read the TL;DR. Skim the rest before making changes; the rest of the
 codebase will make sense faster.
 
+For the **product narrative + entity model in plain language** (intended
+for humans reading top-down) see [`docs/product.md`](docs/product.md).
+For the **decision log** explaining *why* the rules below are what they
+are, see [`docs/decisions.md`](docs/decisions.md). The hard rules
+themselves live at [`.claude/rules/v1-constraints.md`](.claude/rules/v1-constraints.md).
+
 ---
 
 ## TL;DR — if you only read this
@@ -23,10 +29,18 @@ codebase will make sense faster.
    `reporter_only`, `required_fields`, `not_self`. No scripting language.
    Don't add `approver`, `external_check`, or `custom_script` — they were
    designer drift and were removed.
-6. **Out of scope for v1**: sprints, backlog grooming, sub-tasks under epics,
-   custom fields, JQL, SSO, integrations, notifications, public REST API,
-   granular roles. Full list in `.claude/rules/v1-constraints.md`.
-7. **State**: in-memory fixtures only (`src/fixtures.ts`), plus a few
+6. **Issue hierarchy** is a shallow tree: Epic → Story → Task/Bug, plus
+   Epic → Task/Bug as a shortcut. Tasks and Bugs are always leaves. At
+   most one parent per issue. Stored on **both ends** (`parent` on the
+   child, `children[]` on the parent). **Themes** are a separate
+   orthogonal entity — flat, no hierarchy, many-to-many with issues.
+   The only issue link type in v1 is `relates` (symmetric, stored on
+   both ends as `relatedTo[]`). See `docs/product.md`.
+7. **Out of scope for v1**: sprints, backlog grooming, sub-tasks below
+   Task/Bug, link types beyond `relates`, custom fields, JQL, SSO,
+   integrations, notifications, public REST API, granular roles. Full
+   list in `.claude/rules/v1-constraints.md`.
+8. **State**: in-memory fixtures only (`src/fixtures.ts`), plus a few
    `localStorage` keys: `bira:list-layout` (column UI prefs),
    `bira:board-columns:<workspace>:<project>` (per-project board config),
    `bira:projects:<workspace>` (user-created projects, scoped per workspace —
@@ -39,12 +53,12 @@ codebase will make sense faster.
    `src/state/projects.tsx`, and workspace data via `useWorkspaces()` from
    `src/state/workspaces.tsx` — never from stale `PROJECT_INFO` /
    `WORKSPACES`-direct lookups.
-8. **Reuse, don't reinvent**: every layout primitive lives in
+9. **Reuse, don't reinvent**: every layout primitive lives in
    `src/components/` (especially `shell.tsx`). Adding a parallel `<button>`
    styled like an existing `Chip` is a defect, not a shortcut.
-9. **Design tokens only**. Use `var(--token)` from `src/index.css`. No raw
-   hex codes outside the `/design-canvas` reference page.
-10. **Build gate**: `npm run build` (or `npx tsc --noEmit` for a faster
+10. **Design tokens only**. Use `var(--token)` from `src/index.css`. No raw
+    hex codes outside the `/design-canvas` reference page.
+11. **Build gate**: `npm run build` (or `npx tsc --noEmit` for a faster
     type-only pass). There is **no test infrastructure yet** — don't add
     Vitest/Jest configs without approval.
 
@@ -187,6 +201,25 @@ practices. Don't propose changes to these without explicit user sign-off.
   5. `not_self` — acting user is NOT the reporter
 - **Issue types**: Task / Bug / Story / Epic. Workspace-configurable later;
   hardcoded for v1.
+- **Issue hierarchy** is a shallow tree:
+  - Epic → Story → Task / Bug
+  - Epic → Task / Bug (Tasks/Bugs may sit directly under an Epic)
+  - Story → Task / Bug only (no nested stories, no epic-of-epic)
+  - Task / Bug are always leaves
+  - At most one parent per issue. Stored on **both ends** —
+    `Issue.parent` on the child + `Issue.children[]` on the parent.
+- **Issue links**: only `relates` in v1 (symmetric, untyped beyond the verb).
+  Stored on both ends as `relatedTo[]`. `blocks` / `duplicates` / `causes`
+  are deferred. No transition rule like "blocked by linked issue" yet.
+- **Themes** are a separate, orthogonal entity:
+  - Flat — no parent theme, no child theme, no theme↔theme relation.
+  - Many-to-many with issues. Stored on both ends —
+    `Theme.issues[]` and `Issue.themes[]`.
+  - No status, no workflow, no end date — themes are long-running.
+  - Just `{ id, name, description, color }` for v1.
+- **Symmetric storage rule**: parent/children, relatedTo, and theme
+  membership are all denormalised. Touching one side means touching the
+  other; there's no auto-mirroring.
 - **Three roles**: `admin`, `write`, `read`. Ordered ladder
   (`read < write < admin`; write implies read, admin implies write). Roles
   can be assigned to **teams** (defaults) or **individual users** (overrides).
@@ -195,10 +228,11 @@ practices. Don't propose changes to these without explicit user sign-off.
   role wins). Admin is only ever assigned explicitly to a user, never via a
   team. No granular per-feature permissions in v1.
 - **Explicitly out of scope for v1** (deferred — do not add):
-  Sprints / backlog / burndown · Sub-tasks below Epic · Granular
-  roles · Notifications + @mentions + watchers · Custom fields · Custom
-  per-project workflow editor UI · Reports / dashboards · JQL · Integrations
-  (Git/Slack/webhooks) · SSO/SAML · Public REST API.
+  Sprints / backlog / burndown · Sub-tasks below Task/Bug · Issue link
+  types beyond `relates` · Granular roles · Notifications + @mentions +
+  watchers · Custom fields · Custom per-project workflow editor UI ·
+  Reports / dashboards · JQL · Integrations (Git/Slack/webhooks) ·
+  SSO/SAML · Public REST API.
 
 Drift to any of these in the design files is a bug. Search the codebase for
 `"Drift fix"` comments to see prior corrections.
@@ -301,9 +335,15 @@ Top-level routes (defined in `src/App.tsx`):
 
 `src/fixtures.ts` is the single source of demo data. It contains:
 
-- `ISSUES` — ~26 issues across Comet / Orbit / Atlas. Each issue has
-  `id`, `type`, `title`, `status`, `priority`, `assignee`, `labels`,
-  `updated`, `estimate`, and `project` (slug).
+- `ISSUES` — ~26 issues across Comet / Orbit / Atlas. Core fields: `id`,
+  `type`, `title`, `status`, `priority`, `assignee`, `labels`, `updated`,
+  `estimate`, `project` (slug), `startDate?`, `endDate?`. Relations
+  (all denormalised, both ends stored): `parent?`, `children?`,
+  `relatedTo?`, `themes?`. See `docs/product.md` for the hierarchy
+  rules.
+- `THEMES` — orthogonal grouping. Flat (no parent/child theme).
+  Many-to-many with issues; each `Theme.issues[]` mirrors the
+  corresponding `Issue.themes[]`. Helper: `themeById`.
 - `PROJECT_INFO` — the three projects with name, key, letter, color, bg.
 - `MEMBERS` — workspace member roster (used by Settings → Members and
   every member-picker).
@@ -319,8 +359,8 @@ Top-level routes (defined in `src/App.tsx`):
   `epic-coarse`, Atlas uses `epic-detailed`).
 - `CURRENT_USER` — mocked Jordan Lee.
 
-Helpers: `memberByEmail`, `teamBySlug`, `projectEffectiveMembers`,
-`projectsForTeam`, `projectsUsingWorkflow`.
+Helpers: `issueById`, `themeById`, `memberByEmail`, `teamBySlug`,
+`projectEffectiveMembers`, `projectsForTeam`, `projectsUsingWorkflow`.
 
 When a screen needs to vary by project or workspace, read from these
 fixtures via `useWorkspaceContext()` (defined in `shell.tsx`) — it pulls

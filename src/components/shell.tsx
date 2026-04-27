@@ -68,8 +68,10 @@ export type Crumb = string | { label: string; to: string };
 interface TopBarProps {
   breadcrumbs?: Crumb[];
   showSearch?: boolean;
+  /** The "New issue" button needs a project; hide it on workspace-less screens (e.g. /workspaces). */
+  showNewIssue?: boolean;
 }
-export const TopBar = ({ breadcrumbs = [], showSearch = true }: TopBarProps) => (
+export const TopBar = ({ breadcrumbs = [], showSearch = true, showNewIssue = true }: TopBarProps) => (
   <div style={{
     height: 44, borderBottom: '1px solid var(--border-muted)', background: 'var(--bg)',
     display: 'flex', alignItems: 'center', padding: '0 12px 0 8px', gap: 8, flexShrink: 0,
@@ -125,7 +127,7 @@ export const TopBar = ({ breadcrumbs = [], showSearch = true }: TopBarProps) => 
       </button>
     )}
     <NotificationsButton />
-    <NewIssueButton />
+    {showNewIssue && <NewIssueButton />}
     <UserMenu />
   </div>
 );
