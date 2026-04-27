@@ -233,71 +233,284 @@ function Thumbnail({ att, onRemove }: { att: Attachment; onRemove?: () => void }
   );
 }
 
-// Render plain text, splitting out fenced ``` code blocks. Lightweight on
-// purpose — full markdown is out of scope for the prototype.
-export function renderRichText(text: string): ReactNode {
-  const parts: { kind: 'text' | 'code'; lang?: string; body: string }[] = [];
-  const re = /```([a-zA-Z0-9_+-]*)\n?([\s\S]*?)```/g;
+// Render a Slack-flavored markdown subset:
+//   block:  # / ## / ### headers, > quote, - / * bullets, 1. numbered,
+//           ``` fenced code, blank-line separated paragraphs
+//   inline: **bold**, _italic_, ~strike~, `code`, [label](url)
+// Not a markdown spec implementation — just enough to make descriptions
+// and comments scannable. Edge cases (e.g. `~/path`) are tolerated, not
+// handled, matching Slack's own loose parser.
+
+type Block =
+  | { kind: 'heading'; level: 1 | 2 | 3; body: string }
+  | { kind: 'quote'; body: string }
+  | { kind: 'ul'; items: string[] }
+  | { kind: 'ol'; items: string[] }
+  | { kind: 'code'; lang?: string; body: string }
+  | { kind: 'p'; body: string };
+
+function parseBlocks(text: string): Block[] {
+  const blocks: Block[] = [];
+  const codeRe = /```([a-zA-Z0-9_+-]*)\n?([\s\S]*?)```/g;
   let lastIndex = 0;
   let match: RegExpExecArray | null;
-  while ((match = re.exec(text)) !== null) {
+  while ((match = codeRe.exec(text)) !== null) {
     if (match.index > lastIndex) {
-      parts.push({ kind: 'text', body: text.slice(lastIndex, match.index) });
+      pushNonCode(blocks, text.slice(lastIndex, match.index));
     }
-    parts.push({ kind: 'code', lang: match[1] || undefined, body: match[2] });
+    blocks.push({ kind: 'code', lang: match[1] || undefined, body: match[2] });
     lastIndex = match.index + match[0].length;
   }
-  if (lastIndex < text.length) {
-    parts.push({ kind: 'text', body: text.slice(lastIndex) });
+  if (lastIndex < text.length) pushNonCode(blocks, text.slice(lastIndex));
+  return blocks;
+}
+
+function pushNonCode(blocks: Block[], chunk: string): void {
+  const lines = chunk.split('\n');
+  let i = 0;
+  while (i < lines.length) {
+    const line = lines[i];
+    const heading = line.match(/^(#{1,3})\s+(.*)$/);
+    if (heading) {
+      blocks.push({ kind: 'heading', level: heading[1].length as 1 | 2 | 3, body: heading[2] });
+      i++;
+      continue;
+    }
+    if (/^>\s?/.test(line)) {
+      const buf: string[] = [];
+      while (i < lines.length && /^>\s?/.test(lines[i])) {
+        buf.push(lines[i].replace(/^>\s?/, ''));
+        i++;
+      }
+      blocks.push({ kind: 'quote', body: buf.join('\n') });
+      continue;
+    }
+    if (/^[-*]\s+/.test(line)) {
+      const items: string[] = [];
+      while (i < lines.length && /^[-*]\s+/.test(lines[i])) {
+        items.push(lines[i].replace(/^[-*]\s+/, ''));
+        i++;
+      }
+      blocks.push({ kind: 'ul', items });
+      continue;
+    }
+    if (/^\d+\.\s+/.test(line)) {
+      const items: string[] = [];
+      while (i < lines.length && /^\d+\.\s+/.test(lines[i])) {
+        items.push(lines[i].replace(/^\d+\.\s+/, ''));
+        i++;
+      }
+      blocks.push({ kind: 'ol', items });
+      continue;
+    }
+    if (line.trim() === '') { i++; continue; }
+    const buf = [line];
+    i++;
+    while (
+      i < lines.length && lines[i].trim() !== '' &&
+      !/^#{1,3}\s+/.test(lines[i]) && !/^>\s?/.test(lines[i]) &&
+      !/^[-*]\s+/.test(lines[i]) && !/^\d+\.\s+/.test(lines[i])
+    ) {
+      buf.push(lines[i]);
+      i++;
+    }
+    blocks.push({ kind: 'p', body: buf.join('\n') });
   }
-  if (parts.length === 0) return text;
-  return parts.map((p, i) =>
-    p.kind === 'code' ? (
-      <div
-        key={i}
-        style={{
-          margin: '8px 0',
-          border: '1px solid var(--border-muted)',
-          borderRadius: 6,
-          background: 'var(--bg-subtle)',
-          overflow: 'hidden',
-        }}
-      >
-        {p.lang && (
-          <div
-            style={{
-              padding: '3px 10px',
-              fontSize: 10.5,
-              fontWeight: 600,
-              color: 'var(--fg-faint)',
-              textTransform: 'uppercase',
-              letterSpacing: 0.4,
-              borderBottom: '1px solid var(--border-muted)',
-              background: 'var(--bg)',
-            }}
-          >
-            {p.lang}
-          </div>
-        )}
-        <pre
+}
+
+// Inline tokenizer. Walks left-to-right and emits text/strong/em/del/code/a
+// nodes. Recurses into wrapper bodies so emphasis can nest.
+function parseInline(text: string): ReactNode[] {
+  const out: ReactNode[] = [];
+  let buf = '';
+  let i = 0;
+  const flush = () => {
+    if (buf) { out.push(buf); buf = ''; }
+  };
+  const tryWrap = (marker: string): { body: string; end: number } | null => {
+    const end = text.indexOf(marker, i + marker.length);
+    if (end <= i + marker.length) return null;
+    return { body: text.slice(i + marker.length, end), end: end + marker.length };
+  };
+  while (i < text.length) {
+    const ch = text[i];
+    if (ch === '`') {
+      const end = text.indexOf('`', i + 1);
+      if (end > i) {
+        flush();
+        out.push(
+          <code key={out.length} style={{
+            fontFamily: 'var(--font-mono)', fontSize: '0.92em',
+            background: 'var(--bg-subtle)', border: '1px solid var(--border-muted)',
+            borderRadius: 3, padding: '0 4px',
+          }}>{text.slice(i + 1, end)}</code>,
+        );
+        i = end + 1;
+        continue;
+      }
+    }
+    if (ch === '[') {
+      const m = text.slice(i).match(/^\[([^\]]+)\]\(([^)\s]+)\)/);
+      if (m) {
+        flush();
+        out.push(
+          <a key={out.length} href={m[2]} target="_blank" rel="noreferrer" style={{
+            color: 'var(--accent)', textDecoration: 'none',
+          }}>{parseInline(m[1])}</a>,
+        );
+        i += m[0].length;
+        continue;
+      }
+    }
+    if (ch === '*' && text[i + 1] === '*') {
+      const w = tryWrap('**');
+      if (w) {
+        flush();
+        out.push(<strong key={out.length}>{parseInline(w.body)}</strong>);
+        i = w.end;
+        continue;
+      }
+    }
+    if (ch === '*') {
+      const w = tryWrap('*');
+      if (w) {
+        flush();
+        out.push(<em key={out.length}>{parseInline(w.body)}</em>);
+        i = w.end;
+        continue;
+      }
+    }
+    if (ch === '_') {
+      const w = tryWrap('_');
+      if (w) {
+        flush();
+        out.push(<em key={out.length}>{parseInline(w.body)}</em>);
+        i = w.end;
+        continue;
+      }
+    }
+    if (ch === '~') {
+      const w = tryWrap('~');
+      if (w) {
+        flush();
+        out.push(
+          <span key={out.length} style={{ textDecoration: 'line-through' }}>
+            {parseInline(w.body)}
+          </span>,
+        );
+        i = w.end;
+        continue;
+      }
+    }
+    buf += ch;
+    i++;
+  }
+  flush();
+  return out;
+}
+
+// Paragraphs preserve hard line breaks within a block as <br/>.
+function renderParagraph(body: string, key: number): ReactNode {
+  const lines = body.split('\n');
+  const parts: ReactNode[] = [];
+  lines.forEach((line, idx) => {
+    if (idx > 0) parts.push(<br key={`br-${idx}`} />);
+    parts.push(...parseInline(line).map((n, j) =>
+      typeof n === 'string' ? <span key={`t-${idx}-${j}`}>{n}</span> : n,
+    ));
+  });
+  return <p key={key} style={{ margin: '0 0 8px', lineHeight: 1.65 }}>{parts}</p>;
+}
+
+const HEADING_STYLE: Record<1 | 2 | 3, React.CSSProperties> = {
+  1: { fontSize: 18, fontWeight: 600, margin: '14px 0 6px', lineHeight: 1.3 },
+  2: { fontSize: 15.5, fontWeight: 600, margin: '12px 0 6px', lineHeight: 1.3 },
+  3: { fontSize: 13.5, fontWeight: 600, margin: '10px 0 4px', lineHeight: 1.3 },
+};
+
+export function renderRichText(text: string): ReactNode {
+  const blocks = parseBlocks(text);
+  if (blocks.length === 0) return text;
+  return blocks.map((b, i) => {
+    if (b.kind === 'code') {
+      return (
+        <div
+          key={i}
           style={{
-            margin: 0,
-            padding: '10px 12px',
-            fontFamily: 'var(--font-mono)',
-            fontSize: 12,
-            lineHeight: 1.55,
-            color: 'var(--fg)',
-            overflowX: 'auto',
-            whiteSpace: 'pre',
+            margin: '8px 0',
+            border: '1px solid var(--border-muted)',
+            borderRadius: 6,
+            background: 'var(--bg-subtle)',
+            overflow: 'hidden',
           }}
         >
-          {p.body}
-        </pre>
-      </div>
-    ) : (
-      <span key={i} style={{ whiteSpace: 'pre-wrap' }}>
-        {p.body}
-      </span>
-    ),
-  );
+          {b.lang && (
+            <div
+              style={{
+                padding: '3px 10px',
+                fontSize: 10.5,
+                fontWeight: 600,
+                color: 'var(--fg-faint)',
+                textTransform: 'uppercase',
+                letterSpacing: 0.4,
+                borderBottom: '1px solid var(--border-muted)',
+                background: 'var(--bg)',
+              }}
+            >
+              {b.lang}
+            </div>
+          )}
+          <pre
+            style={{
+              margin: 0,
+              padding: '10px 12px',
+              fontFamily: 'var(--font-mono)',
+              fontSize: 12,
+              lineHeight: 1.55,
+              color: 'var(--fg)',
+              overflowX: 'auto',
+              whiteSpace: 'pre',
+            }}
+          >
+            {b.body}
+          </pre>
+        </div>
+      );
+    }
+    if (b.kind === 'heading') {
+      const Tag = (`h${b.level}` as 'h1' | 'h2' | 'h3');
+      return <Tag key={i} style={HEADING_STYLE[b.level]}>{parseInline(b.body)}</Tag>;
+    }
+    if (b.kind === 'quote') {
+      return (
+        <blockquote
+          key={i}
+          style={{
+            margin: '6px 0', padding: '2px 12px',
+            borderLeft: '3px solid var(--border)',
+            color: 'var(--fg-muted)', lineHeight: 1.6,
+          }}
+        >
+          {b.body.split('\n').map((line, idx) => (
+            <div key={idx}>{parseInline(line)}</div>
+          ))}
+        </blockquote>
+      );
+    }
+    if (b.kind === 'ul') {
+      return (
+        <ul key={i} style={{ margin: '6px 0', paddingLeft: 22, lineHeight: 1.65 }}>
+          {b.items.map((item, idx) => <li key={idx}>{parseInline(item)}</li>)}
+        </ul>
+      );
+    }
+    if (b.kind === 'ol') {
+      return (
+        <ol key={i} style={{ margin: '6px 0', paddingLeft: 22, lineHeight: 1.65 }}>
+          {b.items.map((item, idx) => <li key={idx}>{parseInline(item)}</li>)}
+        </ol>
+      );
+    }
+    return renderParagraph(b.body, i);
+  });
 }

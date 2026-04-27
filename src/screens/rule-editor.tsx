@@ -60,7 +60,7 @@ export function RuleEditor() {
   const { workspace, project } = useWorkspaceContext();
   const [rules, setRules] = useState<Rule[]>([
     { id: nextRuleId(), type: 'role', params: { role: 'admin' } },
-    { id: nextRuleId(), type: 'required_fields', params: { fields: ['release_notes', 'assignee'] } },
+    { id: nextRuleId(), type: 'required_fields', params: { fields: ['estimate', 'assignee'] } },
     { id: nextRuleId(), type: 'not_self' },
   ]);
   const [picking, setPicking] = useState(false);

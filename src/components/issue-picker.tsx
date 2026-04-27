@@ -9,6 +9,10 @@ import { Icon } from './icons';
 import { TypeChip } from './shell';
 import { ISSUES, type Issue } from '../fixtures';
 
+// Issue ids look like `COM-123` (2–5 uppercase letters · dash · digits).
+// Used to lift an id out of a pasted URL or free-form text.
+const ISSUE_ID_RE = /[A-Z]{2,5}-\d+/i;
+
 interface IssuePickerModalProps {
   title?: string;
   /** Subtext shown under the title. Useful to explain a constraint. */
@@ -33,7 +37,14 @@ export function IssuePickerModal({
   const exclude = useMemo(() => new Set(excludeIds), [excludeIds]);
 
   const matches = useMemo(() => {
-    const q = query.trim().toLowerCase();
+    const trimmed = query.trim();
+    // If the query contains an id-shaped token (e.g. user pasted an issue
+    // URL like .../issue/COM-123, or wrote "fixes COM-123 in passing"),
+    // collapse the query to that token so the list matches the issue
+    // they actually meant. Without this, a long pasted URL never matches
+    // any issue id via `id.includes(query)`.
+    const idHit = trimmed.match(ISSUE_ID_RE);
+    const q = (idHit ? idHit[0] : trimmed).toLowerCase();
     return ISSUES.filter((i) => {
       if (exclude.has(i.id)) return false;
       if (filter && !filter(i)) return false;
@@ -65,7 +76,7 @@ export function IssuePickerModal({
           className="input input-sm"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
-          placeholder="Search by id or title…"
+          placeholder="Search by id, title, or paste an issue link…"
           style={{ paddingLeft: 28, width: '100%' }}
         />
       </div>

@@ -956,7 +956,7 @@ function EdgeInspector({ edge, nodes, workspace, project, onChange, onDelete }: 
         {isFull && (
           <>
             <RuleCard ruleType="role" title="Only admins" subtitle="role: admin" />
-            <RuleCard ruleType="required_fields" title="Required fields" subtitle="release_notes, assignee" />
+            <RuleCard ruleType="required_fields" title="Required fields" subtitle="estimate, assignee" />
             <RuleCard ruleType="not_self" title="Reviewer ≠ reporter" subtitle="acting user is not the reporter" />
           </>
         )}
