@@ -1,8 +1,9 @@
 import { BrowserRouter, Routes, Route, Navigate, Outlet, useLocation, useParams, Link } from 'react-router-dom';
 import { AppShell } from './components/app-shell';
 import { ErrorState } from './components/states';
-import { useProjects } from './state/projects';
+import { ProjectsProvider, useProjects } from './state/projects';
 import { LoginPage } from './screens/login';
+import { WorkspacesPage } from './screens/workspaces';
 import { ProjectOverviewPage } from './screens/project-overview';
 import { BoardPage } from './screens/board';
 import { ListPage } from './screens/list';
@@ -24,7 +25,7 @@ import { DesignCanvasPage } from './screens/design-canvas';
 
 function WorkspaceLayout() {
   const { pathname } = useLocation();
-  const { project } = useParams<{ project?: string }>();
+  const { workspace = 'acme', project } = useParams<{ workspace?: string; project?: string }>();
 
   // Derive the highlighted sidebar item from the URL. Project-scoped pages
   // produce ids like `${slug}` (overview/settings/members) or
@@ -52,10 +53,15 @@ function WorkspaceLayout() {
     else sidebarActive = project;
   }
 
+  // ProjectsProvider is mounted per workspace. The `key` prop forces a fresh
+  // instance whenever the user navigates between workspaces, so the new
+  // workspace's localStorage key + seed are loaded cleanly.
   return (
-    <AppShell sidebarActive={sidebarActive}>
-      <Outlet />
-    </AppShell>
+    <ProjectsProvider key={workspace} workspace={workspace}>
+      <AppShell sidebarActive={sidebarActive}>
+        <Outlet />
+      </AppShell>
+    </ProjectsProvider>
   );
 }
 
@@ -78,11 +84,11 @@ function NotFound() {
       }
       action={
         <div style={{ display: 'flex', gap: 8, justifyContent: 'center' }}>
-          <Link to="/acme/projects" className="btn btn-primary btn-sm" style={{ textDecoration: 'none' }}>
-            Back to projects
+          <Link to="/workspaces" className="btn btn-primary btn-sm" style={{ textDecoration: 'none' }}>
+            Switch workspace
           </Link>
           <Link to="/login" className="btn btn-sm" style={{ textDecoration: 'none' }}>
-            Switch workspace
+            Sign out
           </Link>
         </div>
       }
@@ -96,6 +102,7 @@ export default function App() {
       <Routes>
         <Route path="/" element={<Navigate to="/login" replace />} />
         <Route path="/login" element={<LoginPage />} />
+        <Route path="/workspaces" element={<WorkspacesPage />} />
         <Route path="/setup" element={<SetupPage />} />
         <Route path="/invite/:token" element={<AcceptInvitePage />} />
         <Route path="/design-canvas" element={<DesignCanvasPage />} />

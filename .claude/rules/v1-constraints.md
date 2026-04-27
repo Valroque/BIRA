@@ -9,7 +9,13 @@ it before implementing.
 - **Multi-tenant via path slug** — every URL is `/:workspace/...`. No
   subdomain routing.
 - **Kanban only** — no sprints, backlog grooming, burndown, story points.
-- **Two roles** — `admin`, `member`. No granular permissions.
+- **Three roles** — `admin`, `write`, `read`. Ordered ladder:
+  `read < write < admin` (write implies read; admin implies write). Roles
+  can be assigned to **teams** (defaults) or **individual users** (overrides).
+  Resolution is **explicit-over-inherited**: an explicit user grant wins over
+  any team grants, in either direction (including downgrades). Team grants
+  combine via union — the highest team role wins. **Admin is only ever
+  assigned explicitly to a user, never inherited from a team.**
 - **Workflow data shape**:
   - Workflows are first-class entities with stable ids.
   - `(project, issue_type)` selects one workflow. Multiple workflows can
@@ -26,7 +32,8 @@ it before implementing.
 
 - Sprints / backlog / burndown
 - Sub-tasks below Epic → Issue
-- Granular roles beyond admin/member
+- Granular roles beyond admin/write/read (no per-feature permissions, no
+  resource-level ACLs, no custom role definitions)
 - Notifications, @mentions, watchers, email digests
 - Custom fields and the editor for them
 - Reports, dashboards, charts

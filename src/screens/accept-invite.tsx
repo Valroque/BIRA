@@ -5,20 +5,21 @@ import { useState, type FormEvent } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { Icon } from '../components/icons';
 import { Field, Hint } from '../components/forms';
+import type { WorkspaceRole } from '../fixtures';
 
 interface InviteContext {
   workspace: string;
   workspaceName: string;
   email: string;
   invitedBy: string;
-  role: 'admin' | 'member';
+  role: WorkspaceRole;
 }
 
 const DEMO: Record<string, InviteContext> = {
   // Anything not in this map will fall back to a generic demo invite.
   'demo-token': {
     workspace: 'acme', workspaceName: 'Acme Robotics',
-    email: 'priya@acme.com', invitedBy: 'Jordan Lee', role: 'member',
+    email: 'priya@acme.com', invitedBy: 'Jordan Lee', role: 'write',
   },
 };
 
@@ -27,7 +28,7 @@ export function AcceptInvitePage() {
   const { token = '' } = useParams<{ token: string }>();
   const ctx = DEMO[token] ?? {
     workspace: 'acme', workspaceName: 'Acme Robotics',
-    email: 'invitee@example.com', invitedBy: 'a workspace admin', role: 'member' as const,
+    email: 'invitee@example.com', invitedBy: 'a workspace admin', role: 'write' as const,
   };
 
   const [fullName, setFullName] = useState('');

@@ -29,11 +29,16 @@ codebase will make sense faster.
 7. **State**: in-memory fixtures only (`src/fixtures.ts`), plus a few
    `localStorage` keys: `bira:list-layout` (column UI prefs),
    `bira:board-columns:<workspace>:<project>` (per-project board config),
-   and `bira:projects` (user-created projects from the New project flow —
-   merged with `SEED_PROJECTS` by `ProjectsProvider`). Workspace + project
+   `bira:projects:<workspace>` (user-created projects, scoped per workspace —
+   `ProjectsProvider` is mounted per workspace inside `WorkspaceLayout` and
+   only seeds `SEED_PROJECTS` for the demo `acme` workspace), and
+   `bira:workspaces` (user-created workspaces from the New workspace flow —
+   merged with `WORKSPACES` by `WorkspacesProvider`). Workspace + project
    come from the URL via `useWorkspaceContext()` in `shell.tsx` — never
    hardcode `/acme/comet/`. Read project data via `useProjects()` from
-   `src/state/projects.tsx`, never from a stale `PROJECT_INFO` map.
+   `src/state/projects.tsx`, and workspace data via `useWorkspaces()` from
+   `src/state/workspaces.tsx` — never from stale `PROJECT_INFO` /
+   `WORKSPACES`-direct lookups.
 8. **Reuse, don't reinvent**: every layout primitive lives in
    `src/components/` (especially `shell.tsx`). Adding a parallel `<button>`
    styled like an existing `Chip` is a defect, not a shortcut.
@@ -154,9 +159,10 @@ BIRA/
 These are the load-bearing product decisions. They override generic best
 practices. Don't propose changes to these without explicit user sign-off.
 
-- **Multi-tenant**: workspaces are the tenant boundary. A user belongs to one
-  workspace; auth is workspace-scoped. URL shape: `/:workspace/...` (path
-  slug, not subdomain).
+- **Multi-tenant**: workspaces are the tenant boundary. A user can belong to
+  multiple workspaces — they pick one at `/workspaces` after sign-in. Each
+  workspace owns its own projects, teams, and members. URL shape:
+  `/:workspace/...` (path slug, not subdomain).
 - **Kanban only**: no sprints, no backlog grooming, no burndown, no story
   points UI. Status grouping on a board is the only flow. *Several places had
   drift to sprint UX during the design phase — they got cleaned up; don't
@@ -174,14 +180,20 @@ practices. Don't propose changes to these without explicit user sign-off.
 - **Transitions carry rules** — guards that decide whether a user is allowed
   to move an issue across a transition. **Five rule types** (closed enum, no
   scripting):
-  1. `role` — acting user has role X (admin / member)
+  1. `role` — acting user has role X (admin / write / read)
   2. `assignee_only` — acting user is the issue's assignee
   3. `reporter_only` — acting user is the issue's reporter
   4. `required_fields` — listed fields must be set on the issue
   5. `not_self` — acting user is NOT the reporter
 - **Issue types**: Task / Bug / Story / Epic. Workspace-configurable later;
   hardcoded for v1.
-- **Two roles**: `admin` and `member`. No granular permissions in v1.
+- **Three roles**: `admin`, `write`, `read`. Ordered ladder
+  (`read < write < admin`; write implies read, admin implies write). Roles
+  can be assigned to **teams** (defaults) or **individual users** (overrides).
+  Resolution: explicit-over-inherited — an explicit user grant wins over team
+  grants, in either direction. Team grants combine via union (highest team
+  role wins). Admin is only ever assigned explicitly to a user, never via a
+  team. No granular per-feature permissions in v1.
 - **Explicitly out of scope for v1** (deferred — do not add):
   Sprints / backlog / burndown · Sub-tasks below Epic · Granular
   roles · Notifications + @mentions + watchers · Custom fields · Custom

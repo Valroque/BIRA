@@ -13,12 +13,15 @@ import '@fontsource/geist-mono/700.css';
 
 import './index.css';
 import App from './App';
-import { ProjectsProvider } from './state/projects';
+import { WorkspacesProvider } from './state/workspaces';
 
+// `ProjectsProvider` is mounted per-workspace inside `WorkspaceLayout`
+// (see App.tsx) — it needs the URL `:workspace` slug to scope storage,
+// which isn't available above the router.
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
-    <ProjectsProvider>
+    <WorkspacesProvider>
       <App />
-    </ProjectsProvider>
+    </WorkspacesProvider>
   </StrictMode>,
 );

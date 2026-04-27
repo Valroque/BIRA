@@ -160,40 +160,50 @@ export interface Issue {
   estimate?: number;
   /** Slug of the project that owns this issue. Drives the URL of issue detail. */
   project: ProjectSlug;
+  /**
+   * ISO date (YYYY-MM-DD). Optional — backlog/todo issues typically don't
+   * have a start date until someone picks them up.
+   */
+  startDate?: string;
+  /** ISO date (YYYY-MM-DD). The target / due date for the issue. Optional. */
+  endDate?: string;
 }
 
+// Today (in this prototype's reference frame) is 2026-04-27. Dates below are
+// hand-tuned around it: backlog usually has no start date, in-progress /
+// in-review have a start date and a target end, done has both filled in.
 export const ISSUES: Issue[] = [
   // --- Comet ---
-  { id: 'CMT-241', project: 'comet', type: 'B', title: 'Reorder of states corrupts saved view state when filter is active', status: 'in-review', priority: 'urgent', assignee: 'Maya Chen', labels: ['regression', 'workflow'], updated: '2h ago', estimate: 3 },
-  { id: 'CMT-238', project: 'comet', type: 'S', title: 'Allow workspace admins to fork the default workflow per project', status: 'in-progress', priority: 'high', assignee: 'Jordan Lee', labels: ['workflow', 'admin'], updated: '4h ago', estimate: 8 },
-  { id: 'CMT-237', project: 'comet', type: 'T', title: 'Document the 5 transition rule types in /help', status: 'todo', priority: 'med', assignee: 'Priya Rao', labels: ['docs'], updated: 'yesterday', estimate: 2 },
+  { id: 'CMT-241', project: 'comet', type: 'B', title: 'Reorder of states corrupts saved view state when filter is active', status: 'in-review', priority: 'urgent', assignee: 'Maya Chen', labels: ['regression', 'workflow'], updated: '2h ago', estimate: 3, startDate: '2026-04-22', endDate: '2026-04-29' },
+  { id: 'CMT-238', project: 'comet', type: 'S', title: 'Allow workspace admins to fork the default workflow per project', status: 'in-progress', priority: 'high', assignee: 'Jordan Lee', labels: ['workflow', 'admin'], updated: '4h ago', estimate: 8, startDate: '2026-04-15', endDate: '2026-05-08' },
+  { id: 'CMT-237', project: 'comet', type: 'T', title: 'Document the 5 transition rule types in /help', status: 'todo', priority: 'med', assignee: 'Priya Rao', labels: ['docs'], updated: 'yesterday', estimate: 2, endDate: '2026-05-04' },
   { id: 'CMT-235', project: 'comet', type: 'B', title: 'Self-loop edges render outside node hit area at zoom < 60%', status: 'todo', priority: 'low', assignee: 'Maya Chen', labels: ['workflow'], updated: '2d ago', estimate: 1 },
-  { id: 'CMT-234', project: 'comet', type: 'T', title: 'Add bulk-edit support for status and assignee on board view', status: 'in-progress', priority: 'high', assignee: 'Sam Park', labels: ['board'], updated: '1d ago', estimate: 5 },
-  { id: 'CMT-232', project: 'comet', type: 'E', title: 'Custom field schema per project', status: 'backlog', priority: 'high', assignee: 'Jordan Lee', labels: ['fields', 'q3'], updated: '3d ago', estimate: 21 },
-  { id: 'CMT-230', project: 'comet', type: 'S', title: 'Auto-archive Done issues after 30 days', status: 'in-review', priority: 'med', assignee: 'Sam Park', labels: ['retention'], updated: '5h ago', estimate: 3 },
-  { id: 'CMT-229', project: 'comet', type: 'B', title: 'Cycle detection misses A→B→A back-edges in graph linter', status: 'in-progress', priority: 'urgent', assignee: 'Maya Chen', labels: ['workflow'], updated: '8h ago', estimate: 5 },
-  { id: 'CMT-227', project: 'comet', type: 'T', title: 'Slug validation on workspace creation', status: 'done', priority: 'med', assignee: 'Priya Rao', labels: ['onboarding'], updated: '1d ago', estimate: 2 },
+  { id: 'CMT-234', project: 'comet', type: 'T', title: 'Add bulk-edit support for status and assignee on board view', status: 'in-progress', priority: 'high', assignee: 'Sam Park', labels: ['board'], updated: '1d ago', estimate: 5, startDate: '2026-04-20', endDate: '2026-05-01' },
+  { id: 'CMT-232', project: 'comet', type: 'E', title: 'Custom field schema per project', status: 'backlog', priority: 'high', assignee: 'Jordan Lee', labels: ['fields', 'q3'], updated: '3d ago', estimate: 21, endDate: '2026-07-15' },
+  { id: 'CMT-230', project: 'comet', type: 'S', title: 'Auto-archive Done issues after 30 days', status: 'in-review', priority: 'med', assignee: 'Sam Park', labels: ['retention'], updated: '5h ago', estimate: 3, startDate: '2026-04-23', endDate: '2026-04-30' },
+  { id: 'CMT-229', project: 'comet', type: 'B', title: 'Cycle detection misses A→B→A back-edges in graph linter', status: 'in-progress', priority: 'urgent', assignee: 'Maya Chen', labels: ['workflow'], updated: '8h ago', estimate: 5, startDate: '2026-04-24', endDate: '2026-04-28' },
+  { id: 'CMT-227', project: 'comet', type: 'T', title: 'Slug validation on workspace creation', status: 'done', priority: 'med', assignee: 'Priya Rao', labels: ['onboarding'], updated: '1d ago', estimate: 2, startDate: '2026-04-21', endDate: '2026-04-25' },
   { id: 'CMT-225', project: 'comet', type: 'B', title: 'Empty state on inbox triggers layout flash on first load', status: 'todo', priority: 'low', assignee: 'Sam Park', labels: ['frontend'], updated: '4d ago', estimate: 2 },
   { id: 'CMT-223', project: 'comet', type: 'S', title: 'Slack-style /commands in comments', status: 'backlog', priority: 'med', assignee: 'Jordan Lee', labels: ['comments'], updated: '1w ago', estimate: 8 },
   { id: 'CMT-220', project: 'comet', type: 'T', title: 'Export workflow as YAML', status: 'backlog', priority: 'low', assignee: 'Priya Rao', labels: ['workflow'], updated: '1w ago', estimate: 3 },
 
   // --- Orbit ---
-  { id: 'ORB-58', project: 'orbit', type: 'S', title: 'Render top-of-funnel chart with project-level filter', status: 'in-progress', priority: 'high', assignee: 'Jordan Lee', labels: ['analytics'], updated: '1h ago', estimate: 5 },
-  { id: 'ORB-55', project: 'orbit', type: 'B', title: 'Date-range picker drops timezone offset on apply', status: 'in-review', priority: 'urgent', assignee: 'Riley Singh', labels: ['regression', 'analytics'], updated: '3h ago', estimate: 2 },
-  { id: 'ORB-52', project: 'orbit', type: 'T', title: 'Add CSV export for cohort table', status: 'todo', priority: 'med', assignee: 'Jordan Lee', labels: ['exports'], updated: '6h ago', estimate: 3 },
+  { id: 'ORB-58', project: 'orbit', type: 'S', title: 'Render top-of-funnel chart with project-level filter', status: 'in-progress', priority: 'high', assignee: 'Jordan Lee', labels: ['analytics'], updated: '1h ago', estimate: 5, startDate: '2026-04-19', endDate: '2026-05-02' },
+  { id: 'ORB-55', project: 'orbit', type: 'B', title: 'Date-range picker drops timezone offset on apply', status: 'in-review', priority: 'urgent', assignee: 'Riley Singh', labels: ['regression', 'analytics'], updated: '3h ago', estimate: 2, startDate: '2026-04-25', endDate: '2026-04-28' },
+  { id: 'ORB-52', project: 'orbit', type: 'T', title: 'Add CSV export for cohort table', status: 'todo', priority: 'med', assignee: 'Jordan Lee', labels: ['exports'], updated: '6h ago', estimate: 3, endDate: '2026-05-10' },
   { id: 'ORB-49', project: 'orbit', type: 'B', title: 'Loading spinner persists after error response', status: 'todo', priority: 'low', assignee: 'Avery Kim', labels: ['frontend'], updated: '2d ago', estimate: 1 },
   { id: 'ORB-44', project: 'orbit', type: 'S', title: 'Per-user retention view on dashboard', status: 'backlog', priority: 'med', assignee: 'Riley Singh', labels: ['analytics', 'retention'], updated: '4d ago', estimate: 8 },
-  { id: 'ORB-40', project: 'orbit', type: 'E', title: 'Cohort analysis revamp', status: 'backlog', priority: 'high', assignee: 'Jordan Lee', labels: ['q3', 'analytics'], updated: '1w ago', estimate: 21 },
-  { id: 'ORB-32', project: 'orbit', type: 'T', title: 'Tighten type-safety on event schema', status: 'done', priority: 'low', assignee: 'Sam Park', labels: ['refactor'], updated: '3d ago', estimate: 2 },
+  { id: 'ORB-40', project: 'orbit', type: 'E', title: 'Cohort analysis revamp', status: 'backlog', priority: 'high', assignee: 'Jordan Lee', labels: ['q3', 'analytics'], updated: '1w ago', estimate: 21, endDate: '2026-06-30' },
+  { id: 'ORB-32', project: 'orbit', type: 'T', title: 'Tighten type-safety on event schema', status: 'done', priority: 'low', assignee: 'Sam Park', labels: ['refactor'], updated: '3d ago', estimate: 2, startDate: '2026-04-17', endDate: '2026-04-24' },
 
   // --- Atlas ---
-  { id: 'ATL-118', project: 'atlas', type: 'B', title: 'Map tiles fail to load when offline cache is full', status: 'in-progress', priority: 'urgent', assignee: 'Maya Chen', labels: ['offline', 'map'], updated: '45m ago', estimate: 5 },
-  { id: 'ATL-115', project: 'atlas', type: 'S', title: 'Pinch-zoom acceleration curve on mobile', status: 'in-review', priority: 'med', assignee: 'Jordan Lee', labels: ['mobile', 'map'], updated: '2h ago', estimate: 3 },
-  { id: 'ATL-112', project: 'atlas', type: 'T', title: 'Migrate icon set to Lucide v2', status: 'todo', priority: 'low', assignee: 'Priya Rao', labels: ['frontend'], updated: '1d ago', estimate: 2 },
-  { id: 'ATL-110', project: 'atlas', type: 'S', title: 'Cluster overlay markers above zoom 14', status: 'todo', priority: 'high', assignee: 'Jordan Lee', labels: ['map'], updated: '2d ago', estimate: 5 },
+  { id: 'ATL-118', project: 'atlas', type: 'B', title: 'Map tiles fail to load when offline cache is full', status: 'in-progress', priority: 'urgent', assignee: 'Maya Chen', labels: ['offline', 'map'], updated: '45m ago', estimate: 5, startDate: '2026-04-26', endDate: '2026-04-30' },
+  { id: 'ATL-115', project: 'atlas', type: 'S', title: 'Pinch-zoom acceleration curve on mobile', status: 'in-review', priority: 'med', assignee: 'Jordan Lee', labels: ['mobile', 'map'], updated: '2h ago', estimate: 3, startDate: '2026-04-20', endDate: '2026-04-29' },
+  { id: 'ATL-112', project: 'atlas', type: 'T', title: 'Migrate icon set to Lucide v2', status: 'todo', priority: 'low', assignee: 'Priya Rao', labels: ['frontend'], updated: '1d ago', estimate: 2, endDate: '2026-05-15' },
+  { id: 'ATL-110', project: 'atlas', type: 'S', title: 'Cluster overlay markers above zoom 14', status: 'todo', priority: 'high', assignee: 'Jordan Lee', labels: ['map'], updated: '2d ago', estimate: 5, endDate: '2026-05-12' },
   { id: 'ATL-104', project: 'atlas', type: 'B', title: 'GPX import drops elevation column', status: 'backlog', priority: 'med', assignee: 'Avery Kim', labels: ['imports'], updated: '5d ago', estimate: 3 },
-  { id: 'ATL-100', project: 'atlas', type: 'E', title: 'Real-time location sharing for teams', status: 'backlog', priority: 'high', assignee: 'Maya Chen', labels: ['q4', 'collaboration'], updated: '2w ago', estimate: 34 },
-  { id: 'ATL-98',  project: 'atlas', type: 'T', title: 'Tile server health check endpoint', status: 'done', priority: 'med', assignee: 'Sam Park', labels: ['ops'], updated: '6d ago', estimate: 2 },
+  { id: 'ATL-100', project: 'atlas', type: 'E', title: 'Real-time location sharing for teams', status: 'backlog', priority: 'high', assignee: 'Maya Chen', labels: ['q4', 'collaboration'], updated: '2w ago', estimate: 34, endDate: '2026-10-31' },
+  { id: 'ATL-98',  project: 'atlas', type: 'T', title: 'Tile server health check endpoint', status: 'done', priority: 'med', assignee: 'Sam Park', labels: ['ops'], updated: '6d ago', estimate: 2, startDate: '2026-04-14', endDate: '2026-04-21' },
 ];
 
 // ---------------------------------------------------------------------------
@@ -207,13 +217,75 @@ export const CURRENT_USER = {
 };
 
 // ---------------------------------------------------------------------------
+// Workspaces
+// ---------------------------------------------------------------------------
+//
+// Every in-app screen runs inside a single workspace derived from the URL
+// (`useWorkspaceContext()` in shell.tsx). The list below feeds the post-login
+// `/workspaces` picker — the workspaces the current user has access to.
+// Until the backend lands, only `acme` actually has fixture data behind it;
+// picking another slug will land in the same UI populated by the same fixtures.
+
+/**
+ * Workspace-level role for the current user. Ordered ladder:
+ * `read < write < admin`. Higher implies lower (write implies read,
+ * admin implies write). Resolution rules — see CLAUDE.md / memory:
+ * explicit user assignment overrides team grants in either direction;
+ * team grants combine via union (highest team role wins); admin is only
+ * ever assigned explicitly to a user, never inherited from a team.
+ */
+export type WorkspaceRole = 'admin' | 'write' | 'read';
+
+export interface Workspace {
+  /** URL slug: lowercase a-z, 0-9, dashes. The tenant primary key. */
+  slug: string;
+  name: string;
+  /** Letter shown inside the workspace avatar. */
+  letter: string;
+  color: string;
+  bg: string;
+  /** Counts shown on the picker — hardcoded in the prototype. */
+  projectCount: number;
+  memberCount: number;
+  /** Effective role of the current user in this workspace. */
+  role: WorkspaceRole;
+}
+
+export const WORKSPACES: Workspace[] = [
+  {
+    slug: 'acme', name: 'Acme Robotics', letter: 'A',
+    color: '#4f46e5', bg: '#e0e7ff',
+    projectCount: 4, memberCount: 6, role: 'admin',
+  },
+  {
+    slug: 'nimbus', name: 'Nimbus Labs', letter: 'N',
+    color: '#0891b2', bg: '#cffafe',
+    projectCount: 2, memberCount: 11, role: 'write',
+  },
+  {
+    slug: 'polar', name: 'Polar Tooling', letter: 'P',
+    color: '#9333ea', bg: '#f3e8ff',
+    projectCount: 7, memberCount: 24, role: 'read',
+  },
+];
+
+/** Slugs that can't be used for workspaces because they're top-level routes. */
+export const RESERVED_WORKSPACE_SLUGS = new Set<string>([
+  'login', 'setup', 'invite', 'workspaces', 'design-canvas',
+]);
+
+// ---------------------------------------------------------------------------
 // Workspace members + teams
 // ---------------------------------------------------------------------------
 
 export interface Member {
   email: string;
   name: string;
-  role: 'admin' | 'member';
+  /**
+   * Effective workspace role. See `WorkspaceRole` for the resolution rules
+   * (explicit-over-inherited; team grants combine via union).
+   */
+  role: WorkspaceRole;
   lastSeen: string;
   status: 'active' | 'invited' | 'deactivated';
 }
@@ -223,12 +295,12 @@ export interface Member {
  * here, and project-level access lists resolve emails against this map.
  */
 export const MEMBERS: Member[] = [
-  { email: 'jordan@acme.com', name: 'Jordan Lee',  role: 'admin',  lastSeen: 'just now',    status: 'active' },
-  { email: 'maya@acme.com',   name: 'Maya Chen',   role: 'member', lastSeen: '12 min ago',  status: 'active' },
-  { email: 'sam@acme.com',    name: 'Sam Park',    role: 'member', lastSeen: '3h ago',      status: 'active' },
-  { email: 'priya@acme.com',  name: 'Priya Rao',   role: 'member', lastSeen: 'yesterday',   status: 'active' },
-  { email: 'riley@acme.com',  name: 'Riley Singh', role: 'member', lastSeen: 'pending',     status: 'invited' },
-  { email: 'avery@acme.com',  name: 'Avery Kim',   role: 'member', lastSeen: '4 weeks ago', status: 'deactivated' },
+  { email: 'jordan@acme.com', name: 'Jordan Lee',  role: 'admin', lastSeen: 'just now',    status: 'active' },
+  { email: 'maya@acme.com',   name: 'Maya Chen',   role: 'write', lastSeen: '12 min ago',  status: 'active' },
+  { email: 'sam@acme.com',    name: 'Sam Park',    role: 'write', lastSeen: '3h ago',      status: 'active' },
+  { email: 'priya@acme.com',  name: 'Priya Rao',   role: 'write', lastSeen: 'yesterday',   status: 'active' },
+  { email: 'riley@acme.com',  name: 'Riley Singh', role: 'write', lastSeen: 'pending',     status: 'invited' },
+  { email: 'avery@acme.com',  name: 'Avery Kim',   role: 'read',  lastSeen: '4 weeks ago', status: 'deactivated' },
 ];
 
 export const memberByEmail = (email: string) => MEMBERS.find((m) => m.email === email);

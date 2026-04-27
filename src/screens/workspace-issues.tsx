@@ -1,9 +1,11 @@
 // Workspace-level issue lists: My Issues + All Issues. Both share the
 // `IssuesTable` component (also used by the project-scoped /list page).
-import { TopBar } from '../components/shell';
+import { useMemo } from 'react';
+import { TopBar, useWorkspaceContext } from '../components/shell';
 import { IssuesTable, type IssueGroupKey } from '../components/issues-table';
 import { type Filter } from '../components/issue-filters';
 import { ISSUES, CURRENT_USER } from '../fixtures';
+import { useProjects } from '../state/projects';
 import type { Crumb } from '../components/shell';
 
 interface WorkspaceIssuesViewProps {

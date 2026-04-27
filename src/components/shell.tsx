@@ -6,6 +6,7 @@ import { Icon } from './icons';
 import { NotificationsButton, UserMenu } from './topbar-menus';
 import { ISSUES, CURRENT_USER, TEAMS } from '../fixtures';
 import { useProjects } from '../state/projects';
+import { useWorkspaces } from '../state/workspaces';
 
 /** Read workspace + project from the URL with sensible defaults for routes that don't have them. */
 export function useWorkspaceContext() {
@@ -153,10 +154,17 @@ export const Sidebar = ({ collapsed = false, active = '' }: SidebarProps) => {
   const w = collapsed ? 52 : 232;
   const { workspace } = useWorkspaceContext();
   const { projects } = useProjects();
+  const { getWorkspace } = useWorkspaces();
+  const ws = getWorkspace(workspace);
   // Active projects render in the sidebar; archived ones are reachable via
   // the All-projects page only. Sub-items (Board / Issues / Workflow) expand
   // under whichever project the URL is currently scoped to.
   const sidebarProjects = projects.filter((p) => p.status === 'active');
+  // Issues belonging to projects that exist in this workspace. Drives the
+  // counts on the My-issues / All-issues sidebar items so a fresh workspace
+  // shows 0 instead of the global fixture total.
+  const projectSlugs = new Set(projects.map((p) => p.slug));
+  const workspaceIssues = ISSUES.filter((i) => projectSlugs.has(i.project));
 
   /**
    * Sidebar Item.
@@ -229,35 +237,47 @@ export const Sidebar = ({ collapsed = false, active = '' }: SidebarProps) => {
       width: w, background: 'var(--bg-subtle)', borderRight: '1px solid var(--border-muted)',
       display: 'flex', flexDirection: 'column', flexShrink: 0, transition: 'width .2s ease',
     }}>
-      {/* Workspace header */}
-      <div style={{
-        height: 44, padding: collapsed ? 0 : '0 10px',
-        display: 'flex', alignItems: 'center', justifyContent: collapsed ? 'center' : 'flex-start',
-        gap: 8, borderBottom: '1px solid var(--border-muted)',
-      }}>
+      {/* Workspace header — clicking returns to the picker. */}
+      <Link
+        to="/workspaces"
+        title={collapsed ? `${ws?.name ?? workspace} — Switch workspace` : undefined}
+        data-tip={!collapsed ? 'Switch workspace' : undefined}
+        style={{
+          height: 44, padding: collapsed ? 0 : '0 10px',
+          display: 'flex', alignItems: 'center', justifyContent: collapsed ? 'center' : 'flex-start',
+          gap: 8, borderBottom: '1px solid var(--border-muted)',
+          textDecoration: 'none', color: 'inherit',
+        }}
+      >
         <div style={{
           width: 26, height: 26, borderRadius: 6,
-          background: 'linear-gradient(135deg, var(--accent), #6366f1)',
+          background: ws?.bg ?? 'linear-gradient(135deg, var(--accent), #6366f1)',
+          color: ws?.color ?? '#fff',
           display: 'flex', alignItems: 'center', justifyContent: 'center',
-          color: '#fff', fontWeight: 700, fontSize: 12, fontFamily: 'var(--font-mono)', letterSpacing: -0.5,
-        }}>B</div>
+          fontWeight: 700, fontSize: 12, letterSpacing: -0.5, flexShrink: 0,
+        }}>{ws?.letter ?? 'B'}</div>
         {!collapsed && (
           <>
             <div style={{ flex: 1, minWidth: 0 }}>
-              <div style={{ fontSize: 13, fontWeight: 600 }}>Acme Robotics</div>
-              <div style={{ fontSize: 11, color: 'var(--fg-faint)', fontFamily: 'var(--font-mono)' }}>bira/acme</div>
+              <div style={{ fontSize: 13, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                {ws?.name ?? workspace}
+              </div>
+              <div style={{ fontSize: 11, color: 'var(--fg-faint)', fontFamily: 'var(--font-mono)' }}>bira/{workspace}</div>
             </div>
-            <Icon name="chevronDown" size={14} color="var(--fg-faint)" />
+            <Icon name="chevronsLeft" size={14} color="var(--fg-faint)" />
           </>
         )}
-      </div>
+      </Link>
 
       <div className="scroll" style={{ flex: 1, overflow: 'auto', padding: '8px 0' }}>
+        {/* Counts are derived from issues whose project belongs to the
+            current workspace — so a fresh workspace with no projects shows
+            "0", not the global fixture total. */}
         <Item id="inbox"      icon="inbox" label="Inbox"      to={`/${workspace}/inbox`} count={3} />
         <Item id="my-issues"  icon="user"  label="My issues"  to={`/${workspace}/my-issues`}
-              count={ISSUES.filter((i) => i.assignee === CURRENT_USER.name).length} />
+              count={workspaceIssues.filter((i) => i.assignee === CURRENT_USER.name).length} />
         <Item id="all-issues" icon="list"  label="All issues" to={`/${workspace}/all-issues`}
-              count={ISSUES.length} />
+              count={workspaceIssues.length} />
 
         <Section label="Projects">
           <Item id="all-projects" icon="grid" label="All projects" to={`/${workspace}/projects`} />
