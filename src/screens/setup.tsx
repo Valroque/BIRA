@@ -1,39 +1,85 @@
 // /setup — first-run flow for a fresh self-hosted instance. The first user
-// becomes the admin of a brand-new workspace they create here.
+// becomes the admin of a brand-new tenant + workspace they create here.
 import { useState, type FormEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Icon } from '../components/icons';
 import { Field, Hint } from '../components/forms';
+import { pickProjectColor, type Workspace } from '../fixtures';
+import { useTenants } from '../state/tenants';
 
-const STEPS = ['workspace', 'admin', 'review'] as const;
+const STEPS = ['tenant', 'workspace', 'admin', 'review'] as const;
 type Step = typeof STEPS[number];
 
 export function SetupPage() {
   const navigate = useNavigate();
-  const [step, setStep] = useState<Step>('workspace');
+  const { addTenant } = useTenants();
+  const [step, setStep] = useState<Step>('tenant');
 
+  const [tenantName, setTenantName] = useState('');
+  const [tenantSlug, setTenantSlug] = useState('');
   const [workspaceName, setWorkspaceName] = useState('');
-  const [slug, setSlug] = useState('');
+  const [workspaceSlug, setWorkspaceSlug] = useState('');
   const [adminName, setAdminName] = useState('');
   const [adminEmail, setAdminEmail] = useState('');
   const [adminPassword, setAdminPassword] = useState('');
 
-  // Auto-suggest a slug from the workspace name.
+  const onTenantNameChange = (v: string) => {
+    setTenantName(v);
+    const auto = v.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+    setTenantSlug(auto);
+  };
+
+  // Auto-suggest a workspace slug from the workspace name.
   const onWorkspaceNameChange = (v: string) => {
     setWorkspaceName(v);
     const auto = v.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
-    setSlug(auto);
+    setWorkspaceSlug(auto);
   };
 
   const next = (e?: FormEvent) => {
     e?.preventDefault();
-    if (step === 'workspace') setStep('admin');
+    if (step === 'tenant') setStep('workspace');
+    else if (step === 'workspace') setStep('admin');
     else if (step === 'admin') setStep('review');
   };
 
   const finish = () => {
-    const safe = slug.trim().toLowerCase().replace(/[^a-z0-9-]/g, '') || 'workspace';
-    navigate(`/${safe}`);
+    const safeTenant = tenantSlug.trim().toLowerCase().replace(/[^a-z0-9-]/g, '') || 'tenant';
+    const safeWorkspace = workspaceSlug.trim().toLowerCase().replace(/[^a-z0-9-]/g, '') || 'workspace';
+
+    // Create the tenant via the live provider so it shows up on the picker
+    // immediately if the user navigates back.
+    const tPalette = pickProjectColor(safeTenant);
+    addTenant({
+      slug: safeTenant,
+      name: tenantName.trim() || safeTenant,
+      letter: (tenantName.trim()[0] ?? safeTenant[0] ?? '?').toUpperCase(),
+      color: tPalette.color,
+      bg: tPalette.bg,
+    });
+
+    // Phase 1 transitional: WorkspacesProvider is mounted under TenantLayout,
+    // so we can't useWorkspaces() from /setup. Bootstrap by writing the
+    // canonical key directly; the provider picks it up on next mount.
+    const wsPalette = pickProjectColor(safeWorkspace);
+    const newWorkspace: Workspace = {
+      tenantSlug: safeTenant,
+      slug: safeWorkspace,
+      name: workspaceName.trim() || safeWorkspace,
+      letter: (workspaceName.trim()[0] ?? 'W').toUpperCase(),
+      color: wsPalette.color,
+      bg: wsPalette.bg,
+      role: 'admin',
+      projectCount: 0,
+      memberCount: 1,
+    };
+    try {
+      localStorage.setItem(`bira:workspaces:${safeTenant}`, JSON.stringify([newWorkspace]));
+    } catch {
+      // Quota / privacy mode — best-effort, ignore.
+    }
+
+    navigate(`/${safeTenant}/${safeWorkspace}`);
   };
 
   return (
@@ -60,11 +106,48 @@ export function SetupPage() {
         <Stepper current={step} />
 
         <div className="card" style={{ padding: 22, marginTop: 18 }}>
+          {step === 'tenant' && (
+            <form onSubmit={next}>
+              <h2 style={{ fontSize: 17, fontWeight: 600, margin: 0 }}>Create your tenant</h2>
+              <p style={{ fontSize: 12.5, color: 'var(--fg-muted)', margin: '4px 0 16px' }}>
+                A tenant is your organization — it holds workspaces, projects, and members.
+              </p>
+              <Field label="Tenant name">
+                <input
+                  autoFocus
+                  className="input"
+                  value={tenantName}
+                  onChange={(e) => onTenantNameChange(e.target.value)}
+                  placeholder="Acme Corp"
+                  required
+                />
+              </Field>
+              <Field label="Slug">
+                <input
+                  className="input mono"
+                  value={tenantSlug}
+                  onChange={(e) => setTenantSlug(e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, ''))}
+                  placeholder="acme-corp"
+                  required
+                />
+                <Hint>URLs will look like <code>/{tenantSlug || 'acme-corp'}/...</code>.</Hint>
+              </Field>
+              <button
+                type="submit"
+                className="btn btn-primary"
+                disabled={!tenantName || !tenantSlug || tenantSlug.length < 2}
+                style={{ width: '100%', height: 34, justifyContent: 'center', marginTop: 6 }}
+              >
+                Continue<Icon name="arrowRight" size={13} />
+              </button>
+            </form>
+          )}
+
           {step === 'workspace' && (
             <form onSubmit={next}>
               <h2 style={{ fontSize: 17, fontWeight: 600, margin: 0 }}>Create your workspace</h2>
               <p style={{ fontSize: 12.5, color: 'var(--fg-muted)', margin: '4px 0 16px' }}>
-                A workspace holds your projects, issues, and team members.
+                Inside <strong>{tenantName || 'this tenant'}</strong>.
               </p>
               <Field label="Workspace name">
                 <input
@@ -79,21 +162,24 @@ export function SetupPage() {
               <Field label="Slug">
                 <input
                   className="input mono"
-                  value={slug}
-                  onChange={(e) => setSlug(e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, ''))}
+                  value={workspaceSlug}
+                  onChange={(e) => setWorkspaceSlug(e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, ''))}
                   placeholder="acme"
                   required
                 />
-                <Hint>Lowercase letters, digits, hyphens. URLs will look like <code>/{slug || 'acme'}/projects/…</code>.</Hint>
+                <Hint>URLs will look like <code>/{tenantSlug || 'acme-corp'}/{workspaceSlug || 'acme'}/...</code>.</Hint>
               </Field>
-              <button
-                type="submit"
-                className="btn btn-primary"
-                disabled={!workspaceName || !slug}
-                style={{ width: '100%', height: 34, justifyContent: 'center', marginTop: 6 }}
-              >
-                Continue<Icon name="arrowRight" size={13} />
-              </button>
+              <div style={{ display: 'flex', gap: 8, marginTop: 6 }}>
+                <button type="button" onClick={() => setStep('tenant')} className="btn">Back</button>
+                <button
+                  type="submit"
+                  className="btn btn-primary"
+                  disabled={!workspaceName || !workspaceSlug || workspaceSlug.length < 2}
+                  style={{ flex: 1, height: 34, justifyContent: 'center' }}
+                >
+                  Continue<Icon name="arrowRight" size={13} />
+                </button>
+              </div>
             </form>
           )}
 
@@ -154,10 +240,12 @@ export function SetupPage() {
             <div>
               <h2 style={{ fontSize: 17, fontWeight: 600, margin: 0 }}>Review and finish</h2>
               <p style={{ fontSize: 12.5, color: 'var(--fg-muted)', margin: '4px 0 16px' }}>
-                You can change all of these later in workspace settings.
+                You can change all of these later in tenant or workspace settings.
               </p>
+              <ReviewRow label="Tenant" value={tenantName} mono={false} />
+              <ReviewRow label="Tenant slug" value={tenantSlug} mono />
               <ReviewRow label="Workspace" value={workspaceName} mono={false} />
-              <ReviewRow label="Slug" value={slug} mono />
+              <ReviewRow label="Workspace slug" value={workspaceSlug} mono />
               <ReviewRow label="Admin name" value={adminName} mono={false} />
               <ReviewRow label="Admin email" value={adminEmail} mono />
               <div style={{ display: 'flex', gap: 8, marginTop: 14 }}>
@@ -168,7 +256,7 @@ export function SetupPage() {
                   className="btn btn-primary"
                   style={{ flex: 1, height: 34, justifyContent: 'center' }}
                 >
-                  <Icon name="check" size={13} />Create workspace
+                  <Icon name="check" size={13} />Create
                 </button>
               </div>
             </div>
@@ -181,6 +269,7 @@ export function SetupPage() {
 
 function Stepper({ current }: { current: Step }) {
   const labels: Record<Step, string> = {
+    tenant: 'Tenant',
     workspace: 'Workspace',
     admin: 'Admin',
     review: 'Review',

@@ -8,6 +8,8 @@ import { Field, Hint } from '../components/forms';
 import type { WorkspaceRole } from '../fixtures';
 
 interface InviteContext {
+  tenant: string;
+  tenantName: string;
   workspace: string;
   workspaceName: string;
   email: string;
@@ -18,6 +20,7 @@ interface InviteContext {
 const DEMO: Record<string, InviteContext> = {
   // Anything not in this map will fall back to a generic demo invite.
   'demo-token': {
+    tenant: 'acme-corp', tenantName: 'Acme Corp',
     workspace: 'acme', workspaceName: 'Acme Robotics',
     email: 'priya@acme.com', invitedBy: 'Jordan Lee', role: 'write',
   },
@@ -27,6 +30,7 @@ export function AcceptInvitePage() {
   const navigate = useNavigate();
   const { token = '' } = useParams<{ token: string }>();
   const ctx = DEMO[token] ?? {
+    tenant: 'acme-corp', tenantName: 'Acme Corp',
     workspace: 'acme', workspaceName: 'Acme Robotics',
     email: 'invitee@example.com', invitedBy: 'a workspace admin', role: 'write' as const,
   };
@@ -38,7 +42,7 @@ export function AcceptInvitePage() {
   const submit = (e: FormEvent) => {
     e.preventDefault();
     if (password !== confirm) return;
-    navigate(`/${ctx.workspace}`);
+    navigate(`/${ctx.tenant}/${ctx.workspace}`);
   };
 
   return (

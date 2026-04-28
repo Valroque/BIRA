@@ -4,7 +4,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Icon } from './icons';
-import { KBD, useWorkspaceContext } from './shell';
+import { KBD, useTenantContext } from './shell';
 import { Modal } from './modal';
 import { ISSUES } from '../fixtures';
 
@@ -22,7 +22,7 @@ export function CommandPalette() {
   const [q, setQ] = useState('');
   const [cursor, setCursor] = useState(0);
   const navigate = useNavigate();
-  const { workspace, project } = useWorkspaceContext();
+  const { tenant, workspace, project } = useTenantContext();
   const inputRef = useRef<HTMLInputElement>(null);
 
   // Open with ⌘K / Ctrl+K, or by dispatching the `bira:cmdk` custom event
@@ -54,23 +54,23 @@ export function CommandPalette() {
   }, [open]);
 
   const all: Command[] = useMemo(() => [
-    { id: 'go-inbox',    group: 'Navigate', label: 'Inbox',              icon: 'inbox',    to: `/${workspace}/inbox` },
-    { id: 'go-mine',     group: 'Navigate', label: 'My issues',          icon: 'user',     to: `/${workspace}/my-issues` },
-    { id: 'go-all',      group: 'Navigate', label: 'All issues',         icon: 'list',     to: `/${workspace}/all-issues` },
-    { id: 'go-projects', group: 'Navigate', label: 'All projects',       icon: 'grid',     to: `/${workspace}/projects` },
-    { id: 'go-overview', group: 'Navigate', label: 'Project overview',  icon: 'eye',      to: `/${workspace}/${project}` },
-    { id: 'go-board',    group: 'Navigate', label: 'Board',              icon: 'board',    to: `/${workspace}/${project}/board` },
-    { id: 'go-list',     group: 'Navigate', label: 'Issues (list)',      icon: 'list',     to: `/${workspace}/${project}/list` },
-    { id: 'go-workflow', group: 'Navigate', label: 'Workflow editor',    icon: 'workflow', to: `/${workspace}/${project}/workflow` },
-    { id: 'go-rules',    group: 'Navigate', label: 'Transition rules',   icon: 'shield',   to: `/${workspace}/${project}/workflow/rules` },
-    { id: 'new-issue',   group: 'Create',   label: 'New issue',          icon: 'plus',     to: `/${workspace}/${project}/issue/new`, hint: 'C' },
+    { id: 'go-inbox',    group: 'Navigate', label: 'Inbox',              icon: 'inbox',    to: `/${tenant}/${workspace}/inbox` },
+    { id: 'go-mine',     group: 'Navigate', label: 'My issues',          icon: 'user',     to: `/${tenant}/${workspace}/my-issues` },
+    { id: 'go-all',      group: 'Navigate', label: 'All issues',         icon: 'list',     to: `/${tenant}/${workspace}/all-issues` },
+    { id: 'go-projects', group: 'Navigate', label: 'All projects',       icon: 'grid',     to: `/${tenant}/${workspace}/projects` },
+    { id: 'go-overview', group: 'Navigate', label: 'Project overview',  icon: 'eye',      to: `/${tenant}/${workspace}/${project}` },
+    { id: 'go-board',    group: 'Navigate', label: 'Board',              icon: 'board',    to: `/${tenant}/${workspace}/${project}/board` },
+    { id: 'go-list',     group: 'Navigate', label: 'Issues (list)',      icon: 'list',     to: `/${tenant}/${workspace}/${project}/list` },
+    { id: 'go-workflow', group: 'Navigate', label: 'Workflow editor',    icon: 'workflow', to: `/${tenant}/${workspace}/${project}/workflow` },
+    { id: 'go-rules',    group: 'Navigate', label: 'Transition rules',   icon: 'shield',   to: `/${tenant}/${workspace}/${project}/workflow/rules` },
+    { id: 'new-issue',   group: 'Create',   label: 'New issue',          icon: 'plus',     to: `/${tenant}/${workspace}/${project}/issue/new`, hint: 'C' },
     ...ISSUES.map((i): Command => ({
       id: `issue-${i.id}`, group: 'Issues',
       label: `${i.id} · ${i.title}`,
       icon: i.type === 'B' ? 'bug' : i.type === 'E' ? 'layers' : 'tasks',
-      to: `/${workspace}/${project}/issue/${i.id}`,
+      to: `/${tenant}/${workspace}/${project}/issue/${i.id}`,
     })),
-  ], [workspace, project]);
+  ], [tenant, workspace, project]);
 
   const filtered = useMemo(() => {
     if (!q.trim()) return all.slice(0, 12);

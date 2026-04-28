@@ -1,20 +1,20 @@
 import { Link } from 'react-router-dom';
-import { TopBar, Tabs, projectTabs, useWorkspaceContext } from '../components/shell';
+import { TopBar, Tabs, projectTabs, useTenantContext } from '../components/shell';
 import { ListRow } from '../components/issue-row';
 import { ISSUES } from '../fixtures';
 import { useProjects } from '../state/projects';
 
 export function ProjectOverviewPage() {
-  const { workspace, project } = useWorkspaceContext();
+  const { tenant, workspace, project } = useTenantContext();
   const { getProject } = useProjects();
   const projectInfo = getProject(project);
   return (
     <div className="bira" style={{ height: '100%', display: 'flex', flexDirection: 'column', background: 'var(--bg)' }}>
       <TopBar breadcrumbs={[
-        { label: 'Acme Robotics', to: `/${workspace}/projects` },
+        { label: 'Acme Robotics', to: `/${tenant}/${workspace}/projects` },
         projectInfo?.name ?? project,
       ]} />
-      <Tabs active="overview" tabs={projectTabs(workspace, project)} />
+      <Tabs active="overview" tabs={projectTabs(tenant, workspace, project)} />
 
       <div className="scroll" style={{ flex: 1, overflow: 'auto', padding: 24 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 4 }}>
@@ -55,7 +55,7 @@ export function ProjectOverviewPage() {
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
             <span style={{ fontSize: 13, fontWeight: 600 }}>Workflow health</span>
             <Link
-              to={`/${workspace}/${project}/workflow`}
+              to={`/${tenant}/${workspace}/${project}/workflow`}
               style={{ fontSize: 11.5, color: 'var(--fg-muted)', textDecoration: 'none' }}
             >Edit workflow →</Link>
             <span className="pill" style={{ marginLeft: 'auto', background: 'var(--in-progress-bg)', color: 'var(--in-progress)' }}>3 stuck</span>
@@ -68,7 +68,7 @@ export function ProjectOverviewPage() {
             Recently updated
           </div>
           {ISSUES.filter((i) => i.project === project).slice(0, 5).map((i) => (
-            <ListRow key={i.id} issue={i} workspace={workspace} />
+            <ListRow key={i.id} issue={i} tenant={tenant} workspace={workspace} />
           ))}
         </div>
       </div>

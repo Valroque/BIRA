@@ -1,24 +1,24 @@
-// /:workspace/inbox — placeholder inbox view. Demonstrates the empty state.
+// /:tenant/:workspace/inbox — placeholder inbox view. Demonstrates the empty state.
 import { Link } from 'react-router-dom';
-import { TopBar, Tabs, useWorkspaceContext } from '../components/shell';
+import { TopBar, Tabs, useTenantContext } from '../components/shell';
 import { EmptyState } from '../components/states';
 import { Icon } from '../components/icons';
 import { useProjects } from '../state/projects';
 
 export function InboxPage() {
-  const { workspace } = useWorkspaceContext();
+  const { tenant, workspace } = useTenantContext();
   const { projects } = useProjects();
   const firstProject = projects.find((p) => p.status === 'active') ?? projects[0];
   return (
     <div className="bira" style={{ height: '100%', display: 'flex', flexDirection: 'column', background: 'var(--bg)' }}>
       <TopBar breadcrumbs={[
-        { label: 'Acme Robotics', to: `/${workspace}/projects` },
+        { label: 'Acme Robotics', to: `/${tenant}/${workspace}/projects` },
         'Inbox',
       ]} />
       <Tabs
         active="unread"
         tabs={[
-          { id: 'unread', label: 'Unread',  icon: 'inbox', count: 0, to: `/${workspace}/inbox` },
+          { id: 'unread', label: 'Unread',  icon: 'inbox', count: 0, to: `/${tenant}/${workspace}/inbox` },
           { id: 'all',    label: 'All',     icon: 'list' },
           { id: 'archive',label: 'Archive', icon: 'archive' },
         ]}
@@ -30,7 +30,7 @@ export function InboxPage() {
           description="No new mentions, assignments, or replies. Notifications will appear here when other members tag you."
           action={firstProject ? (
             <Link
-              to={`/${workspace}/${firstProject.slug}/board`}
+              to={`/${tenant}/${workspace}/${firstProject.slug}/board`}
               className="btn btn-sm"
               style={{ textDecoration: 'none' }}
             >

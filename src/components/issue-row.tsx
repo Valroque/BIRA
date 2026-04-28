@@ -281,6 +281,7 @@ function renderCell(
 
 interface ListRowProps {
   issue: Issue;
+  tenant: string;
   workspace: string;
   selected?: boolean;
   onToggleSelect?: (id: string) => void;
@@ -295,7 +296,7 @@ interface ListRowProps {
 }
 
 export function ListRow(props: ListRowProps) {
-  const { issue, workspace, selected, onToggleSelect, showProject, order, visible, columns } = props;
+  const { issue, tenant, workspace, selected, onToggleSelect, showProject, order, visible, columns } = props;
   // Always call the hook; props can override its values.
   const [layout] = useColumnLayout();
   const { getProject } = useProjects();
@@ -314,7 +315,7 @@ export function ListRow(props: ListRowProps) {
 
   return (
     <Link
-      to={`/${workspace}/${issue.project}/issue/${issue.id}`}
+      to={`/${tenant}/${workspace}/${issue.project}/issue/${issue.id}`}
       style={{
         display: 'grid',
         gridTemplateColumns: effectiveColumns,

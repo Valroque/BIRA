@@ -4,7 +4,7 @@
 // pick a different one for an issue type.
 import { Link } from 'react-router-dom';
 import { Icon } from '../components/icons';
-import { TopBar, useWorkspaceContext } from '../components/shell';
+import { TopBar, useTenantContext } from '../components/shell';
 import { ProjectChip } from '../components/project-chip';
 import {
   WORKFLOWS, ISSUE_TYPE_NAMES,
@@ -15,7 +15,7 @@ import { useProjects } from '../state/projects';
 const TYPE_ORDER: IssueTypeLetter[] = ['T', 'B', 'S', 'E'];
 
 export function WorkflowsPage() {
-  const { workspace } = useWorkspaceContext();
+  const { tenant, workspace } = useTenantContext();
   const { projects, projectsUsingWorkflow } = useProjects();
 
   // Group workflows by which issue type they serve. A workflow appears under
@@ -33,7 +33,7 @@ export function WorkflowsPage() {
   return (
     <div className="bira" style={{ height: '100%', display: 'flex', flexDirection: 'column', background: 'var(--bg)' }}>
       <TopBar breadcrumbs={[
-        { label: 'Acme Robotics', to: `/${workspace}/projects` },
+        { label: 'Acme Robotics', to: `/${tenant}/${workspace}/projects` },
         'Workflows',
       ]} />
       <div style={{ padding: '20px 28px 14px', borderBottom: '1px solid var(--border-muted)' }}>
@@ -102,7 +102,7 @@ export function WorkflowsPage() {
                           {usagePairs.map(({ project: p }) => (
                             <Link
                               key={p.slug}
-                              to={`/${workspace}/${p.slug}/workflow`}
+                              to={`/${tenant}/${workspace}/${p.slug}/workflow`}
                               style={{ textDecoration: 'none' }}
                             >
                               <ProjectChip project={p} />
@@ -117,7 +117,7 @@ export function WorkflowsPage() {
                       </div>
                       {firstProject ? (
                         <Link
-                          to={`/${workspace}/${firstProject.slug}/workflow`}
+                          to={`/${tenant}/${workspace}/${firstProject.slug}/workflow`}
                           className="btn btn-sm"
                           style={{ textDecoration: 'none' }}
                           data-tip={`Open editor in ${firstProject.name}'s context`}

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import { Icon } from '../components/icons';
-import { TopBar, Tabs, Toolbar, Chip, StatusDot, TypeChip, STATUSES, projectTabs, useWorkspaceContext } from '../components/shell';
+import { TopBar, Tabs, Toolbar, Chip, StatusDot, TypeChip, STATUSES, projectTabs, useTenantContext } from '../components/shell';
 import { useDismiss } from '../components/use-dismiss';
 import {
   WORKFLOWS, ISSUE_TYPE_NAMES, DEFAULT_PROJECT_WORKFLOWS,
@@ -468,7 +468,7 @@ export function WorkflowPage() {
 }
 
 export function WorkflowEditor() {
-  const { workspace, project } = useWorkspaceContext();
+  const { tenant, workspace, project } = useTenantContext();
   const { getProject, projectsUsingWorkflow, updateProject } = useProjects();
   const projectInfo = getProject(project);
   const workflows = projectInfo?.workflows ?? DEFAULT_PROJECT_WORKFLOWS;
@@ -537,13 +537,13 @@ export function WorkflowEditor() {
   return (
     <div className="bira" style={{ height: '100%', display: 'flex', flexDirection: 'column', background: 'var(--bg)' }}>
       <TopBar breadcrumbs={[
-        { label: 'Acme Robotics', to: `/${workspace}/projects` },
-        { label: projectInfo?.name ?? project, to: `/${workspace}/${project}` },
+        { label: 'Acme Robotics', to: `/${tenant}/${workspace}/projects` },
+        { label: projectInfo?.name ?? project, to: `/${tenant}/${workspace}/${project}` },
         'Workflow',
       ]} />
       <div style={{ display: 'flex', flex: 1, minHeight: 0 }}>
         <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0 }}>
-          <Tabs active="workflow" tabs={projectTabs(workspace, project)} />
+          <Tabs active="workflow" tabs={projectTabs(tenant, workspace, project)} />
 
           {/* Issue-type segmented selector — drives which workflow is shown. */}
           <div style={{
@@ -629,6 +629,7 @@ export function WorkflowEditor() {
           selected={selected}
           nodes={nodes}
           edges={edges}
+          tenant={tenant}
           workspace={workspace}
           project={project}
           workflowName={baseWorkflow.name}
@@ -730,6 +731,7 @@ interface InspectorProps {
   selected: Selection | null;
   nodes: GraphNode[];
   edges: GraphEdge[];
+  tenant: string;
   workspace: string;
   project: string;
   workflowName: string;
@@ -740,7 +742,7 @@ interface InspectorProps {
   onDeleteEdge: (id: string) => void;
 }
 function Inspector({
-  selected, nodes, edges, workspace, project,
+  selected, nodes, edges, tenant, workspace, project,
   workflowName, issueTypeName,
   onUpdateNode, onUpdateEdge, onDeleteNode, onDeleteEdge,
 }: InspectorProps) {
@@ -766,6 +768,7 @@ function Inspector({
         <EdgeInspector
           edge={edges.find((e) => e.id === selected.id)!}
           nodes={nodes}
+          tenant={tenant}
           workspace={workspace}
           project={project}
           onChange={(patch) => onUpdateEdge(selected.id, patch)}
@@ -900,12 +903,13 @@ function NodeInspector({
 interface EdgeInspectorProps {
   edge: GraphEdge;
   nodes: GraphNode[];
+  tenant: string;
   workspace: string;
   project: string;
   onChange: (patch: Partial<GraphEdge>) => void;
   onDelete: () => void;
 }
-function EdgeInspector({ edge, nodes, workspace, project, onChange, onDelete }: EdgeInspectorProps) {
+function EdgeInspector({ edge, nodes, tenant, workspace, project, onChange, onDelete }: EdgeInspectorProps) {
   const from = nodes.find((n) => n.id === edge.from);
   const to = nodes.find((n) => n.id === edge.to);
   const fromStatus = STATUSES.find((s) => s.id === from?.statusId);
@@ -943,7 +947,7 @@ function EdgeInspector({ edge, nodes, workspace, project, onChange, onDelete }: 
         }}>
           <span className="label-section">Rules · {isFull ? 3 : 1}</span>
           <Link
-            to={`/${workspace}/${project}/workflow/rules`}
+            to={`/${tenant}/${workspace}/${project}/workflow/rules`}
             style={{ fontSize: 11.5, color: 'var(--accent)', textDecoration: 'none' }}
           >Edit in detail →</Link>
         </div>
@@ -965,7 +969,7 @@ function EdgeInspector({ edge, nodes, workspace, project, onChange, onDelete }: 
         )}
 
         <Link
-          to={`/${workspace}/${project}/workflow/rules`}
+          to={`/${tenant}/${workspace}/${project}/workflow/rules`}
           style={{
             marginTop: 8, width: '100%', height: 32,
             border: '1.5px dashed var(--border)', borderRadius: 6, background: 'transparent',

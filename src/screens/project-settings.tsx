@@ -2,7 +2,7 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Icon } from '../components/icons';
-import { TopBar, Tabs, TypeChip, projectTabs, useWorkspaceContext } from '../components/shell';
+import { TopBar, Tabs, TypeChip, projectTabs, useTenantContext } from '../components/shell';
 import { Field, Hint, DangerRow } from '../components/forms';
 import { Section } from '../components/section';
 import {
@@ -14,7 +14,7 @@ import { useProjects } from '../state/projects';
 const TYPE_ORDER: IssueTypeLetter[] = ['T', 'B', 'S', 'E'];
 
 export function ProjectSettingsPage() {
-  const { workspace, project } = useWorkspaceContext();
+  const { tenant, workspace, project } = useTenantContext();
   const navigate = useNavigate();
   const { getProject } = useProjects();
   const projectInfo = getProject(project);
@@ -31,11 +31,11 @@ export function ProjectSettingsPage() {
   return (
     <div className="bira" style={{ height: '100%', display: 'flex', flexDirection: 'column', background: 'var(--bg)' }}>
       <TopBar breadcrumbs={[
-        { label: 'Acme Robotics', to: `/${workspace}/projects` },
-        { label: projectInfo?.name ?? project, to: `/${workspace}/${project}` },
+        { label: 'Acme Robotics', to: `/${tenant}/${workspace}/projects` },
+        { label: projectInfo?.name ?? project, to: `/${tenant}/${workspace}/${project}` },
         'Settings',
       ]} />
-      <Tabs active="settings" tabs={projectTabs(workspace, project)} />
+      <Tabs active="settings" tabs={projectTabs(tenant, workspace, project)} />
 
       <div className="scroll" style={{ flex: 1, overflow: 'auto', padding: '24px 28px' }}>
         <div style={{ maxWidth: 720 }}>
@@ -106,7 +106,7 @@ export function ProjectSettingsPage() {
                       ))}
                     </select>
                     <button
-                      onClick={() => navigate(`/${workspace}/${project}/workflow`)}
+                      onClick={() => navigate(`/${tenant}/${workspace}/${project}/workflow`)}
                       className="btn btn-sm"
                       data-tip={`Open ${wf.name} in the editor`}
                     >

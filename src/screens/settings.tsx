@@ -3,28 +3,31 @@
 import { useState } from 'react';
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { Icon } from '../components/icons';
-import { TopBar, Avatar, useWorkspaceContext } from '../components/shell';
+import { TopBar, Avatar, useTenantContext } from '../components/shell';
 import { Modal, ModalHeader, ModalBody, ModalFooter } from '../components/modal';
 import { Field, Hint, DangerRow } from '../components/forms';
 import { Section } from '../components/section';
 import { MEMBERS, type Member, type WorkspaceRole } from '../fixtures';
+import { useWorkspaces } from '../state/workspaces';
 
 // --- Outer layout (header + secondary tab strip + outlet) ---
 
 export function SettingsLayout() {
-  const { workspace } = useWorkspaceContext();
+  const { tenant, workspace } = useTenantContext();
+  const { getWorkspace } = useWorkspaces();
   const { pathname } = useLocation();
-  const base = `/${workspace}/settings`;
+  const base = `/${tenant}/${workspace}/settings`;
   const sections = [
     { id: 'general', to: `${base}/general`, label: 'General', icon: 'settings' },
     { id: 'members', to: `${base}/members`, label: 'Members', icon: 'users' },
     { id: 'profile', to: `${base}/profile`, label: 'Profile',  icon: 'user' },
   ];
+  const wsName = getWorkspace(workspace)?.name ?? workspace;
 
   return (
     <div className="bira" style={{ height: '100%', display: 'flex', flexDirection: 'column', background: 'var(--bg)' }}>
       <TopBar breadcrumbs={[
-        { label: 'Acme Robotics', to: `/${workspace}/projects` },
+        { label: wsName, to: `/${tenant}/${workspace}/projects` },
         'Settings',
       ]} />
       <div style={{
@@ -337,7 +340,7 @@ export function ProfileSettings() {
       </Section>
 
       <Section title="Sign out" subtitle="Sign out of this device. You can sign back in any time." card>
-        <button onClick={() => navigate('/login')} className="btn">
+        <button onClick={() => navigate('/tenants')} className="btn">
           <Icon name="power" size={13} />Sign out
         </button>
       </Section>

@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState, type FormEvent, type ReactNode } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Icon } from '../components/icons';
-import { TypeChip, StatusDot, Priority, Avatar, KBD, useWorkspaceContext } from '../components/shell';
+import { TypeChip, StatusDot, Priority, Avatar, KBD, useTenantContext } from '../components/shell';
 import { AttachmentRow, useComposer } from '../components/composer';
 import { issueById, type Issue } from '../fixtures';
 
@@ -29,7 +29,7 @@ function allowedTypesFor(parent: Issue | null): TypeChar[] {
 
 export function CreateIssuePage() {
   const navigate = useNavigate();
-  const { workspace, project } = useWorkspaceContext();
+  const { tenant, workspace, project } = useTenantContext();
   const [searchParams] = useSearchParams();
   const close = () => navigate(-1);
   const desc = useComposer();
@@ -59,7 +59,7 @@ export function CreateIssuePage() {
   // can do without persistence).
   const submit = (e?: FormEvent) => {
     e?.preventDefault();
-    navigate(`/${workspace}/${project}/issue/CMT-241`, { replace: true });
+    navigate(`/${tenant}/${workspace}/${project}/issue/CMT-241`, { replace: true });
   };
 
   // Esc closes the modal.

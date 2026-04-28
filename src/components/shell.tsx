@@ -8,10 +8,19 @@ import { ISSUES, CURRENT_USER, TEAMS } from '../fixtures';
 import { useProjects } from '../state/projects';
 import { useWorkspaces } from '../state/workspaces';
 
-/** Read workspace + project from the URL with sensible defaults for routes that don't have them. */
-export function useWorkspaceContext() {
-  const { workspace = 'acme', project = 'comet' } = useParams<{ workspace?: string; project?: string }>();
-  return { workspace, project };
+/**
+ * Read tenant + workspace + project from the URL. Empty-string fallback when
+ * any segment is missing (e.g. on a workspace-less route). Callers that need
+ * to build URLs always have all three available — there are no hardcoded
+ * defaults like `acme` / `comet` anymore.
+ */
+export function useTenantContext() {
+  const params = useParams<{ tenant?: string; workspace?: string; project?: string }>();
+  return {
+    tenant: params.tenant ?? '',
+    workspace: params.workspace ?? '',
+    project: params.project ?? '',
+  };
 }
 
 export const STATUSES = [
@@ -134,10 +143,10 @@ export const TopBar = ({ breadcrumbs = [], showSearch = true, showNewIssue = tru
 
 /** TopBar's "New issue" button — project-aware via URL params. */
 function NewIssueButton() {
-  const { workspace, project } = useWorkspaceContext();
+  const { tenant, workspace, project } = useTenantContext();
   return (
     <Link
-      to={`/${workspace}/${project}/issue/new`}
+      to={`/${tenant}/${workspace}/${project}/issue/new`}
       className="btn btn-primary btn-sm"
       style={{ textDecoration: 'none' }}
     >
@@ -154,7 +163,7 @@ interface SidebarProps {
 
 export const Sidebar = ({ collapsed = false, active = '' }: SidebarProps) => {
   const w = collapsed ? 52 : 232;
-  const { workspace } = useWorkspaceContext();
+  const { tenant, workspace } = useTenantContext();
   const { projects } = useProjects();
   const { getWorkspace } = useWorkspaces();
   const ws = getWorkspace(workspace);
@@ -241,7 +250,7 @@ export const Sidebar = ({ collapsed = false, active = '' }: SidebarProps) => {
     }}>
       {/* Workspace header — clicking returns to the picker. */}
       <Link
-        to="/workspaces"
+        to={`/${tenant}/workspaces`}
         title={collapsed ? `${ws?.name ?? workspace} — Switch workspace` : undefined}
         data-tip={!collapsed ? 'Switch workspace' : undefined}
         style={{
@@ -275,14 +284,14 @@ export const Sidebar = ({ collapsed = false, active = '' }: SidebarProps) => {
         {/* Counts are derived from issues whose project belongs to the
             current workspace — so a fresh workspace with no projects shows
             "0", not the global fixture total. */}
-        <Item id="inbox"      icon="inbox" label="Inbox"      to={`/${workspace}/inbox`} count={3} />
-        <Item id="my-issues"  icon="user"  label="My issues"  to={`/${workspace}/my-issues`}
+        <Item id="inbox"      icon="inbox" label="Inbox"      to={`/${tenant}/${workspace}/inbox`} count={3} />
+        <Item id="my-issues"  icon="user"  label="My issues"  to={`/${tenant}/${workspace}/my-issues`}
               count={workspaceIssues.filter((i) => i.assignee === CURRENT_USER.name).length} />
-        <Item id="all-issues" icon="list"  label="All issues" to={`/${workspace}/all-issues`}
+        <Item id="all-issues" icon="list"  label="All issues" to={`/${tenant}/${workspace}/all-issues`}
               count={workspaceIssues.length} />
 
         <Section label="Projects">
-          <Item id="all-projects" icon="grid" label="All projects" to={`/${workspace}/projects`} />
+          <Item id="all-projects" icon="grid" label="All projects" to={`/${tenant}/${workspace}/projects`} />
           {sidebarProjects.map((p) => {
             const isActive = active === p.slug || active.startsWith(`${p.slug}-`);
             return (
@@ -291,13 +300,13 @@ export const Sidebar = ({ collapsed = false, active = '' }: SidebarProps) => {
                   id={p.slug}
                   icon={isActive ? 'folderOpen' : 'folder'}
                   label={p.name}
-                  to={`/${workspace}/${p.slug}`}
+                  to={`/${tenant}/${workspace}/${p.slug}`}
                 />
                 {isActive && (
                   <>
-                    <Item id={`${p.slug}-board`}    icon="board"    label="Board"    indent={1} to={`/${workspace}/${p.slug}/board`} />
-                    <Item id={`${p.slug}-list`}     icon="list"     label="Issues"   indent={1} to={`/${workspace}/${p.slug}/list`} />
-                    <Item id={`${p.slug}-workflow`} icon="workflow" label="Workflow" indent={1} to={`/${workspace}/${p.slug}/workflow`} />
+                    <Item id={`${p.slug}-board`}    icon="board"    label="Board"    indent={1} to={`/${tenant}/${workspace}/${p.slug}/board`} />
+                    <Item id={`${p.slug}-list`}     icon="list"     label="Issues"   indent={1} to={`/${tenant}/${workspace}/${p.slug}/list`} />
+                    <Item id={`${p.slug}-workflow`} icon="workflow" label="Workflow" indent={1} to={`/${tenant}/${workspace}/${p.slug}/workflow`} />
                   </>
                 )}
               </Fragment>
@@ -306,7 +315,7 @@ export const Sidebar = ({ collapsed = false, active = '' }: SidebarProps) => {
         </Section>
 
         <Section label="Workspace">
-          <Item id="workflows" icon="branch" label="Issue types & workflows" to={`/${workspace}/workflows`} />
+          <Item id="workflows" icon="branch" label="Issue types & workflows" to={`/${tenant}/${workspace}/workflows`} />
         </Section>
 
         {/*
@@ -319,21 +328,21 @@ export const Sidebar = ({ collapsed = false, active = '' }: SidebarProps) => {
         </Section>
 
         <Section label="Teams">
-          <Item id="all-teams" icon="users" label="All teams" to={`/${workspace}/teams`} />
+          <Item id="all-teams" icon="users" label="All teams" to={`/${tenant}/${workspace}/teams`} />
           {TEAMS.map((t) => (
             <Item
               key={t.slug}
               id={`team-${t.slug}`}
               icon="hash"
               label={t.name}
-              to={`/${workspace}/teams/${t.slug}`}
+              to={`/${tenant}/${workspace}/teams/${t.slug}`}
             />
           ))}
         </Section>
       </div>
 
       <div style={{ borderTop: '1px solid var(--border-muted)', padding: '8px 0' }}>
-        <Item id="settings" icon="settings" label="Settings" to={`/${workspace}/settings`} />
+        <Item id="settings" icon="settings" label="Settings" to={`/${tenant}/${workspace}/settings`} />
         <Item id="help" icon="question" label="Help" />
       </div>
     </div>
@@ -422,14 +431,15 @@ export const Chip = ({ children, onX, dim, style }: ChipProps) => (
  * fixture count for `project`; pass `opts.issueCount` to override (e.g.
  * to show a filtered count).
  */
-export function projectTabs(workspace: string, project: string, opts?: { issueCount?: number }): Tab[] {
+export function projectTabs(tenant: string, workspace: string, project: string, opts?: { issueCount?: number }): Tab[] {
   const issueCount = opts?.issueCount ?? ISSUES.filter((i) => i.project === project).length;
+  const base = `/${tenant}/${workspace}/${project}`;
   return [
-    { id: 'overview', label: 'Overview', icon: 'eye',      to: `/${workspace}/${project}` },
-    { id: 'board',    label: 'Board',    icon: 'board',    to: `/${workspace}/${project}/board` },
-    { id: 'issues',   label: 'Issues',   icon: 'list',     to: `/${workspace}/${project}/list`, count: issueCount },
-    { id: 'workflow', label: 'Workflow', icon: 'workflow', to: `/${workspace}/${project}/workflow` },
-    { id: 'members',  label: 'Members',  icon: 'users',    to: `/${workspace}/${project}/members` },
-    { id: 'settings', label: 'Settings', icon: 'settings', to: `/${workspace}/${project}/settings` },
+    { id: 'overview', label: 'Overview', icon: 'eye',      to: base },
+    { id: 'board',    label: 'Board',    icon: 'board',    to: `${base}/board` },
+    { id: 'issues',   label: 'Issues',   icon: 'list',     to: `${base}/list`, count: issueCount },
+    { id: 'workflow', label: 'Workflow', icon: 'workflow', to: `${base}/workflow` },
+    { id: 'members',  label: 'Members',  icon: 'users',    to: `${base}/members` },
+    { id: 'settings', label: 'Settings', icon: 'settings', to: `${base}/settings` },
   ];
 }

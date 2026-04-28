@@ -2,7 +2,7 @@
 import { useRef, useState, type ReactNode } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { Icon } from './icons';
-import { Avatar, KBD, useWorkspaceContext } from './shell';
+import { Avatar, KBD, useTenantContext } from './shell';
 import { useDismiss } from './use-dismiss';
 
 interface Notification {
@@ -15,10 +15,10 @@ interface Notification {
 }
 
 const NOTIFS: Notification[] = [
-  { id: 'n1', who: 'Maya Chen', verb: <>commented on <strong>CMT-241</strong></>, when: '2h ago', unread: true, href: '/acme/comet/issue/CMT-241' },
-  { id: 'n2', who: 'Sam Park',  verb: <>moved <strong>CMT-234</strong> to In Progress</>, when: '4h ago', unread: true, href: '/acme/comet/issue/CMT-234' },
-  { id: 'n3', who: 'Jordan Lee', verb: <>assigned <strong>CMT-238</strong> to you</>, when: 'yesterday', unread: true, href: '/acme/comet/issue/CMT-238' },
-  { id: 'n4', who: 'Priya Rao', verb: <>resolved <strong>CMT-227</strong></>, when: '2d ago', href: '/acme/comet/issue/CMT-227' },
+  { id: 'n1', who: 'Maya Chen', verb: <>commented on <strong>CMT-241</strong></>, when: '2h ago', unread: true, href: '/acme-corp/acme/comet/issue/CMT-241' },
+  { id: 'n2', who: 'Sam Park',  verb: <>moved <strong>CMT-234</strong> to In Progress</>, when: '4h ago', unread: true, href: '/acme-corp/acme/comet/issue/CMT-234' },
+  { id: 'n3', who: 'Jordan Lee', verb: <>assigned <strong>CMT-238</strong> to you</>, when: 'yesterday', unread: true, href: '/acme-corp/acme/comet/issue/CMT-238' },
+  { id: 'n4', who: 'Priya Rao', verb: <>resolved <strong>CMT-227</strong></>, when: '2d ago', href: '/acme-corp/acme/comet/issue/CMT-227' },
 ];
 
 export function NotificationsButton() {
@@ -101,11 +101,11 @@ export function UserMenu() {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
   const navigate = useNavigate();
-  const { workspace } = useWorkspaceContext();
+  const { tenant, workspace } = useTenantContext();
   useDismiss(ref, () => setOpen(false), open);
 
   const go = (to: string) => { setOpen(false); navigate(to); };
-  const signOut = () => go('/login');
+  const signOut = () => go('/tenants');
 
   return (
     <div ref={ref} style={{ position: 'relative' }}>
@@ -135,11 +135,11 @@ export function UserMenu() {
             </div>
           </div>
           <div style={{ padding: 4 }}>
-            <MenuRow icon="user" label="Profile" onClick={() => go(`/${workspace}/settings/profile`)} />
-            <MenuRow icon="settings" label="Workspace settings" onClick={() => go(`/${workspace}/settings/general`)} />
-            <MenuRow icon="users" label="Members & invites" onClick={() => go(`/${workspace}/settings/members`)} />
+            <MenuRow icon="user" label="Profile" onClick={() => go(`/${tenant}/${workspace}/settings/profile`)} />
+            <MenuRow icon="settings" label="Workspace settings" onClick={() => go(`/${tenant}/${workspace}/settings/general`)} />
+            <MenuRow icon="users" label="Members & invites" onClick={() => go(`/${tenant}/${workspace}/settings/members`)} />
             <div style={{ height: 1, background: 'var(--border-muted)', margin: '4px 0' }} />
-            <MenuRow icon="globe" label="Switch workspace" onClick={() => go('/login')} />
+            <MenuRow icon="globe" label="Switch workspace" onClick={() => go(`/${tenant}/workspaces`)} />
             <MenuRow icon="moon" label="Theme: light" disabled />
             <div style={{ height: 1, background: 'var(--border-muted)', margin: '4px 0' }} />
             <MenuRow icon="power" label="Sign out" onClick={signOut} danger />

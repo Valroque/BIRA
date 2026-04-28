@@ -14,7 +14,7 @@ import {
 import { Icon } from './icons';
 import {
   Toolbar, StatusDot, Avatar, Priority, TypeChip,
-  STATUSES, useWorkspaceContext,
+  STATUSES, useTenantContext,
 } from './shell';
 import {
   ListRow, buildRowColumns, useColumnLayout, MIN_WIDTHS, COLUMN_LABELS,
@@ -98,7 +98,7 @@ export function IssuesTable(props: IssuesTableProps) {
     return projectScoped ? base.filter((g) => g !== 'project') : base;
   }, [props.groupOptions, projectScoped]);
 
-  const { workspace } = useWorkspaceContext();
+  const { tenant, workspace } = useTenantContext();
   const { projects } = useProjects();
 
   const [groupBy, setGroupBy] = useState<IssueGroupKey>(defaultGroup);
@@ -281,6 +281,7 @@ export function IssuesTable(props: IssuesTableProps) {
                   <ListRow
                     key={i.id}
                     issue={i}
+                    tenant={tenant}
                     workspace={workspace}
                     selected={selectedIds.has(i.id)}
                     onToggleSelect={toggleSelect}

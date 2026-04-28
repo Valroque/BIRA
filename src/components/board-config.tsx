@@ -53,12 +53,12 @@ export function defaultBoardConfig(): BoardConfig {
   };
 }
 
-const storageKey = (workspace: string, project: string) =>
-  `bira:board-columns:${workspace}:${project}`;
+const storageKey = (tenant: string, workspace: string, project: string) =>
+  `bira:board-columns:${tenant}:${workspace}:${project}`;
 
-function loadConfig(workspace: string, project: string): BoardConfig {
+function loadConfig(tenant: string, workspace: string, project: string): BoardConfig {
   try {
-    const raw = localStorage.getItem(storageKey(workspace, project));
+    const raw = localStorage.getItem(storageKey(tenant, workspace, project));
     if (!raw) return defaultBoardConfig();
     const parsed = JSON.parse(raw);
     if (!parsed || !Array.isArray(parsed.columns)) return defaultBoardConfig();
@@ -80,21 +80,21 @@ function loadConfig(workspace: string, project: string): BoardConfig {
   }
 }
 
-export function useBoardConfig(workspace: string, project: string) {
-  const [config, setConfig] = useState<BoardConfig>(() => loadConfig(workspace, project));
+export function useBoardConfig(tenant: string, workspace: string, project: string) {
+  const [config, setConfig] = useState<BoardConfig>(() => loadConfig(tenant, workspace, project));
 
-  // Reload when navigating between projects/workspaces.
+  // Reload when navigating between projects/workspaces/tenants.
   useEffect(() => {
-    setConfig(loadConfig(workspace, project));
-  }, [workspace, project]);
+    setConfig(loadConfig(tenant, workspace, project));
+  }, [tenant, workspace, project]);
 
   useEffect(() => {
     try {
-      localStorage.setItem(storageKey(workspace, project), JSON.stringify(config));
+      localStorage.setItem(storageKey(tenant, workspace, project), JSON.stringify(config));
     } catch {
       // Quota / privacy mode — best-effort, ignore.
     }
-  }, [workspace, project, config]);
+  }, [tenant, workspace, project, config]);
 
   const reset = useCallback(() => setConfig(defaultBoardConfig()), []);
 

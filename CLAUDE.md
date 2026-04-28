@@ -10,6 +10,12 @@ For the **decision log** explaining *why* the rules below are what they
 are, see [`docs/decisions.md`](docs/decisions.md). The hard rules
 themselves live at [`.claude/rules/v1-constraints.md`](.claude/rules/v1-constraints.md).
 
+> **In-flight refactor (2026-04):** Tenant level is being added above
+> Workspace. URL shape is now `/:tenant/:workspace/...`. See
+> `memory/project_tenant_refactor.md` for the current scope and which
+> phases have landed. The full TL;DR + rules below will be reconciled
+> when Phase 5 lands.
+
 ---
 
 ## TL;DR — if you only read this
@@ -41,18 +47,18 @@ themselves live at [`.claude/rules/v1-constraints.md`](.claude/rules/v1-constrai
    integrations, notifications, public REST API, granular roles. Full
    list in `.claude/rules/v1-constraints.md`.
 8. **State**: in-memory fixtures only (`src/fixtures.ts`), plus a few
-   `localStorage` keys: `bira:list-layout` (column UI prefs),
-   `bira:board-columns:<workspace>:<project>` (per-project board config),
-   `bira:projects:<workspace>` (user-created projects, scoped per workspace —
-   `ProjectsProvider` is mounted per workspace inside `WorkspaceLayout` and
-   only seeds `SEED_PROJECTS` for the demo `acme` workspace), and
-   `bira:workspaces` (user-created workspaces from the New workspace flow —
-   merged with `WORKSPACES` by `WorkspacesProvider`). Workspace + project
-   come from the URL via `useWorkspaceContext()` in `shell.tsx` — never
-   hardcode `/acme/comet/`. Read project data via `useProjects()` from
-   `src/state/projects.tsx`, and workspace data via `useWorkspaces()` from
-   `src/state/workspaces.tsx` — never from stale `PROJECT_INFO` /
-   `WORKSPACES`-direct lookups.
+   `localStorage` keys: `bira:list-layout` (column UI prefs, tenant-unaware),
+   `bira:issue-inspector-width` (UI prefs, tenant-unaware), `bira:tenants`
+   (user-created tenants — merged with `TENANTS` by `TenantsProvider`),
+   `bira:workspaces:<tenant>` (per-tenant workspace list — `WorkspacesProvider`
+   is mounted per tenant inside `TenantLayout`), `bira:projects:<tenant>:<workspace>`
+   (per-workspace project list — only the demo `acme-corp/acme` workspace
+   gets `SEED_PROJECTS` seeded), and `bira:board-columns:<tenant>:<workspace>:<project>`
+   (per-project board config). Tenant + workspace + project come from the URL via
+   `useTenantContext()` in `shell.tsx` — never hardcode `/acme-corp/acme/comet/`.
+   Read tenant data via `useTenants()` from `src/state/tenants.tsx`, workspace data via
+   `useWorkspaces()` from `src/state/workspaces.tsx`, and project data via `useProjects()`
+   from `src/state/projects.tsx` — never from stale `WORKSPACES`/`TENANTS`-direct lookups.
 9. **Reuse, don't reinvent**: every layout primitive lives in
    `src/components/` (especially `shell.tsx`). Adding a parallel `<button>`
    styled like an existing `Chip` is a defect, not a shortcut.
