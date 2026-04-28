@@ -5,7 +5,7 @@
 import { useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { Icon } from '../components/icons';
-import { TopBar, Avatar, useTenantContext } from '../components/shell';
+import { TopBar, Avatar, useTenantContext, useTenantBreadcrumbs } from '../components/shell';
 import { Modal, ModalHeader, ModalBody, ModalFooter } from '../components/modal';
 import { Section } from '../components/section';
 import { ProjectBadge } from '../components/project-chip';
@@ -20,7 +20,7 @@ import { useProjects } from '../state/projects';
 // ----- Index -----
 
 export function TeamsPage() {
-  const { tenant, workspace } = useTenantContext();
+  const { tenant, workspace, tenantName, workspaceName } = useTenantBreadcrumbs();
   const [filter, setFilter] = useState('');
   const [showCreate, setShowCreate] = useState(false);
 
@@ -31,7 +31,8 @@ export function TeamsPage() {
   return (
     <div className="bira" style={{ height: '100%', display: 'flex', flexDirection: 'column', background: 'var(--bg)' }}>
       <TopBar breadcrumbs={[
-        { label: 'Acme Robotics', to: `/${tenant}/${workspace}/projects` },
+        { label: tenantName, to: `/${tenant}/workspaces` },
+        { label: workspaceName, to: `/${tenant}/${workspace}/projects` },
         'Teams',
       ]} />
       <div style={{ padding: '20px 28px 14px', borderBottom: '1px solid var(--border-muted)' }}>
@@ -122,7 +123,7 @@ function TeamCard({ team, tenant, workspace }: { team: Team; tenant: string; wor
 // ----- Detail -----
 
 export function TeamDetailPage() {
-  const { tenant, workspace } = useTenantContext();
+  const { tenant, workspace, tenantName, workspaceName } = useTenantBreadcrumbs();
   const { teamSlug } = useParams<{ teamSlug: string }>();
   const team = teamSlug ? teamBySlug(teamSlug) : undefined;
 
@@ -141,10 +142,10 @@ export function TeamDetailPage() {
     );
   }
 
-  return <TeamDetail team={team} tenant={tenant} workspace={workspace} />;
+  return <TeamDetail team={team} tenant={tenant} workspace={workspace} tenantName={tenantName} workspaceName={workspaceName} />;
 }
 
-function TeamDetail({ team, tenant, workspace }: { team: Team; tenant: string; workspace: string }) {
+function TeamDetail({ team, tenant, workspace, tenantName, workspaceName }: { team: Team; tenant: string; workspace: string; tenantName: string; workspaceName: string }) {
   const { projectsForTeam } = useProjects();
   const [memberEmails, setMemberEmails] = useState<string[]>(team.memberEmails);
   const [showAddMember, setShowAddMember] = useState(false);
@@ -163,7 +164,8 @@ function TeamDetail({ team, tenant, workspace }: { team: Team; tenant: string; w
   return (
     <div className="bira" style={{ height: '100%', display: 'flex', flexDirection: 'column', background: 'var(--bg)' }}>
       <TopBar breadcrumbs={[
-        { label: 'Acme Robotics', to: `/${tenant}/${workspace}/projects` },
+        { label: tenantName, to: `/${tenant}/workspaces` },
+        { label: workspaceName, to: `/${tenant}/${workspace}/projects` },
         { label: 'Teams', to: `/${tenant}/${workspace}/teams` },
         team.name,
       ]} />

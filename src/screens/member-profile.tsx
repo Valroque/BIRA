@@ -8,7 +8,7 @@ import { Link, useParams } from 'react-router-dom';
 import { Icon } from '../components/icons';
 import {
   TopBar, Avatar, IssueId, TypeChip, StatusDot, Priority,
-  useTenantContext,
+  useTenantContext, useTenantBreadcrumbs,
 } from '../components/shell';
 import { Section } from '../components/section';
 import { ProjectBadge } from '../components/project-chip';
@@ -57,7 +57,7 @@ export function MemberProfilePage() {
 }
 
 function MemberProfile({ member }: { member: Member }) {
-  const { tenant, workspace } = useTenantContext();
+  const { tenant, workspace, tenantName, workspaceName } = useTenantBreadcrumbs();
   const { projects } = useProjects();
 
   // Issues visible to a member: anything currently assigned to them. The
@@ -81,7 +81,8 @@ function MemberProfile({ member }: { member: Member }) {
     <div className="bira" style={{ height: '100%', display: 'flex', flexDirection: 'column', background: 'var(--bg)' }}>
       <TopBar
         breadcrumbs={[
-          { label: 'Acme Robotics', to: `/${tenant}/${workspace}/projects` },
+          { label: tenantName, to: `/${tenant}/workspaces` },
+          { label: workspaceName, to: `/${tenant}/${workspace}/projects` },
           { label: 'Members', to: `/${tenant}/${workspace}/settings/members` },
           member.name,
         ]}

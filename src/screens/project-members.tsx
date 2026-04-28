@@ -5,7 +5,7 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Icon } from '../components/icons';
-import { TopBar, Tabs, projectTabs, useTenantContext } from '../components/shell';
+import { TopBar, Tabs, projectTabs, useTenantBreadcrumbs } from '../components/shell';
 import { Modal, ModalHeader } from '../components/modal';
 import { Section } from '../components/section';
 import { AddMembersModal, AvatarStack, MemberRow, TeamBadge } from './teams';
@@ -17,7 +17,7 @@ import {
 import { useProjects } from '../state/projects';
 
 export function ProjectMembersPage() {
-  const { tenant, workspace, project } = useTenantContext();
+  const { tenant, workspace, project, tenantName, workspaceName } = useTenantBreadcrumbs();
   const { getProject } = useProjects();
   const projectInfo = getProject(project);
 
@@ -44,7 +44,8 @@ export function ProjectMembersPage() {
   return (
     <div className="bira" style={{ height: '100%', display: 'flex', flexDirection: 'column', background: 'var(--bg)' }}>
       <TopBar breadcrumbs={[
-        { label: 'Acme Robotics', to: `/${tenant}/${workspace}/projects` },
+        { label: tenantName, to: `/${tenant}/workspaces` },
+        { label: workspaceName, to: `/${tenant}/${workspace}/projects` },
         { label: projectInfo?.name ?? project, to: `/${tenant}/${workspace}/${project}` },
         'Members',
       ]} />

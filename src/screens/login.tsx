@@ -16,7 +16,15 @@ export function LoginPage() {
   // ugly empty-tenant headline.
   if (!tenant) return <Navigate to="/tenants" replace />;
 
-  const tenantName = getTenant(tenant)?.name ?? tenant;
+  // Tenant identity surfaced at the top of the login card — anonymous
+  // surface, so the chip + name aren't redundant the way they would be
+  // inside the signed-in app shell. Defensive fallbacks keep the chip
+  // rendering even for typoed slugs that don't match a fixture.
+  const t = getTenant(tenant);
+  const tenantName = t?.name ?? tenant;
+  const tenantLetter = (t?.letter ?? tenant[0] ?? '?').toUpperCase();
+  const tenantColor = t?.color ?? 'var(--fg-muted)';
+  const tenantBg = t?.bg ?? 'var(--bg-muted)';
 
   const submit = (e: FormEvent) => {
     e.preventDefault();
@@ -44,9 +52,41 @@ export function LoginPage() {
         </div>
 
         <div className="card" style={{ padding: 22 }}>
+          {/* Tenant identity — anchors the anonymous login to a specific tenant */}
+          <div style={{
+            display: 'flex', alignItems: 'center', gap: 10,
+            paddingBottom: 14, marginBottom: 14,
+            borderBottom: '1px solid var(--border-muted)',
+          }}>
+            <div style={{
+              width: 36, height: 36, borderRadius: 4,
+              border: '1px solid var(--border)',
+              background: tenantBg, color: tenantColor,
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              fontWeight: 700, fontSize: 16, flexShrink: 0,
+            }}>
+              {tenantLetter}
+            </div>
+            <div style={{ minWidth: 0 }}>
+              <div style={{
+                fontSize: 10, fontWeight: 700, letterSpacing: 1,
+                color: 'var(--fg-faint)', textTransform: 'uppercase',
+                marginBottom: 1,
+              }}>
+                Tenant
+              </div>
+              <div style={{
+                fontSize: 14, fontWeight: 600,
+                overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+              }}>
+                {tenantName}
+              </div>
+            </div>
+          </div>
+
           <h2 style={{ fontSize: 17, fontWeight: 600, margin: 0 }}>Sign in</h2>
           <p style={{ fontSize: 12.5, color: 'var(--fg-muted)', margin: '4px 0 16px' }}>
-            Signing in to <strong style={{ color: 'var(--fg)' }}>{tenantName}</strong>. You'll pick a workspace next.
+            You'll pick a workspace next.
           </p>
 
           <Field label="Email">

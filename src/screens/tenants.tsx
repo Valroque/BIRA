@@ -150,13 +150,21 @@ function TenantRow({ t }: { t: Tenant }) {
       }}
     >
       <div style={{
-        width: 38, height: 38, borderRadius: 8, flexShrink: 0,
+        width: 38, height: 38, borderRadius: 4, flexShrink: 0,
+        border: '1px solid var(--border)',
         background: t.bg, color: t.color,
         display: 'flex', alignItems: 'center', justifyContent: 'center',
         fontWeight: 700, fontSize: 16,
       }}>{t.letter}</div>
 
       <div style={{ flex: 1, minWidth: 0 }}>
+        <span style={{
+          fontSize: 10, fontWeight: 700, letterSpacing: 1,
+          color: 'var(--fg-faint)', textTransform: 'uppercase',
+          display: 'block', marginBottom: 2,
+        }}>
+          Tenant
+        </span>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           <span style={{ fontSize: 14, fontWeight: 600 }}>{t.name}</span>
           <RolePill role={t.role} />

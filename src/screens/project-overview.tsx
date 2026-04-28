@@ -1,17 +1,18 @@
 import { Link } from 'react-router-dom';
-import { TopBar, Tabs, projectTabs, useTenantContext } from '../components/shell';
+import { TopBar, Tabs, projectTabs, useTenantBreadcrumbs } from '../components/shell';
 import { ListRow } from '../components/issue-row';
 import { ISSUES } from '../fixtures';
 import { useProjects } from '../state/projects';
 
 export function ProjectOverviewPage() {
-  const { tenant, workspace, project } = useTenantContext();
+  const { tenant, workspace, project, tenantName, workspaceName } = useTenantBreadcrumbs();
   const { getProject } = useProjects();
   const projectInfo = getProject(project);
   return (
     <div className="bira" style={{ height: '100%', display: 'flex', flexDirection: 'column', background: 'var(--bg)' }}>
       <TopBar breadcrumbs={[
-        { label: 'Acme Robotics', to: `/${tenant}/${workspace}/projects` },
+        { label: tenantName, to: `/${tenant}/workspaces` },
+        { label: workspaceName, to: `/${tenant}/${workspace}/projects` },
         projectInfo?.name ?? project,
       ]} />
       <Tabs active="overview" tabs={projectTabs(tenant, workspace, project)} />
