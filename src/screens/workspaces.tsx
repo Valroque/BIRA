@@ -57,9 +57,14 @@ export function WorkspacesPage() {
               </p>
             </div>
             {workspaces.length > 0 && (
-              <button onClick={() => setShowCreate(true)} className="btn btn-primary btn-sm">
-                <Icon name="plus" size={13} />New workspace
-              </button>
+              <>
+                <Link to={`/${tenant}/settings`} className="btn btn-sm" style={{ textDecoration: 'none' }}>
+                  <Icon name="settings" size={13} />Tenant settings
+                </Link>
+                <button onClick={() => setShowCreate(true)} className="btn btn-primary btn-sm">
+                  <Icon name="plus" size={13} />New workspace
+                </button>
+              </>
             )}
           </div>
 

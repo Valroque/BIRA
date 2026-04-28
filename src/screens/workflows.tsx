@@ -4,7 +4,7 @@
 // pick a different one for an issue type.
 import { Link } from 'react-router-dom';
 import { Icon } from '../components/icons';
-import { TopBar, useTenantContext } from '../components/shell';
+import { TopBar, useTenantBreadcrumbs } from '../components/shell';
 import { ProjectChip } from '../components/project-chip';
 import {
   WORKFLOWS, ISSUE_TYPE_NAMES,
@@ -15,7 +15,7 @@ import { useProjects } from '../state/projects';
 const TYPE_ORDER: IssueTypeLetter[] = ['T', 'B', 'S', 'E'];
 
 export function WorkflowsPage() {
-  const { tenant, workspace } = useTenantContext();
+  const { tenant, workspace, tenantName, workspaceName } = useTenantBreadcrumbs();
   const { projects, projectsUsingWorkflow } = useProjects();
 
   // Group workflows by which issue type they serve. A workflow appears under
@@ -33,7 +33,8 @@ export function WorkflowsPage() {
   return (
     <div className="bira" style={{ height: '100%', display: 'flex', flexDirection: 'column', background: 'var(--bg)' }}>
       <TopBar breadcrumbs={[
-        { label: 'Acme Robotics', to: `/${tenant}/${workspace}/projects` },
+        { label: tenantName, to: `/${tenant}/workspaces` },
+        { label: workspaceName, to: `/${tenant}/${workspace}/projects` },
         'Workflows',
       ]} />
       <div style={{ padding: '20px 28px 14px', borderBottom: '1px solid var(--border-muted)' }}>

@@ -16,6 +16,7 @@ import { CreateIssuePage } from './screens/create-issue';
 import { AcceptInvitePage } from './screens/accept-invite';
 import { SetupPage } from './screens/setup';
 import { SettingsLayout, GeneralSettings, MembersSettings, ProfileSettings } from './screens/settings';
+import { TenantSettingsLayout, TenantGeneralSettings, TenantMembersSettings } from './screens/tenant-settings';
 import { ProjectsPage } from './screens/projects';
 import { ProjectSettingsPage } from './screens/project-settings';
 import { WorkflowsPage } from './screens/workflows';
@@ -57,8 +58,12 @@ function WorkspaceLayout() {
     sidebarActive = m ? `team-${m[1]}` : 'all-teams';
   }
   else if (pathname.endsWith('/teams')) sidebarActive = 'all-teams';
-  // Workspace-level settings (not project-scoped) → bottom Settings item.
+  // Workspace-level settings (3 segments deep): /:tenant/:workspace/settings
   else if (/^\/[^/]+\/[^/]+\/settings(\/|$)/.test(pathname)) sidebarActive = 'settings';
+  // Tenant-level settings (2 segments deep): /:tenant/settings — tenant settings is
+  // full-bleed (no sidebar) so this case currently can't render the sidebar; included
+  // for completeness in case a sidebar is added later.
+  else if (/^\/[^/]+\/settings(\/|$)/.test(pathname)) sidebarActive = 'tenant-settings';
   else if (project) {
     if (pathname.endsWith('/board')) sidebarActive = `${project}-board`;
     else if (pathname.endsWith('/list')) sidebarActive = `${project}-list`;
@@ -136,6 +141,13 @@ export default function App() {
           <Route path="/:tenant" element={<TenantHomeRedirect />} />
           {/* Workspace picker — literal segment, ordered before `/:tenant/:workspace`. */}
           <Route path="/:tenant/workspaces" element={<WorkspacesPage />} />
+
+          {/* Tenant-level settings — full-bleed (no sidebar), outside WorkspaceLayout. */}
+          <Route path="/:tenant/settings" element={<TenantSettingsLayout />}>
+            <Route index element={<Navigate to="general" replace />} />
+            <Route path="general" element={<TenantGeneralSettings />} />
+            <Route path="members" element={<TenantMembersSettings />} />
+          </Route>
 
           <Route element={<WorkspaceLayout />}>
             <Route path="/:tenant/:workspace" element={<WorkspaceHomeRedirect />} />

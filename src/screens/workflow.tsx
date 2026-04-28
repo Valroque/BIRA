@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import { Icon } from '../components/icons';
-import { TopBar, Tabs, Toolbar, Chip, StatusDot, TypeChip, STATUSES, projectTabs, useTenantContext } from '../components/shell';
+import { TopBar, Tabs, Toolbar, Chip, StatusDot, TypeChip, STATUSES, projectTabs, useTenantBreadcrumbs } from '../components/shell';
 import { useDismiss } from '../components/use-dismiss';
 import {
   WORKFLOWS, ISSUE_TYPE_NAMES, DEFAULT_PROJECT_WORKFLOWS,
@@ -468,7 +468,7 @@ export function WorkflowPage() {
 }
 
 export function WorkflowEditor() {
-  const { tenant, workspace, project } = useTenantContext();
+  const { tenant, workspace, project, tenantName, workspaceName } = useTenantBreadcrumbs();
   const { getProject, projectsUsingWorkflow, updateProject } = useProjects();
   const projectInfo = getProject(project);
   const workflows = projectInfo?.workflows ?? DEFAULT_PROJECT_WORKFLOWS;
@@ -537,7 +537,8 @@ export function WorkflowEditor() {
   return (
     <div className="bira" style={{ height: '100%', display: 'flex', flexDirection: 'column', background: 'var(--bg)' }}>
       <TopBar breadcrumbs={[
-        { label: 'Acme Robotics', to: `/${tenant}/${workspace}/projects` },
+        { label: tenantName, to: `/${tenant}/workspaces` },
+        { label: workspaceName, to: `/${tenant}/${workspace}/projects` },
         { label: projectInfo?.name ?? project, to: `/${tenant}/${workspace}/${project}` },
         'Workflow',
       ]} />

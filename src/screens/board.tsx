@@ -4,7 +4,7 @@ import { Icon } from '../components/icons';
 import {
   TopBar, Tabs, Toolbar,
   StatusDot, TypeChip, Priority, Avatar, IssueId, STATUSES,
-  projectTabs, useTenantContext,
+  projectTabs, useTenantBreadcrumbs,
 } from '../components/shell';
 import { StatusPill } from '../components/status-pill';
 import {
@@ -38,7 +38,7 @@ interface BoardViewProps {
 const DEMO_SELECTED = ['CMT-241', 'CMT-238', 'CMT-237', 'CMT-235', 'CMT-234'];
 
 export function BoardView({ selectedCount, showBulkBar = true }: BoardViewProps) {
-  const { tenant, workspace, project } = useTenantContext();
+  const { tenant, workspace, project, tenantName, workspaceName } = useTenantBreadcrumbs();
   const { getProject } = useProjects();
   const projectInfo = getProject(project);
   const members = projectInfo ? projectEffectiveMembers(projectInfo) : [];
@@ -80,7 +80,8 @@ export function BoardView({ selectedCount, showBulkBar = true }: BoardViewProps)
   return (
     <div className="bira" style={{ height: '100%', display: 'flex', flexDirection: 'column', background: 'var(--bg)' }}>
       <TopBar breadcrumbs={[
-        { label: 'Acme Robotics', to: `/${tenant}/${workspace}/projects` },
+        { label: tenantName, to: `/${tenant}/workspaces` },
+        { label: workspaceName, to: `/${tenant}/${workspace}/projects` },
         { label: projectInfo?.name ?? project, to: `/${tenant}/${workspace}/${project}` },
         'Board',
       ]} />

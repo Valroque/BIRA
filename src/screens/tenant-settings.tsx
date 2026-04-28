@@ -1,39 +1,57 @@
-// Settings: workspace-level (general, members) + user profile.
-// Sections live as nested routes so each is deep-linkable.
+// Tenant-level settings: general (details / logo / danger zone) and members.
+// Sits outside WorkspaceLayout — no sidebar, full-bleed like the workspace
+// picker / tenant picker. Mirrors the structure of `screens/settings.tsx`
+// (workspace settings) so the two read the same.
 import { useState } from 'react';
-import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
+import { NavLink, Outlet, useLocation, useParams } from 'react-router-dom';
 import { Icon } from '../components/icons';
-import { TopBar, Avatar, useTenantBreadcrumbs } from '../components/shell';
+import { TopBar, Avatar } from '../components/shell';
 import { Modal, ModalHeader, ModalBody, ModalFooter } from '../components/modal';
 import { Field, Hint, DangerRow } from '../components/forms';
 import { Section } from '../components/section';
 import { MEMBERS, type Member, type WorkspaceRole } from '../fixtures';
+import { useTenants } from '../state/tenants';
 
 // --- Outer layout (header + secondary tab strip + outlet) ---
 
-export function SettingsLayout() {
-  const { tenant, workspace, tenantName, workspaceName } = useTenantBreadcrumbs();
+export function TenantSettingsLayout() {
+  const { tenant = '' } = useParams<{ tenant: string }>();
+  const { getTenant } = useTenants();
+  const tenantName = getTenant(tenant)?.name ?? tenant;
   const { pathname } = useLocation();
-  const base = `/${tenant}/${workspace}/settings`;
+  const base = `/${tenant}/settings`;
   const sections = [
     { id: 'general', to: `${base}/general`, label: 'General', icon: 'settings' },
     { id: 'members', to: `${base}/members`, label: 'Members', icon: 'users' },
-    { id: 'profile', to: `${base}/profile`, label: 'Profile',  icon: 'user' },
   ];
 
   return (
     <div className="bira" style={{ height: '100%', display: 'flex', flexDirection: 'column', background: 'var(--bg)' }}>
-      <TopBar breadcrumbs={[
-        { label: tenantName, to: `/${tenant}/workspaces` },
-        { label: workspaceName, to: `/${tenant}/${workspace}/projects` },
-        'Settings',
-      ]} />
+      <TopBar
+        breadcrumbs={[
+          { label: tenantName, to: `/${tenant}/workspaces` },
+          'Settings',
+        ]}
+        showSearch={false}
+        showNewIssue={false}
+      />
       <div style={{
         padding: '20px 28px 0', borderBottom: '1px solid var(--border-muted)',
       }}>
-        <h1 style={{ fontSize: 22, fontWeight: 600, letterSpacing: -0.4, margin: 0 }}>Settings</h1>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 4 }}>
+          <h1 style={{ fontSize: 22, fontWeight: 600, letterSpacing: -0.4, margin: 0 }}>
+            Settings
+          </h1>
+          <span style={{
+            fontSize: 11, fontWeight: 600, letterSpacing: 0.4, textTransform: 'uppercase',
+            color: 'var(--accent-active)', background: 'var(--accent-muted)',
+            padding: '2px 8px', borderRadius: 4,
+          }}>
+            Tenant
+          </span>
+        </div>
         <p style={{ fontSize: 13, color: 'var(--fg-muted)', margin: '4px 0 14px' }}>
-          Configure your workspace and account preferences.
+          Configure your tenant — workspaces, members, and the org-level danger zone.
         </p>
         <div style={{ display: 'flex', gap: 2 }}>
           {sections.map((s) => {
@@ -66,16 +84,16 @@ export function SettingsLayout() {
   );
 }
 
-// --- General (workspace) ---
+// --- General (tenant) ---
 
-export function GeneralSettings() {
-  const [name, setName] = useState('Acme Robotics');
-  const [slug, setSlug] = useState('acme');
-  const [description, setDescription] = useState('Internal issue tracker for the robotics team.');
+export function TenantGeneralSettings() {
+  const [name, setName] = useState('Acme Corp');
+  const [slug, setSlug] = useState('acme-corp');
+  const [description, setDescription] = useState('');
 
   return (
     <>
-      <Section title="Workspace details" subtitle="How your workspace appears to its members." card>
+      <Section title="Tenant details" subtitle="How your tenant appears to its members." card>
         <Field label="Name">
           <input className="input" value={name} onChange={(e) => setName(e.target.value)} />
         </Field>
@@ -93,6 +111,7 @@ export function GeneralSettings() {
             rows={3}
             value={description}
             onChange={(e) => setDescription(e.target.value)}
+            placeholder="A short description of your tenant."
             style={{ height: 'auto', padding: '8px 10px', fontFamily: 'var(--font-sans)', resize: 'vertical' }}
           />
         </Field>
@@ -102,7 +121,8 @@ export function GeneralSettings() {
       <Section title="Logo" card>
         <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
           <div style={{
-            width: 56, height: 56, borderRadius: 10,
+            width: 56, height: 56, borderRadius: 4,
+            border: '1px solid var(--border)',
             background: 'linear-gradient(135deg, var(--accent), #6366f1)',
             display: 'flex', alignItems: 'center', justifyContent: 'center',
             color: '#fff', fontWeight: 700, fontSize: 24, fontFamily: 'var(--font-mono)',
@@ -121,13 +141,13 @@ export function GeneralSettings() {
         card
       >
         <DangerRow
-          label="Archive workspace"
-          description="Hide the workspace and freeze all data. Members lose access until restored."
+          label="Archive tenant"
+          description="Hide the tenant and freeze all of its workspaces. Members lose access until restored."
           actionLabel="Archive…"
         />
         <DangerRow
-          label="Delete workspace"
-          description="Permanently delete the workspace and all its issues, projects, comments, and members."
+          label="Delete tenant"
+          description="Permanently delete the tenant and every workspace, project, issue, and member inside it."
           actionLabel="Delete…"
         />
       </Section>
@@ -137,7 +157,10 @@ export function GeneralSettings() {
 
 // --- Members ---
 
-export function MembersSettings() {
+export function TenantMembersSettings() {
+  // Phase 2 placeholder: tenant Members shows the workspace MEMBERS roster as a
+  // stand-in. Phase 3 splits MEMBERS into TENANT_MEMBERS + per-workspace access
+  // lists and rewires this view.
   const [filter, setFilter] = useState('');
   const [showInvite, setShowInvite] = useState(false);
   const [inviteEmail, setInviteEmail] = useState('');
@@ -153,7 +176,7 @@ export function MembersSettings() {
     <>
       <Section
         title={`Members · ${MEMBERS.length}`}
-        subtitle="Anyone in the workspace. Admins can invite, change roles, and deactivate."
+        subtitle="Anyone in the tenant. Tenant admins can invite, change roles, and deactivate."
         card
       >
         <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 12 }}>
@@ -295,57 +318,6 @@ function InviteModal({ email, role, onEmail, onRole, onSend, onClose }: InviteMo
   );
 }
 
-// --- Profile ---
-
-export function ProfileSettings() {
-  const navigate = useNavigate();
-  const [name, setName] = useState('Jordan Lee');
-  const [email, setEmail] = useState('jordan@acme.com');
-
-  return (
-    <>
-      <Section title="Account" subtitle="Information about you, visible to other members of this workspace." card>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginBottom: 16 }}>
-          <Avatar name={name} size={56} />
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-            <button className="btn btn-sm"><Icon name="upload" size={13} />Upload avatar</button>
-            <span style={{ fontSize: 11, color: 'var(--fg-faint)' }}>JPG/PNG up to 1 MB. Initials are used by default.</span>
-          </div>
-        </div>
-        <Field label="Name">
-          <input className="input" value={name} onChange={(e) => setName(e.target.value)} />
-        </Field>
-        <Field label="Email">
-          <input type="email" className="input" value={email} onChange={(e) => setEmail(e.target.value)} />
-          <Hint>Changing your email requires re-verification.</Hint>
-        </Field>
-        <SaveBar />
-      </Section>
-
-      <Section title="Password" card>
-        <Field label="Current password">
-          <input type="password" className="input" autoComplete="current-password" />
-        </Field>
-        <Field label="New password">
-          <input type="password" className="input" autoComplete="new-password" minLength={8} />
-        </Field>
-        <Field label="Confirm new password">
-          <input type="password" className="input" autoComplete="new-password" />
-        </Field>
-        <div style={{ marginTop: 12 }}>
-          <button className="btn btn-primary btn-sm">Update password</button>
-        </div>
-      </Section>
-
-      <Section title="Sign out" subtitle="Sign out of this device. You can sign back in any time." card>
-        <button onClick={() => navigate('/tenants')} className="btn">
-          <Icon name="power" size={13} />Sign out
-        </button>
-      </Section>
-    </>
-  );
-}
-
 // --- Helpers ---
 
 function SaveBar() {
@@ -356,6 +328,3 @@ function SaveBar() {
     </div>
   );
 }
-
-// Re-export the layout under a friendlier name when imported by App.tsx.
-export { SettingsLayout as SettingsPage };

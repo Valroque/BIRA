@@ -1,7 +1,7 @@
 import { useState, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import { Icon } from '../components/icons';
-import { TopBar, StatusDot, useTenantContext } from '../components/shell';
+import { TopBar, StatusDot, useTenantBreadcrumbs } from '../components/shell';
 
 /*
  * Drift fix (entire screen rewritten):
@@ -57,7 +57,7 @@ export function RuleEditorPage() {
 }
 
 export function RuleEditor() {
-  const { tenant, workspace, project } = useTenantContext();
+  const { tenant, workspace, project, tenantName, workspaceName } = useTenantBreadcrumbs();
   const [rules, setRules] = useState<Rule[]>([
     { id: nextRuleId(), type: 'role', params: { role: 'admin' } },
     { id: nextRuleId(), type: 'required_fields', params: { fields: ['estimate', 'assignee'] } },
@@ -83,8 +83,9 @@ export function RuleEditor() {
   return (
     <div className="bira" style={{ height: '100%', display: 'flex', flexDirection: 'column', background: 'var(--bg)' }}>
       <TopBar breadcrumbs={[
-        { label: 'Acme Robotics', to: `/${tenant}/${workspace}/projects` },
-        { label: 'Comet', to: `/${tenant}/${workspace}/${project}` },
+        { label: tenantName, to: `/${tenant}/workspaces` },
+        { label: workspaceName, to: `/${tenant}/${workspace}/projects` },
+        { label: project, to: `/${tenant}/${workspace}/${project}` },
         { label: 'Workflow', to: `/${tenant}/${workspace}/${project}/workflow` },
         'In Review → Done',
       ]} />

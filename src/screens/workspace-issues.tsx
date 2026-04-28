@@ -1,10 +1,9 @@
 // Workspace-level issue lists: My Issues + All Issues. Both share the
 // `IssuesTable` component (also used by the project-scoped /list page).
-import { TopBar, useTenantContext } from '../components/shell';
+import { TopBar, useTenantBreadcrumbs } from '../components/shell';
 import { IssuesTable, type IssueGroupKey } from '../components/issues-table';
 import { type Filter } from '../components/issue-filters';
 import { ISSUES, CURRENT_USER } from '../fixtures';
-import { useWorkspaces } from '../state/workspaces';
 import type { Crumb } from '../components/shell';
 
 interface WorkspaceIssuesViewProps {
@@ -18,11 +17,10 @@ interface WorkspaceIssuesViewProps {
 }
 
 function WorkspaceIssuesView(props: WorkspaceIssuesViewProps) {
-  const { tenant, workspace } = useTenantContext();
-  const { getWorkspace } = useWorkspaces();
-  const ws = getWorkspace(workspace);
+  const { tenant, workspace, tenantName, workspaceName } = useTenantBreadcrumbs();
   const breadcrumbs: Crumb[] = [
-    { label: ws?.name ?? workspace, to: `/${tenant}/${workspace}/projects` },
+    { label: tenantName, to: `/${tenant}/workspaces` },
+    { label: workspaceName, to: `/${tenant}/${workspace}/projects` },
     props.trailingCrumb,
   ];
   return (

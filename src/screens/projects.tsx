@@ -2,7 +2,7 @@
 import { useMemo, useState, type FormEvent } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { Icon } from '../components/icons';
-import { TopBar, Avatar, useTenantContext } from '../components/shell';
+import { TopBar, Avatar, useTenantContext, useTenantBreadcrumbs } from '../components/shell';
 import { Modal, ModalHeader, ModalFooter } from '../components/modal';
 import { Field, Hint } from '../components/forms';
 import { ProjectBadge } from '../components/project-chip';
@@ -13,13 +13,10 @@ import {
   type IssueTypeLetter, type Member, type Project,
 } from '../fixtures';
 import { useProjects } from '../state/projects';
-import { useWorkspaces } from '../state/workspaces';
 
 export function ProjectsPage() {
-  const { tenant, workspace } = useTenantContext();
+  const { tenant, workspace, tenantName, workspaceName } = useTenantBreadcrumbs();
   const { projects } = useProjects();
-  const { getWorkspace } = useWorkspaces();
-  const ws = getWorkspace(workspace);
   const [showCreate, setShowCreate] = useState(false);
   const [filter, setFilter] = useState('');
 
@@ -34,7 +31,8 @@ export function ProjectsPage() {
   return (
     <div className="bira" style={{ height: '100%', display: 'flex', flexDirection: 'column', background: 'var(--bg)' }}>
       <TopBar breadcrumbs={[
-        { label: ws?.name ?? workspace, to: `/${tenant}/${workspace}/projects` },
+        { label: tenantName, to: `/${tenant}/workspaces` },
+        { label: workspaceName, to: `/${tenant}/${workspace}/projects` },
         'Projects',
       ]} />
       <div style={{ padding: '20px 28px 14px', borderBottom: '1px solid var(--border-muted)' }}>

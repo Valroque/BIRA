@@ -2,7 +2,7 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Icon } from '../components/icons';
-import { TopBar, Tabs, TypeChip, projectTabs, useTenantContext } from '../components/shell';
+import { TopBar, Tabs, TypeChip, projectTabs, useTenantBreadcrumbs } from '../components/shell';
 import { Field, Hint, DangerRow } from '../components/forms';
 import { Section } from '../components/section';
 import {
@@ -14,7 +14,7 @@ import { useProjects } from '../state/projects';
 const TYPE_ORDER: IssueTypeLetter[] = ['T', 'B', 'S', 'E'];
 
 export function ProjectSettingsPage() {
-  const { tenant, workspace, project } = useTenantContext();
+  const { tenant, workspace, project, tenantName, workspaceName } = useTenantBreadcrumbs();
   const navigate = useNavigate();
   const { getProject } = useProjects();
   const projectInfo = getProject(project);
@@ -31,7 +31,8 @@ export function ProjectSettingsPage() {
   return (
     <div className="bira" style={{ height: '100%', display: 'flex', flexDirection: 'column', background: 'var(--bg)' }}>
       <TopBar breadcrumbs={[
-        { label: 'Acme Robotics', to: `/${tenant}/${workspace}/projects` },
+        { label: tenantName, to: `/${tenant}/workspaces` },
+        { label: workspaceName, to: `/${tenant}/${workspace}/projects` },
         { label: projectInfo?.name ?? project, to: `/${tenant}/${workspace}/${project}` },
         'Settings',
       ]} />

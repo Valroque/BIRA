@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { Icon } from '../components/icons';
-import { TopBar, TypeChip, IssueId, StatusDot, Priority, Avatar, STATUSES, useTenantContext } from '../components/shell';
+import { TopBar, TypeChip, IssueId, StatusDot, Priority, Avatar, STATUSES, useTenantContext, useTenantBreadcrumbs } from '../components/shell';
 import { AttachmentRow, renderRichText, useComposer, type Attachment } from '../components/composer';
 import { IssuePickerModal } from '../components/issue-picker';
 import { useDismiss } from '../components/use-dismiss';
@@ -53,7 +53,7 @@ function formatISODate(iso: string): string {
 
 export function IssueDetailPage() {
   const { key } = useParams<{ key: string }>();
-  const { tenant, workspace, project } = useTenantContext();
+  const { tenant, workspace, project, tenantName, workspaceName } = useTenantBreadcrumbs();
   const { getProject } = useProjects();
   const projectInfo = getProject(project);
   const issue = key ? ISSUES.find((i) => i.id === key) : undefined;
@@ -62,7 +62,8 @@ export function IssueDetailPage() {
     return (
       <div className="bira" style={{ height: '100%', display: 'flex', flexDirection: 'column', background: 'var(--bg)' }}>
         <TopBar breadcrumbs={[
-          { label: 'Acme Robotics', to: `/${tenant}/${workspace}/projects` },
+          { label: tenantName, to: `/${tenant}/workspaces` },
+          { label: workspaceName, to: `/${tenant}/${workspace}/projects` },
           { label: projectInfo?.name ?? project, to: `/${tenant}/${workspace}/${project}` },
           { label: 'Issues', to: `/${tenant}/${workspace}/${project}/list` },
           key ?? '?',
@@ -97,7 +98,7 @@ export function IssueDetailPage() {
  * routed `IssueDetailPage` always passes a real one.
  */
 function IssueDetail({ issue = ISSUES[0] }: { issue?: Issue }) {
-  const { tenant, workspace, project } = useTenantContext();
+  const { tenant, workspace, project, tenantName, workspaceName } = useTenantBreadcrumbs();
   const { getProject } = useProjects();
   // Inner detail: drive everything off the issue's owning project rather than
   // the URL slug, so the breadcrumb is right even when this is rendered inside
@@ -199,7 +200,8 @@ function IssueDetail({ issue = ISSUES[0] }: { issue?: Issue }) {
   return (
     <div className="bira" style={{ height: '100%', display: 'flex', flexDirection: 'column', background: 'var(--bg)' }}>
       <TopBar breadcrumbs={[
-        { label: 'Acme Robotics', to: `/${tenant}/${workspace}/projects` },
+        { label: tenantName, to: `/${tenant}/workspaces` },
+        { label: workspaceName, to: `/${tenant}/${workspace}/projects` },
         { label: owningProject?.name ?? project, to: `/${tenant}/${workspace}/${project}` },
         { label: 'Issues', to: `/${tenant}/${workspace}/${project}/list` },
         issue.id,

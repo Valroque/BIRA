@@ -1,18 +1,19 @@
 // /:tenant/:workspace/inbox — placeholder inbox view. Demonstrates the empty state.
 import { Link } from 'react-router-dom';
-import { TopBar, Tabs, useTenantContext } from '../components/shell';
+import { TopBar, Tabs, useTenantBreadcrumbs } from '../components/shell';
 import { EmptyState } from '../components/states';
 import { Icon } from '../components/icons';
 import { useProjects } from '../state/projects';
 
 export function InboxPage() {
-  const { tenant, workspace } = useTenantContext();
+  const { tenant, workspace, tenantName, workspaceName } = useTenantBreadcrumbs();
   const { projects } = useProjects();
   const firstProject = projects.find((p) => p.status === 'active') ?? projects[0];
   return (
     <div className="bira" style={{ height: '100%', display: 'flex', flexDirection: 'column', background: 'var(--bg)' }}>
       <TopBar breadcrumbs={[
-        { label: 'Acme Robotics', to: `/${tenant}/${workspace}/projects` },
+        { label: tenantName, to: `/${tenant}/workspaces` },
+        { label: workspaceName, to: `/${tenant}/${workspace}/projects` },
         'Inbox',
       ]} />
       <Tabs

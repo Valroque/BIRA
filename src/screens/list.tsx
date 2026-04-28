@@ -4,7 +4,7 @@
 import { useMemo } from 'react';
 import { Link } from 'react-router-dom';
 import { Icon } from '../components/icons';
-import { TopBar, Tabs, projectTabs, useTenantContext } from '../components/shell';
+import { TopBar, Tabs, projectTabs, useTenantBreadcrumbs } from '../components/shell';
 import { IssuesTable } from '../components/issues-table';
 import { ISSUES } from '../fixtures';
 import { useProjects } from '../state/projects';
@@ -14,7 +14,7 @@ export function ListPage() {
 }
 
 export function ListView() {
-  const { tenant, workspace, project } = useTenantContext();
+  const { tenant, workspace, project, tenantName, workspaceName } = useTenantBreadcrumbs();
   const { getProject } = useProjects();
   const projectInfo = getProject(project);
 
@@ -26,7 +26,8 @@ export function ListView() {
   return (
     <div className="bira" style={{ height: '100%', display: 'flex', flexDirection: 'column', background: 'var(--bg)' }}>
       <TopBar breadcrumbs={[
-        { label: 'Acme Robotics', to: `/${tenant}/${workspace}/projects` },
+        { label: tenantName, to: `/${tenant}/workspaces` },
+        { label: workspaceName, to: `/${tenant}/${workspace}/projects` },
         { label: projectInfo?.name ?? project, to: `/${tenant}/${workspace}/${project}` },
         'Issues',
       ]} />

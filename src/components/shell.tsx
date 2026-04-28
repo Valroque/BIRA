@@ -7,6 +7,7 @@ import { NotificationsButton, UserMenu } from './topbar-menus';
 import { ISSUES, CURRENT_USER, TEAMS } from '../fixtures';
 import { useProjects } from '../state/projects';
 import { useWorkspaces } from '../state/workspaces';
+import { useTenants } from '../state/tenants';
 
 /**
  * Read tenant + workspace + project from the URL. Empty-string fallback when
@@ -21,6 +22,19 @@ export function useTenantContext() {
     workspace: params.workspace ?? '',
     project: params.project ?? '',
   };
+}
+
+/**
+ * Resolves human-readable names for the current tenant + workspace from the URL.
+ * Use only inside WorkspaceLayout — useWorkspaces() throws otherwise. Tenant
+ * settings (full-bleed, outside WorkspaceLayout) builds its breadcrumbs by
+ * calling useTenants() directly.
+ */
+export function useTenantBreadcrumbs() {
+  const { tenant, workspace, project } = useTenantContext();
+  const tenantName = useTenants().getTenant(tenant)?.name ?? tenant;
+  const workspaceName = useWorkspaces().getWorkspace(workspace)?.name ?? workspace;
+  return { tenant, workspace, project, tenantName, workspaceName };
 }
 
 export const STATUSES = [
@@ -248,7 +262,12 @@ export const Sidebar = ({ collapsed = false, active = '' }: SidebarProps) => {
       width: w, background: 'var(--bg-subtle)', borderRight: '1px solid var(--border-muted)',
       display: 'flex', flexDirection: 'column', flexShrink: 0, transition: 'width .2s ease',
     }}>
-      {/* Workspace header — clicking returns to the picker. */}
+      {/* Workspace header — clicking returns to the workspace picker.
+          Tenant identity is intentionally NOT surfaced here: once you're
+          signed in, the URL + breadcrumbs already establish which tenant
+          you're in. Tenant chips live on anonymous surfaces (tenant picker,
+          login). Bottom-of-sidebar "Tenant settings" item is the in-app
+          path to tenant-level management. */}
       <Link
         to={`/${tenant}/workspaces`}
         title={collapsed ? `${ws?.name ?? workspace} — Switch workspace` : undefined}
@@ -273,7 +292,7 @@ export const Sidebar = ({ collapsed = false, active = '' }: SidebarProps) => {
               <div style={{ fontSize: 13, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                 {ws?.name ?? workspace}
               </div>
-              <div style={{ fontSize: 11, color: 'var(--fg-faint)', fontFamily: 'var(--font-mono)' }}>bira/{workspace}</div>
+              <div style={{ fontSize: 11, color: 'var(--fg-faint)', fontFamily: 'var(--font-mono)' }}>bira/{tenant}/{workspace}</div>
             </div>
             <Icon name="chevronsLeft" size={14} color="var(--fg-faint)" />
           </>
@@ -342,8 +361,9 @@ export const Sidebar = ({ collapsed = false, active = '' }: SidebarProps) => {
       </div>
 
       <div style={{ borderTop: '1px solid var(--border-muted)', padding: '8px 0' }}>
-        <Item id="settings" icon="settings" label="Settings" to={`/${tenant}/${workspace}/settings`} />
-        <Item id="help" icon="question" label="Help" />
+        <Item id="tenant-settings" icon="building" label="Tenant settings" to={`/${tenant}/settings`} />
+        <Item id="settings"        icon="settings" label="Settings"        to={`/${tenant}/${workspace}/settings`} />
+        <Item id="help"            icon="question" label="Help" />
       </div>
     </div>
   );
