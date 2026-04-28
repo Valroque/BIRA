@@ -1,18 +1,28 @@
 import { useState, type FormEvent } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, Navigate, useNavigate, useParams } from 'react-router-dom';
 import { Icon } from '../components/icons';
 import { Field } from '../components/forms';
+import { useTenants } from '../state/tenants';
 
 export function LoginPage() {
   const navigate = useNavigate();
+  const { tenant = '' } = useParams<{ tenant: string }>();
+  const { getTenant } = useTenants();
   const [email, setEmail] = useState('jordan@acme.com');
-  const [password, setPassword] = useState('');
+  const [password, setPassword] = useState('password');
+
+  // Defensive: the route requires a tenant slug, but if we ever render
+  // without one, send the user back to the picker rather than show an
+  // ugly empty-tenant headline.
+  if (!tenant) return <Navigate to="/tenants" replace />;
+
+  const tenantName = getTenant(tenant)?.name ?? tenant;
 
   const submit = (e: FormEvent) => {
     e.preventDefault();
-    // After sign-in we land on the workspace picker. The picker is the
-    // canonical path into a workspace — direct-slug shortcuts can come later.
-    navigate('/workspaces');
+    // Login is tenant-scoped — after sign-in we go straight to that
+    // tenant's workspace picker.
+    navigate(`/${tenant}/workspaces`);
   };
 
   return (
@@ -36,7 +46,7 @@ export function LoginPage() {
         <div className="card" style={{ padding: 22 }}>
           <h2 style={{ fontSize: 17, fontWeight: 600, margin: 0 }}>Sign in</h2>
           <p style={{ fontSize: 12.5, color: 'var(--fg-muted)', margin: '4px 0 16px' }}>
-            Sign in with your BIRA account. You'll pick a workspace next.
+            Signing in to <strong style={{ color: 'var(--fg)' }}>{tenantName}</strong>. You'll pick a workspace next.
           </p>
 
           <Field label="Email">

@@ -8,7 +8,7 @@ import { Link, useParams } from 'react-router-dom';
 import { Icon } from '../components/icons';
 import {
   TopBar, Avatar, IssueId, TypeChip, StatusDot, Priority,
-  useWorkspaceContext,
+  useTenantContext,
 } from '../components/shell';
 import { Section } from '../components/section';
 import { ProjectBadge } from '../components/project-chip';
@@ -26,7 +26,7 @@ const ROLE_LABEL: Record<Member['role'], string> = {
 };
 
 export function MemberProfilePage() {
-  const { workspace } = useWorkspaceContext();
+  const { tenant, workspace } = useTenantContext();
   const { email } = useParams<{ email: string }>();
   // React Router decodes path params for us, so `email` is already the
   // raw "jordan@acme.com" form — no manual decode needed.
@@ -42,7 +42,7 @@ export function MemberProfilePage() {
         }
         action={
           <Link
-            to={`/${workspace}/settings/members`}
+            to={`/${tenant}/${workspace}/settings/members`}
             className="btn btn-primary btn-sm"
             style={{ textDecoration: 'none' }}
           >
@@ -57,7 +57,7 @@ export function MemberProfilePage() {
 }
 
 function MemberProfile({ member }: { member: Member }) {
-  const { workspace } = useWorkspaceContext();
+  const { tenant, workspace } = useTenantContext();
   const { projects } = useProjects();
 
   // Issues visible to a member: anything currently assigned to them. The
@@ -81,8 +81,8 @@ function MemberProfile({ member }: { member: Member }) {
     <div className="bira" style={{ height: '100%', display: 'flex', flexDirection: 'column', background: 'var(--bg)' }}>
       <TopBar
         breadcrumbs={[
-          { label: 'Acme Robotics', to: `/${workspace}/projects` },
-          { label: 'Members', to: `/${workspace}/settings/members` },
+          { label: 'Acme Robotics', to: `/${tenant}/${workspace}/projects` },
+          { label: 'Members', to: `/${tenant}/${workspace}/settings/members` },
           member.name,
         ]}
       />
@@ -128,7 +128,7 @@ function MemberProfile({ member }: { member: Member }) {
                 {teams.map((t, i) => (
                   <Link
                     key={t.slug}
-                    to={`/${workspace}/teams/${t.slug}`}
+                    to={`/${tenant}/${workspace}/teams/${t.slug}`}
                     style={{
                       display: 'flex', alignItems: 'center', gap: 12,
                       padding: '12px 14px', textDecoration: 'none', color: 'inherit',
@@ -172,7 +172,7 @@ function MemberProfile({ member }: { member: Member }) {
                 {memberProjects.map((p, i) => (
                   <Link
                     key={p.slug}
-                    to={`/${workspace}/${p.slug}`}
+                    to={`/${tenant}/${workspace}/${p.slug}`}
                     style={{
                       display: 'flex', alignItems: 'center', gap: 12,
                       padding: '12px 14px', textDecoration: 'none', color: 'inherit',
@@ -202,7 +202,7 @@ function MemberProfile({ member }: { member: Member }) {
             ) : (
               <div className="card" style={{ padding: 0 }}>
                 {assigned.map((i, idx) => (
-                  <AssignedIssueRow key={i.id} issue={i} first={idx === 0} workspace={workspace} />
+                  <AssignedIssueRow key={i.id} issue={i} first={idx === 0} tenant={tenant} workspace={workspace} />
                 ))}
               </div>
             )}
@@ -214,10 +214,10 @@ function MemberProfile({ member }: { member: Member }) {
   );
 }
 
-function AssignedIssueRow({ issue, first, workspace }: { issue: Issue; first: boolean; workspace: string }) {
+function AssignedIssueRow({ issue, first, tenant, workspace }: { issue: Issue; first: boolean; tenant: string; workspace: string }) {
   return (
     <Link
-      to={`/${workspace}/${issue.project}/issue/${issue.id}`}
+      to={`/${tenant}/${workspace}/${issue.project}/issue/${issue.id}`}
       style={{
         display: 'flex', alignItems: 'center', gap: 10,
         padding: '10px 14px', textDecoration: 'none', color: 'inherit',

@@ -1,4 +1,4 @@
-// Workspace projects — runtime state, scoped per workspace.
+// Workspace projects — runtime state, scoped per (tenant, workspace).
 //
 // Holds the full projects list (seeds + user-added) in component state and
 // persists it to localStorage. Seed projects are auto-backfilled on load if
@@ -12,8 +12,9 @@
 // without each surface knowing about it.
 //
 // The provider is mounted inside `WorkspaceLayout` (App.tsx) with
-// `key={workspace}`, so navigating between workspaces remounts it with the
-// new workspace's storage key + seed.
+// `key={`${tenant}/${workspace}`}`, so navigating between workspaces (or
+// tenants) remounts it with the new pair's storage key + seed. The old
+// `bira:projects:<workspace>` key is abandoned (no migration in Phase 0).
 
 import {
   createContext, useCallback, useContext, useEffect, useState,
@@ -24,16 +25,17 @@ import {
   type IssueTypeLetter, type Project,
 } from '../fixtures';
 
-/** localStorage key for the full project list in a given workspace. */
-const storageKey = (workspace: string) => `bira:projects:${workspace}`;
+/** localStorage key for the full project list in a given (tenant, workspace). */
+const storageKey = (tenant: string, workspace: string) =>
+  `bira:projects:${tenant}:${workspace}`;
 
 /**
- * Demo `acme` workspace ships with seed projects so the prototype isn't
- * empty on first load. Other workspaces start with no projects until the
- * user creates one — matching the behavior of a fresh tenant.
+ * Demo `acme-corp/acme` workspace ships with seed projects so the prototype
+ * isn't empty on first load. Other workspaces start with no projects until
+ * the user creates one — matching the behavior of a fresh tenant.
  */
-const seedFor = (workspace: string): Project[] =>
-  workspace === 'acme' ? SEED_PROJECTS : [];
+const seedFor = (tenant: string, workspace: string): Project[] =>
+  tenant === 'acme-corp' && workspace === 'acme' ? SEED_PROJECTS : [];
 
 function isValidProject(p: unknown): p is Project {
   return !!p && typeof (p as Project).slug === 'string'
@@ -44,11 +46,11 @@ function isValidProject(p: unknown): p is Project {
 /** Load + backfill missing seeds. Returns the persisted list, with any seed
  *  slugs not present in storage prepended so the workspace is never missing
  *  its expected starting projects. */
-function loadProjects(workspace: string): Project[] {
-  const seeds = seedFor(workspace);
+function loadProjects(tenant: string, workspace: string): Project[] {
+  const seeds = seedFor(tenant, workspace);
   let stored: Project[] = [];
   try {
-    const raw = localStorage.getItem(storageKey(workspace));
+    const raw = localStorage.getItem(storageKey(tenant, workspace));
     if (raw) {
       const parsed = JSON.parse(raw);
       if (Array.isArray(parsed)) stored = parsed.filter(isValidProject);
@@ -96,16 +98,16 @@ const ProjectsContext = createContext<ProjectsCtxValue | undefined>(undefined);
 
 const ALL_TYPES: IssueTypeLetter[] = ['T', 'B', 'S', 'E'];
 
-export function ProjectsProvider({ workspace, children }: { workspace: string; children: ReactNode }) {
-  const [projects, setProjects] = useState<Project[]>(() => loadProjects(workspace));
+export function ProjectsProvider({ tenant, workspace, children }: { tenant: string; workspace: string; children: ReactNode }) {
+  const [projects, setProjects] = useState<Project[]>(() => loadProjects(tenant, workspace));
 
   useEffect(() => {
     try {
-      localStorage.setItem(storageKey(workspace), JSON.stringify(projects));
+      localStorage.setItem(storageKey(tenant, workspace), JSON.stringify(projects));
     } catch {
       // Quota / privacy mode — best-effort, ignore.
     }
-  }, [workspace, projects]);
+  }, [tenant, workspace, projects]);
 
   const getProject = useCallback(
     (slug: string) => projects.find((p) => p.slug === slug),

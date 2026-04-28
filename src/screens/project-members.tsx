@@ -5,7 +5,7 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Icon } from '../components/icons';
-import { TopBar, Tabs, projectTabs, useWorkspaceContext } from '../components/shell';
+import { TopBar, Tabs, projectTabs, useTenantContext } from '../components/shell';
 import { Modal, ModalHeader } from '../components/modal';
 import { Section } from '../components/section';
 import { AddMembersModal, AvatarStack, MemberRow, TeamBadge } from './teams';
@@ -17,7 +17,7 @@ import {
 import { useProjects } from '../state/projects';
 
 export function ProjectMembersPage() {
-  const { workspace, project } = useWorkspaceContext();
+  const { tenant, workspace, project } = useTenantContext();
   const { getProject } = useProjects();
   const projectInfo = getProject(project);
 
@@ -44,11 +44,11 @@ export function ProjectMembersPage() {
   return (
     <div className="bira" style={{ height: '100%', display: 'flex', flexDirection: 'column', background: 'var(--bg)' }}>
       <TopBar breadcrumbs={[
-        { label: 'Acme Robotics', to: `/${workspace}/projects` },
-        { label: projectInfo?.name ?? project, to: `/${workspace}/${project}` },
+        { label: 'Acme Robotics', to: `/${tenant}/${workspace}/projects` },
+        { label: projectInfo?.name ?? project, to: `/${tenant}/${workspace}/${project}` },
         'Members',
       ]} />
-      <Tabs active="members" tabs={projectTabs(workspace, project)} />
+      <Tabs active="members" tabs={projectTabs(tenant, workspace, project)} />
 
       <div className="scroll" style={{ flex: 1, overflow: 'auto', padding: '24px 28px' }}>
         <div style={{ maxWidth: 760 }}>
@@ -87,6 +87,7 @@ export function ProjectMembersPage() {
                   <TeamRow
                     key={t.slug}
                     team={t}
+                    tenant={tenant}
                     workspace={workspace}
                     first={i === 0}
                     onRemove={() => removeTeam(t.slug)}
@@ -144,7 +145,7 @@ export function ProjectMembersPage() {
   );
 }
 
-function TeamRow({ team, workspace, first, onRemove }: { team: Team; workspace: string; first?: boolean; onRemove: () => void }) {
+function TeamRow({ team, tenant, workspace, first, onRemove }: { team: Team; tenant: string; workspace: string; first?: boolean; onRemove: () => void }) {
   const teamMembers = team.memberEmails.map(memberByEmail).filter((m): m is Member => !!m);
   return (
     <div style={{
@@ -161,7 +162,7 @@ function TeamRow({ team, workspace, first, onRemove }: { team: Team; workspace: 
       </div>
       <AvatarStack members={teamMembers} max={4} size={20} />
       <Link
-        to={`/${workspace}/teams/${team.slug}`}
+        to={`/${tenant}/${workspace}/teams/${team.slug}`}
         className="btn btn-ghost btn-sm"
         style={{ textDecoration: 'none' }}
         data-tip="View team"

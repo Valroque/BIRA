@@ -1,7 +1,7 @@
 import { useState, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import { Icon } from '../components/icons';
-import { TopBar, StatusDot, useWorkspaceContext } from '../components/shell';
+import { TopBar, StatusDot, useTenantContext } from '../components/shell';
 
 /*
  * Drift fix (entire screen rewritten):
@@ -57,7 +57,7 @@ export function RuleEditorPage() {
 }
 
 export function RuleEditor() {
-  const { workspace, project } = useWorkspaceContext();
+  const { tenant, workspace, project } = useTenantContext();
   const [rules, setRules] = useState<Rule[]>([
     { id: nextRuleId(), type: 'role', params: { role: 'admin' } },
     { id: nextRuleId(), type: 'required_fields', params: { fields: ['estimate', 'assignee'] } },
@@ -83,16 +83,16 @@ export function RuleEditor() {
   return (
     <div className="bira" style={{ height: '100%', display: 'flex', flexDirection: 'column', background: 'var(--bg)' }}>
       <TopBar breadcrumbs={[
-        { label: 'Acme Robotics', to: `/${workspace}/projects` },
-        { label: 'Comet', to: `/${workspace}/${project}` },
-        { label: 'Workflow', to: `/${workspace}/${project}/workflow` },
+        { label: 'Acme Robotics', to: `/${tenant}/${workspace}/projects` },
+        { label: 'Comet', to: `/${tenant}/${workspace}/${project}` },
+        { label: 'Workflow', to: `/${tenant}/${workspace}/${project}/workflow` },
         'In Review → Done',
       ]} />
 
       <div style={{ padding: '16px 24px 12px', borderBottom: '1px solid var(--border-muted)' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 6 }}>
           <Link
-            to={`/${workspace}/${project}/workflow`}
+            to={`/${tenant}/${workspace}/${project}/workflow`}
             className="btn btn-ghost btn-sm"
             style={{ width: 24, padding: 0, textDecoration: 'none' }}
             data-tip="Back to workflow"

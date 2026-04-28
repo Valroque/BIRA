@@ -5,7 +5,7 @@
 import { useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { Icon } from '../components/icons';
-import { TopBar, Avatar, useWorkspaceContext } from '../components/shell';
+import { TopBar, Avatar, useTenantContext } from '../components/shell';
 import { Modal, ModalHeader, ModalBody, ModalFooter } from '../components/modal';
 import { Section } from '../components/section';
 import { ProjectBadge } from '../components/project-chip';
@@ -20,7 +20,7 @@ import { useProjects } from '../state/projects';
 // ----- Index -----
 
 export function TeamsPage() {
-  const { workspace } = useWorkspaceContext();
+  const { tenant, workspace } = useTenantContext();
   const [filter, setFilter] = useState('');
   const [showCreate, setShowCreate] = useState(false);
 
@@ -31,7 +31,7 @@ export function TeamsPage() {
   return (
     <div className="bira" style={{ height: '100%', display: 'flex', flexDirection: 'column', background: 'var(--bg)' }}>
       <TopBar breadcrumbs={[
-        { label: 'Acme Robotics', to: `/${workspace}/projects` },
+        { label: 'Acme Robotics', to: `/${tenant}/${workspace}/projects` },
         'Teams',
       ]} />
       <div style={{ padding: '20px 28px 14px', borderBottom: '1px solid var(--border-muted)' }}>
@@ -71,7 +71,7 @@ export function TeamsPage() {
           </div>
         ) : (
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: 12 }}>
-            {filtered.map((t) => <TeamCard key={t.slug} team={t} workspace={workspace} />)}
+            {filtered.map((t) => <TeamCard key={t.slug} team={t} tenant={tenant} workspace={workspace} />)}
           </div>
         )}
       </div>
@@ -81,12 +81,12 @@ export function TeamsPage() {
   );
 }
 
-function TeamCard({ team, workspace }: { team: Team; workspace: string }) {
+function TeamCard({ team, tenant, workspace }: { team: Team; tenant: string; workspace: string }) {
   const { projectsForTeam } = useProjects();
   const projects = projectsForTeam(team.slug);
   return (
     <Link
-      to={`/${workspace}/teams/${team.slug}`}
+      to={`/${tenant}/${workspace}/teams/${team.slug}`}
       className="card"
       style={{ padding: 16, textDecoration: 'none', color: 'inherit' }}
     >
@@ -122,7 +122,7 @@ function TeamCard({ team, workspace }: { team: Team; workspace: string }) {
 // ----- Detail -----
 
 export function TeamDetailPage() {
-  const { workspace } = useWorkspaceContext();
+  const { tenant, workspace } = useTenantContext();
   const { teamSlug } = useParams<{ teamSlug: string }>();
   const team = teamSlug ? teamBySlug(teamSlug) : undefined;
 
@@ -133,7 +133,7 @@ export function TeamDetailPage() {
         title="Team not found"
         description={<>The team <span className="mono">{teamSlug}</span> doesn't exist in this workspace.</>}
         action={
-          <Link to={`/${workspace}/teams`} className="btn btn-primary btn-sm" style={{ textDecoration: 'none' }}>
+          <Link to={`/${tenant}/${workspace}/teams`} className="btn btn-primary btn-sm" style={{ textDecoration: 'none' }}>
             <Icon name="arrowRight" size={13} />Back to teams
           </Link>
         }
@@ -141,10 +141,10 @@ export function TeamDetailPage() {
     );
   }
 
-  return <TeamDetail team={team} workspace={workspace} />;
+  return <TeamDetail team={team} tenant={tenant} workspace={workspace} />;
 }
 
-function TeamDetail({ team, workspace }: { team: Team; workspace: string }) {
+function TeamDetail({ team, tenant, workspace }: { team: Team; tenant: string; workspace: string }) {
   const { projectsForTeam } = useProjects();
   const [memberEmails, setMemberEmails] = useState<string[]>(team.memberEmails);
   const [showAddMember, setShowAddMember] = useState(false);
@@ -163,8 +163,8 @@ function TeamDetail({ team, workspace }: { team: Team; workspace: string }) {
   return (
     <div className="bira" style={{ height: '100%', display: 'flex', flexDirection: 'column', background: 'var(--bg)' }}>
       <TopBar breadcrumbs={[
-        { label: 'Acme Robotics', to: `/${workspace}/projects` },
-        { label: 'Teams', to: `/${workspace}/teams` },
+        { label: 'Acme Robotics', to: `/${tenant}/${workspace}/projects` },
+        { label: 'Teams', to: `/${tenant}/${workspace}/teams` },
         team.name,
       ]} />
       <div style={{ padding: '20px 28px 14px', borderBottom: '1px solid var(--border-muted)' }}>
@@ -219,7 +219,7 @@ function TeamDetail({ team, workspace }: { team: Team; workspace: string }) {
                 {projects.map((p, i) => (
                   <Link
                     key={p.slug}
-                    to={`/${workspace}/${p.slug}/members`}
+                    to={`/${tenant}/${workspace}/${p.slug}/members`}
                     style={{
                       display: 'flex', alignItems: 'center', gap: 12,
                       padding: '12px 14px', textDecoration: 'none', color: 'inherit',
@@ -407,7 +407,7 @@ export function AvatarStack({ members, max = 5, size = 22 }: { members: Member[]
 
 function CreateTeamModal({ onClose }: { onClose: () => void }) {
   const navigate = useNavigate();
-  const { workspace } = useWorkspaceContext();
+  const { tenant, workspace } = useTenantContext();
   const [name, setName] = useState('');
   const [slug, setSlug] = useState('');
 
@@ -421,7 +421,7 @@ function CreateTeamModal({ onClose }: { onClose: () => void }) {
       onClose={onClose}
       maxWidth={460}
       label="New team"
-      onSubmit={(e) => { e.preventDefault(); onClose(); navigate(`/${workspace}/teams/${slug || 'team'}`); }}
+      onSubmit={(e) => { e.preventDefault(); onClose(); navigate(`/${tenant}/${workspace}/teams/${slug || 'team'}`); }}
     >
       <ModalHeader title="New team" onClose={onClose} />
       <ModalBody>

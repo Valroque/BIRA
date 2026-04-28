@@ -314,14 +314,48 @@ export const CURRENT_USER = {
 };
 
 // ---------------------------------------------------------------------------
-// Workspaces
+// Tenants + Workspaces
 // ---------------------------------------------------------------------------
 //
-// Every in-app screen runs inside a single workspace derived from the URL
-// (`useWorkspaceContext()` in shell.tsx). The list below feeds the post-login
-// `/workspaces` picker — the workspaces the current user has access to.
-// Until the backend lands, only `acme` actually has fixture data behind it;
-// picking another slug will land in the same UI populated by the same fixtures.
+// In-flight refactor (2026-04): tenant level sits above workspace. Every
+// in-app screen runs inside a single (tenant, workspace) pair derived from
+// the URL (`useTenantContext()` in shell.tsx). Phase 0 only sets up the
+// data model + URL plumbing; tenant picker UI, settings, membership reshape
+// are later phases.
+
+/** Tenant-level role for the current user. Same ladder as `WorkspaceRole`. */
+export type TenantRole = 'admin' | 'write' | 'read';
+
+export interface Tenant {
+  /** URL slug. Lowercase a-z, 0-9, dashes. Globally unique. */
+  slug: string;
+  name: string;
+  letter: string;
+  color: string;
+  bg: string;
+  /** Counts shown on the picker — hardcoded in the prototype. */
+  workspaceCount: number;
+  memberCount: number;
+  /** Effective tenant role of the current user. */
+  role: TenantRole;
+}
+
+export const TENANTS: Tenant[] = [
+  {
+    slug: 'acme-corp',
+    name: 'Acme Corp',
+    letter: 'A',
+    color: '#4f46e5',
+    bg: '#e0e7ff',
+    workspaceCount: 3,
+    memberCount: 6,
+    role: 'admin',
+  },
+];
+
+export const RESERVED_TENANT_SLUGS = new Set<string>([
+  'login', 'setup', 'invite', 'tenants', 'workspaces', 'design-canvas', 'profile',
+]);
 
 /**
  * Workspace-level role for the current user. Ordered ladder:
@@ -334,7 +368,9 @@ export const CURRENT_USER = {
 export type WorkspaceRole = 'admin' | 'write' | 'read';
 
 export interface Workspace {
-  /** URL slug: lowercase a-z, 0-9, dashes. The tenant primary key. */
+  /** Tenant this workspace belongs to. */
+  tenantSlug: string;
+  /** URL slug: lowercase a-z, 0-9, dashes. The workspace primary key within a tenant. */
   slug: string;
   name: string;
   /** Letter shown inside the workspace avatar. */
@@ -350,25 +386,29 @@ export interface Workspace {
 
 export const WORKSPACES: Workspace[] = [
   {
+    tenantSlug: 'acme-corp',
     slug: 'acme', name: 'Acme Robotics', letter: 'A',
     color: '#4f46e5', bg: '#e0e7ff',
     projectCount: 4, memberCount: 6, role: 'admin',
   },
   {
+    tenantSlug: 'acme-corp',
     slug: 'nimbus', name: 'Nimbus Labs', letter: 'N',
     color: '#0891b2', bg: '#cffafe',
     projectCount: 2, memberCount: 11, role: 'write',
   },
   {
+    tenantSlug: 'acme-corp',
     slug: 'polar', name: 'Polar Tooling', letter: 'P',
     color: '#9333ea', bg: '#f3e8ff',
     projectCount: 7, memberCount: 24, role: 'read',
   },
 ];
 
-/** Slugs that can't be used for workspaces because they're top-level routes. */
+/** Slugs that can't be used for workspaces because they collide with the tenant-scoped route literals (`/:tenant/<slug>/...`). */
 export const RESERVED_WORKSPACE_SLUGS = new Set<string>([
-  'login', 'setup', 'invite', 'workspaces', 'design-canvas',
+  'inbox', 'my-issues', 'all-issues', 'projects', 'workflows',
+  'teams', 'settings', 'u', 'workspaces', 'login',
 ]);
 
 // ---------------------------------------------------------------------------

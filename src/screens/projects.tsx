@@ -2,7 +2,7 @@
 import { useMemo, useState, type FormEvent } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { Icon } from '../components/icons';
-import { TopBar, Avatar, useWorkspaceContext } from '../components/shell';
+import { TopBar, Avatar, useTenantContext } from '../components/shell';
 import { Modal, ModalHeader, ModalFooter } from '../components/modal';
 import { Field, Hint } from '../components/forms';
 import { ProjectBadge } from '../components/project-chip';
@@ -16,7 +16,7 @@ import { useProjects } from '../state/projects';
 import { useWorkspaces } from '../state/workspaces';
 
 export function ProjectsPage() {
-  const { workspace } = useWorkspaceContext();
+  const { tenant, workspace } = useTenantContext();
   const { projects } = useProjects();
   const { getWorkspace } = useWorkspaces();
   const ws = getWorkspace(workspace);
@@ -34,7 +34,7 @@ export function ProjectsPage() {
   return (
     <div className="bira" style={{ height: '100%', display: 'flex', flexDirection: 'column', background: 'var(--bg)' }}>
       <TopBar breadcrumbs={[
-        { label: ws?.name ?? workspace, to: `/${workspace}/projects` },
+        { label: ws?.name ?? workspace, to: `/${tenant}/${workspace}/projects` },
         'Projects',
       ]} />
       <div style={{ padding: '20px 28px 14px', borderBottom: '1px solid var(--border-muted)' }}>
@@ -65,10 +65,10 @@ export function ProjectsPage() {
 
       <div className="scroll" style={{ flex: 1, overflow: 'auto', padding: '24px 28px' }}>
         {active.length > 0 && (
-          <Group label="Active" projects={active} workspace={workspace} />
+          <Group label="Active" projects={active} tenant={tenant} workspace={workspace} />
         )}
         {archived.length > 0 && (
-          <Group label="Archived" projects={archived} workspace={workspace} dim />
+          <Group label="Archived" projects={archived} tenant={tenant} workspace={workspace} dim />
         )}
         {filtered.length === 0 && (
           <div style={{
@@ -102,7 +102,7 @@ export function ProjectsPage() {
   );
 }
 
-function Group({ label, projects, workspace, dim }: { label: string; projects: Project[]; workspace: string; dim?: boolean }) {
+function Group({ label, projects, tenant, workspace, dim }: { label: string; projects: Project[]; tenant: string; workspace: string; dim?: boolean }) {
   return (
     <section style={{ marginBottom: 28, opacity: dim ? 0.65 : 1 }}>
       <div className="label-section" style={{ marginBottom: 10 }}>{label} · {projects.length}</div>
@@ -115,7 +115,7 @@ function Group({ label, projects, workspace, dim }: { label: string; projects: P
           return (
             <Link
               key={p.slug}
-              to={`/${workspace}/${p.slug}`}
+              to={`/${tenant}/${workspace}/${p.slug}`}
               className="card"
               style={{ padding: 16, textDecoration: 'none', color: 'inherit' }}
             >
@@ -157,7 +157,7 @@ function deriveKey(name: string): string {
 
 function CreateProjectModal({ onClose }: { onClose: () => void }) {
   const navigate = useNavigate();
-  const { workspace } = useWorkspaceContext();
+  const { tenant, workspace } = useTenantContext();
   const { projects, addProject } = useProjects();
 
   const [name, setName] = useState('');
@@ -220,7 +220,7 @@ function CreateProjectModal({ onClose }: { onClose: () => void }) {
       createdByEmail: CURRENT_USER.email,
     });
     onClose();
-    navigate(`/${workspace}/${created.slug}`);
+    navigate(`/${tenant}/${workspace}/${created.slug}`);
   };
 
   return (
@@ -242,7 +242,7 @@ function CreateProjectModal({ onClose }: { onClose: () => void }) {
               placeholder="e.g. Nebula"
               required
             />
-            {slug && <Hint>URL: <code>/{workspace}/{slug}</code></Hint>}
+            {slug && <Hint>URL: <code>/{tenant}/{workspace}/{slug}</code></Hint>}
           </Field>
 
           <Field label="Issue key">

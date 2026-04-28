@@ -4,7 +4,7 @@ import { Icon } from '../components/icons';
 import {
   TopBar, Tabs, Toolbar,
   StatusDot, TypeChip, Priority, Avatar, IssueId, STATUSES,
-  projectTabs, useWorkspaceContext,
+  projectTabs, useTenantContext,
 } from '../components/shell';
 import { StatusPill } from '../components/status-pill';
 import {
@@ -38,11 +38,11 @@ interface BoardViewProps {
 const DEMO_SELECTED = ['CMT-241', 'CMT-238', 'CMT-237', 'CMT-235', 'CMT-234'];
 
 export function BoardView({ selectedCount, showBulkBar = true }: BoardViewProps) {
-  const { workspace, project } = useWorkspaceContext();
+  const { tenant, workspace, project } = useTenantContext();
   const { getProject } = useProjects();
   const projectInfo = getProject(project);
   const members = projectInfo ? projectEffectiveMembers(projectInfo) : [];
-  const { config, setConfig, reset } = useBoardConfig(workspace, project);
+  const { config, setConfig, reset } = useBoardConfig(tenant, workspace, project);
   const [configOpen, setConfigOpen] = useState(false);
   const [filters, setFilters] = useState<Filter[]>([]);
   const initial = selectedCount != null
@@ -80,17 +80,17 @@ export function BoardView({ selectedCount, showBulkBar = true }: BoardViewProps)
   return (
     <div className="bira" style={{ height: '100%', display: 'flex', flexDirection: 'column', background: 'var(--bg)' }}>
       <TopBar breadcrumbs={[
-        { label: 'Acme Robotics', to: `/${workspace}/projects` },
-        { label: projectInfo?.name ?? project, to: `/${workspace}/${project}` },
+        { label: 'Acme Robotics', to: `/${tenant}/${workspace}/projects` },
+        { label: projectInfo?.name ?? project, to: `/${tenant}/${workspace}/${project}` },
         'Board',
       ]} />
-      <Tabs active="board" tabs={projectTabs(workspace, project)} />
+      <Tabs active="board" tabs={projectTabs(tenant, workspace, project)} />
       {/* Drift fix: removed "Sprint 23" filter chip (sprints out of scope for v1). */}
       <Toolbar
         right={
           <>
             <Link
-              to={`/${workspace}/${project}/members`}
+              to={`/${tenant}/${workspace}/${project}/members`}
               data-tip={`${members.length} members · click to manage`}
               style={{
                 display: 'inline-flex', alignItems: 'center', gap: 6,
@@ -117,7 +117,7 @@ export function BoardView({ selectedCount, showBulkBar = true }: BoardViewProps)
               <Icon name="board" size={13} />Columns
             </button>
             <Link
-              to={`/${workspace}/${project}/settings`}
+              to={`/${tenant}/${workspace}/${project}/settings`}
               className="btn btn-sm"
               data-tip="Project & board settings"
               style={{ textDecoration: 'none' }}
@@ -159,6 +159,7 @@ export function BoardView({ selectedCount, showBulkBar = true }: BoardViewProps)
                       <BoardCard
                         key={i.id}
                         issue={i}
+                        tenant={tenant}
                         workspace={workspace}
                         project={project}
                         selected={selectedIds.has(i.id)}
@@ -168,7 +169,7 @@ export function BoardView({ selectedCount, showBulkBar = true }: BoardViewProps)
                     ))}
                     {hostsTodo && (
                       <Link
-                        to={`/${workspace}/${project}/issue/new`}
+                        to={`/${tenant}/${workspace}/${project}/issue/new`}
                         style={{
                           height: 30, border: '1.5px dashed var(--border)', borderRadius: 6,
                           background: 'transparent', color: 'var(--fg-faint)', fontSize: 12, cursor: 'pointer',
@@ -198,6 +199,7 @@ export function BoardView({ selectedCount, showBulkBar = true }: BoardViewProps)
             groupBy={config.groupBy}
             selectedIds={selectedIds}
             onToggleSelect={toggleSelect}
+            tenant={tenant}
             workspace={workspace}
             project={project}
           />
@@ -395,12 +397,13 @@ interface SwimlaneBoardProps {
   groupBy: GroupBy;
   selectedIds: Set<string>;
   onToggleSelect: (id: string) => void;
+  tenant: string;
   workspace: string;
   project: string;
 }
 function SwimlaneBoard({
   columns, issues, issuesIn, groupBy,
-  selectedIds, onToggleSelect, workspace, project,
+  selectedIds, onToggleSelect, tenant, workspace, project,
 }: SwimlaneBoardProps) {
   const lanes = useMemo(() => deriveLanes(issues, groupBy), [issues, groupBy]);
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
@@ -491,6 +494,7 @@ function SwimlaneBoard({
                             <BoardCard
                               key={i.id}
                               issue={i}
+                              tenant={tenant}
                               workspace={workspace}
                               project={project}
                               selected={selectedIds.has(i.id)}
@@ -618,6 +622,7 @@ export function BulkBtn({ icon, label, tone, tooltip }: BulkBtnProps) {
 
 interface BoardCardProps {
   issue: Issue;
+  tenant?: string;
   workspace?: string;
   project?: string;
   selected?: boolean;
@@ -625,17 +630,17 @@ interface BoardCardProps {
   /** Show a small status indicator. Useful when the column groups multiple statuses. */
   showStatus?: boolean;
 }
-export function BoardCard({ issue, workspace, project, selected, onToggleSelect, showStatus }: BoardCardProps) {
+export function BoardCard({ issue, tenant, workspace, project, selected, onToggleSelect, showStatus }: BoardCardProps) {
   const statusMeta = STATUSES.find((s) => s.id === issue.status);
   const stopAndToggle = (e: MouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
     onToggleSelect?.(issue.id);
   };
-  const linkable = workspace && project;
+  const linkable = tenant && workspace && project;
   const Wrapper: React.ElementType = linkable ? Link : 'div';
   const wrapperProps = linkable
-    ? { to: `/${workspace}/${project}/issue/${issue.id}`, style: { textDecoration: 'none', color: 'inherit' } }
+    ? { to: `/${tenant}/${workspace}/${project}/issue/${issue.id}`, style: { textDecoration: 'none', color: 'inherit' } }
     : {};
   return (
     <Wrapper

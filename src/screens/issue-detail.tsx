@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { Icon } from '../components/icons';
-import { TopBar, TypeChip, IssueId, StatusDot, Priority, Avatar, STATUSES, useWorkspaceContext } from '../components/shell';
+import { TopBar, TypeChip, IssueId, StatusDot, Priority, Avatar, STATUSES, useTenantContext } from '../components/shell';
 import { AttachmentRow, renderRichText, useComposer, type Attachment } from '../components/composer';
 import { IssuePickerModal } from '../components/issue-picker';
 import { useDismiss } from '../components/use-dismiss';
@@ -53,7 +53,7 @@ function formatISODate(iso: string): string {
 
 export function IssueDetailPage() {
   const { key } = useParams<{ key: string }>();
-  const { workspace, project } = useWorkspaceContext();
+  const { tenant, workspace, project } = useTenantContext();
   const { getProject } = useProjects();
   const projectInfo = getProject(project);
   const issue = key ? ISSUES.find((i) => i.id === key) : undefined;
@@ -62,9 +62,9 @@ export function IssueDetailPage() {
     return (
       <div className="bira" style={{ height: '100%', display: 'flex', flexDirection: 'column', background: 'var(--bg)' }}>
         <TopBar breadcrumbs={[
-          { label: 'Acme Robotics', to: `/${workspace}/projects` },
-          { label: projectInfo?.name ?? project, to: `/${workspace}/${project}` },
-          { label: 'Issues', to: `/${workspace}/${project}/list` },
+          { label: 'Acme Robotics', to: `/${tenant}/${workspace}/projects` },
+          { label: projectInfo?.name ?? project, to: `/${tenant}/${workspace}/${project}` },
+          { label: 'Issues', to: `/${tenant}/${workspace}/${project}/list` },
           key ?? '?',
         ]} />
         <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 32 }}>
@@ -79,7 +79,7 @@ export function IssueDetailPage() {
             <p style={{ fontSize: 13, color: 'var(--fg-muted)', margin: '6px 0 14px' }}>
               <span className="mono">{key}</span> doesn’t exist in this project. It may have been deleted, or the link is wrong.
             </p>
-            <Link to={`/${workspace}/${project}/list`} className="btn btn-primary btn-sm" style={{ textDecoration: 'none' }}>
+            <Link to={`/${tenant}/${workspace}/${project}/list`} className="btn btn-primary btn-sm" style={{ textDecoration: 'none' }}>
               <Icon name="arrowRight" size={13} />Back to issues
             </Link>
           </div>
@@ -97,7 +97,7 @@ export function IssueDetailPage() {
  * routed `IssueDetailPage` always passes a real one.
  */
 function IssueDetail({ issue = ISSUES[0] }: { issue?: Issue }) {
-  const { workspace, project } = useWorkspaceContext();
+  const { tenant, workspace, project } = useTenantContext();
   const { getProject } = useProjects();
   // Inner detail: drive everything off the issue's owning project rather than
   // the URL slug, so the breadcrumb is right even when this is rendered inside
@@ -158,7 +158,7 @@ function IssueDetail({ issue = ISSUES[0] }: { issue?: Issue }) {
         : [];
 
   const goCreateChild = () => {
-    navigate(`/${workspace}/${project}/issue/new?parent=${issue.id}`);
+    navigate(`/${tenant}/${workspace}/${project}/issue/new?parent=${issue.id}`);
   };
   const openChildPicker = () => setPickerMode('child');
   const openRelatedPicker = () => setPickerMode('related');
@@ -199,9 +199,9 @@ function IssueDetail({ issue = ISSUES[0] }: { issue?: Issue }) {
   return (
     <div className="bira" style={{ height: '100%', display: 'flex', flexDirection: 'column', background: 'var(--bg)' }}>
       <TopBar breadcrumbs={[
-        { label: 'Acme Robotics', to: `/${workspace}/projects` },
-        { label: owningProject?.name ?? project, to: `/${workspace}/${project}` },
-        { label: 'Issues', to: `/${workspace}/${project}/list` },
+        { label: 'Acme Robotics', to: `/${tenant}/${workspace}/projects` },
+        { label: owningProject?.name ?? project, to: `/${tenant}/${workspace}/${project}` },
+        { label: 'Issues', to: `/${tenant}/${workspace}/${project}/list` },
         issue.id,
       ]} />
 
@@ -212,12 +212,12 @@ function IssueDetail({ issue = ISSUES[0] }: { issue?: Issue }) {
               <TypeChip type={issue.type} />
               <IssueId id={issue.id} />
               <CopyLinkButton
-                url={`${window.location.origin}/${workspace}/${issue.project}/issue/${issue.id}`}
+                url={`${window.location.origin}/${tenant}/${workspace}/${issue.project}/issue/${issue.id}`}
               />
               <span style={{ fontSize: 11, color: 'var(--fg-faint)' }}>·</span>
               <span style={{ fontSize: 11, color: 'var(--fg-muted)' }}>
                 opened by{' '}
-                <MemberLink workspace={workspace} name={reporter} email={reporterEmail} />
+                <MemberLink tenant={tenant} workspace={workspace} name={reporter} email={reporterEmail} />
                 {' · 2 days ago'}
               </span>
             </div>
@@ -391,7 +391,7 @@ function IssueDetail({ issue = ISSUES[0] }: { issue?: Issue }) {
           </Meta>
           <Meta label="Reporter">
             <Link
-              to={`/${workspace}/u/${encodeURIComponent(reporterEmail)}`}
+              to={`/${tenant}/${workspace}/u/${encodeURIComponent(reporterEmail)}`}
               style={{
                 display: 'inline-flex', alignItems: 'center', gap: 6,
                 color: 'var(--fg)', textDecoration: 'none',
@@ -664,10 +664,10 @@ function NotSet() {
  * obviously clickable. Email is encoded so `@` and `.` survive routing
  * in case any environment is picky.
  */
-function MemberLink({ workspace, name, email }: { workspace: string; name: string; email: string }) {
+function MemberLink({ tenant, workspace, name, email }: { tenant: string; workspace: string; name: string; email: string }) {
   return (
     <Link
-      to={`/${workspace}/u/${encodeURIComponent(email)}`}
+      to={`/${tenant}/${workspace}/u/${encodeURIComponent(email)}`}
       style={{ color: 'var(--fg)', fontWeight: 500, textDecoration: 'none' }}
       onMouseEnter={(e) => { e.currentTarget.style.textDecoration = 'underline'; }}
       onMouseLeave={(e) => { e.currentTarget.style.textDecoration = 'none'; }}
@@ -1051,14 +1051,14 @@ function CopyLinkButton({ url }: { url: string }) {
  * happen if a relation went stale).
  */
 function IssueLink({ id }: { id: string }) {
-  const { workspace } = useWorkspaceContext();
+  const { tenant, workspace } = useTenantContext();
   const target = issueById(id);
   if (!target) {
     return <span className="mono" style={{ fontSize: 11.5, color: 'var(--fg-muted)' }}>{id}</span>;
   }
   return (
     <Link
-      to={`/${workspace}/${target.project}/issue/${target.id}`}
+      to={`/${tenant}/${workspace}/${target.project}/issue/${target.id}`}
       style={{
         display: 'flex', alignItems: 'center', gap: 6, minWidth: 0,
         color: 'var(--fg)', fontSize: 12, textDecoration: 'none',
@@ -1253,7 +1253,7 @@ function LinkedSection({
 }
 
 function LinkedIssueCard({ id }: { id: string }) {
-  const { workspace } = useWorkspaceContext();
+  const { tenant, workspace } = useTenantContext();
   const target = issueById(id);
   if (!target) {
     return (
@@ -1268,7 +1268,7 @@ function LinkedIssueCard({ id }: { id: string }) {
   }
   return (
     <Link
-      to={`/${workspace}/${target.project}/issue/${target.id}`}
+      to={`/${tenant}/${workspace}/${target.project}/issue/${target.id}`}
       style={{
         display: 'flex', alignItems: 'center', gap: 10, minWidth: 0,
         padding: '8px 10px',
