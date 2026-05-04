@@ -24,7 +24,12 @@ export interface CreateIssueInput {
   assigneeUserId?: string | null;
   reporterUserId?: string | null;
   parentIssueId?: string | null;
+  startDate?: string | null;
+  endDate?: string | null;
+  estimate?: number | null;
 }
+
+const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
 interface ProjectRowMin {
   id: string;
@@ -57,6 +62,37 @@ export async function createIssue(input: CreateIssueInput): Promise<Issue> {
   }
   if (input.title.length > 500) {
     throw new AppError('title must be 500 characters or fewer', 400);
+  }
+
+  // Type-gate schedule + estimate. Stories/Epics roll up from leaves.
+  const isLeaf = input.type === 'T' || input.type === 'B';
+  if (!isLeaf) {
+    if (input.startDate !== undefined && input.startDate !== null) {
+      throw new AppError('Schedules live on Tasks and Bugs only', 400);
+    }
+    if (input.endDate !== undefined && input.endDate !== null) {
+      throw new AppError('Schedules live on Tasks and Bugs only', 400);
+    }
+    if (input.estimate !== undefined && input.estimate !== null) {
+      throw new AppError(
+        'Effort estimates are not set on Stories or Epics — they roll up from leaves',
+        400
+      );
+    }
+  }
+  if (input.startDate !== undefined && input.startDate !== null && !ISO_DATE_RE.test(input.startDate)) {
+    throw new AppError('startDate must be YYYY-MM-DD', 400);
+  }
+  if (input.endDate !== undefined && input.endDate !== null && !ISO_DATE_RE.test(input.endDate)) {
+    throw new AppError('endDate must be YYYY-MM-DD', 400);
+  }
+  if (input.startDate && input.endDate && input.endDate < input.startDate) {
+    throw new AppError('endDate must be on or after startDate', 400);
+  }
+  if (input.estimate !== undefined && input.estimate !== null) {
+    if (!Number.isInteger(input.estimate) || input.estimate < 0) {
+      throw new AppError('estimate must be a non-negative integer', 400);
+    }
   }
 
   // Stories require an Epic parent at creation. Other types accept an
@@ -123,6 +159,9 @@ export async function createIssue(input: CreateIssueInput): Promise<Issue> {
         assigneeUserId: input.assigneeUserId ?? null,
         reporterUserId: input.reporterUserId ?? null,
         parentIssueId: input.parentIssueId ?? null,
+        startDate: input.startDate ?? null,
+        endDate: input.endDate ?? null,
+        estimate: input.estimate ?? null,
       },
       trx
     );

@@ -11,6 +11,8 @@ import workspacesRouter from './workspaces.js';
 import projectsRouter from './projects.js';
 import tenantMembersRouter from './tenantMembers.js';
 import issuesRouter from './issues.js';
+import workflowsRouter from './workflows.js';
+import themesRouter from './themes.js';
 
 const slugSchema = z
   .string()
@@ -125,6 +127,22 @@ router.use(
   '/:tenantSlug/workspaces/:workspaceSlug/issues',
   resolveWorkspaceScope,
   issuesRouter
+);
+
+// /api/tenants/:tenantSlug/workspaces/:workspaceSlug/workflows — workflows
+// + their nodes/transitions/rules. (slice 3 + slice 5)
+router.use(
+  '/:tenantSlug/workspaces/:workspaceSlug/workflows',
+  resolveWorkspaceScope,
+  workflowsRouter
+);
+
+// /api/tenants/:tenantSlug/workspaces/:workspaceSlug/themes — workspace-scoped
+// theme CRUD + issue attach/detach (slice 7).
+router.use(
+  '/:tenantSlug/workspaces/:workspaceSlug/themes',
+  resolveWorkspaceScope,
+  themesRouter
 );
 
 // /api/tenants/:tenantSlug/members — tenant member admin actions (e.g. admin

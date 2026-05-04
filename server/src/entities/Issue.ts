@@ -24,6 +24,9 @@ export interface IssueRow {
   assigneeUserId: string | null;
   reporterUserId: string | null;
   parentIssueId: string | null;
+  startDate: Date | string | null;
+  endDate: Date | string | null;
+  estimate: number | null;
   createdAt: Date | string;
   updatedAt: Date | string | null;
 }
@@ -51,6 +54,9 @@ export class Issue {
   // enforced at the entity layer because validation needs the parent
   // type — the usecase layer owns that. Entity stays a pure row mirror.
   readonly parentIssueId: string | null;
+  readonly startDate: string | null;
+  readonly endDate: string | null;
+  readonly estimate: number | null;
   readonly createdAt: string;
   readonly updatedAt: string | null;
 
@@ -100,6 +106,16 @@ export class Issue {
     this.assigneeUserId = row.assigneeUserId ?? null;
     this.reporterUserId = row.reporterUserId ?? null;
     this.parentIssueId = row.parentIssueId ?? null;
+    this.startDate = formatDate(row.startDate);
+    this.endDate = formatDate(row.endDate);
+    // estimate may come back as string from pg in some configs;
+    // coerce defensively.
+    this.estimate =
+      row.estimate === null || row.estimate === undefined
+        ? null
+        : typeof row.estimate === 'number'
+          ? row.estimate
+          : Number(row.estimate);
     this.createdAt = toISO(row.createdAt, ENTITY, 'createdAt');
     this.updatedAt = row.updatedAt ? toISO(row.updatedAt, ENTITY, 'updatedAt') : null;
   }
@@ -107,4 +123,23 @@ export class Issue {
   static fromRow(row: IssueRow): Issue {
     return new Issue(row);
   }
+}
+
+/**
+ * Format a `date`-typed pg column as `YYYY-MM-DD`. Knex returns these
+ * as `Date` objects under most configurations; we strip the time part
+ * and return a date-only ISO string.
+ */
+function formatDate(value: Date | string | null | undefined): string | null {
+  if (value === null || value === undefined) return null;
+  if (value instanceof Date) {
+    if (Number.isNaN(value.getTime())) return null;
+    const y = value.getUTCFullYear();
+    const m = String(value.getUTCMonth() + 1).padStart(2, '0');
+    const d = String(value.getUTCDate()).padStart(2, '0');
+    return `${y}-${m}-${d}`;
+  }
+  // Already a string. If it includes a 'T' it's an ISO datetime — slice
+  // to the date portion. Otherwise it's already YYYY-MM-DD.
+  return value.length >= 10 ? value.slice(0, 10) : value;
 }

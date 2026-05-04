@@ -13,6 +13,10 @@ import { getIssue } from '../usecases/issues/getIssue.js';
 import { listIssuesByProject } from '../usecases/issues/listIssues.js';
 import { updateIssue } from '../usecases/issues/updateIssue.js';
 import { setIssueParent } from '../usecases/issues/setIssueParent.js';
+import { relateIssues } from '../usecases/issueLinks/relateIssues.js';
+import { unrelateIssues } from '../usecases/issueLinks/unrelateIssues.js';
+import { addDependency } from '../usecases/issueLinks/addDependency.js';
+import { removeDependency } from '../usecases/issueLinks/removeDependency.js';
 import * as issueService from '../services/issueService.js';
 import { ISSUE_TYPES, STATUSES, PRIORITIES } from '../lib/constants.js';
 
@@ -33,11 +37,24 @@ const CreateIssueSchema = z.object({
   // External callers reference issues by key (e.g. 'CMT-7'); the route
   // resolves this to a uuid before handing off to the usecase.
   parent: z.string().regex(ISSUE_KEY_RE).nullable().optional(),
+  startDate: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/)
+    .nullable()
+    .optional(),
+  endDate: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/)
+    .nullable()
+    .optional(),
+  estimate: z.number().int().nonnegative().nullable().optional(),
 });
 
 const SetParentSchema = z.object({
   parent: z.string().regex(ISSUE_KEY_RE).nullable(),
 });
+
+const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
 
 const UpdateIssueSchema = z
   .object({
@@ -47,6 +64,9 @@ const UpdateIssueSchema = z
     priority: z.enum(PRIORITIES).optional(),
     assigneeUserId: z.string().uuid().nullable().optional(),
     labels: z.array(z.string().min(1).max(64)).max(64).optional(),
+    startDate: z.string().regex(ISO_DATE).nullable().optional(),
+    endDate: z.string().regex(ISO_DATE).nullable().optional(),
+    estimate: z.number().int().nonnegative().nullable().optional(),
   })
   .refine((p) => Object.values(p).some((v) => v !== undefined), {
     message: 'At least one field must be provided',
@@ -145,10 +165,13 @@ router.patch(
   requireActiveTenant,
   requireActiveWorkspace,
   asyncHandler(async (req, res) => {
-    if (!req.scope?.workspaceId) throw new AppError('Workspace scope missing', 500);
+    if (!req.scope?.workspaceId || !req.user) throw new AppError('Workspace scope missing', 500);
     await resolveProject(req);
     const patch = UpdateIssueSchema.parse(req.body);
-    const issue = await updateIssue(req.scope.workspaceId, req.params.key, patch);
+    const issue = await updateIssue(req.scope.workspaceId, req.params.key, patch, {
+      actingUserId: req.user.id,
+      actingUserRole: req.scope.role,
+    });
     // Wrap as IssueView so the response shape matches GET / list.
     const view = await getIssue(req.scope.workspaceId, issue.key);
     res.json({ success: true, data: view ?? issue });
@@ -189,6 +212,95 @@ router.patch(
 
     const view = await getIssue(req.scope.workspaceId, child.key);
     res.json({ success: true, data: view });
+  })
+);
+
+// ---- issue links (slice 8) ----
+
+const RelatesBodySchema = z.object({ relatedKey: z.string().regex(ISSUE_KEY_RE) });
+const DependencyBodySchema = z.object({ blockerKey: z.string().regex(ISSUE_KEY_RE) });
+
+// POST /:key/relates  body { relatedKey }
+router.post(
+  '/:key/relates',
+  authorize('write'),
+  requireActiveTenant,
+  requireActiveWorkspace,
+  asyncHandler(async (req, res) => {
+    if (!req.scope?.workspaceId) throw new AppError('Workspace scope missing', 500);
+    await resolveProject(req);
+    const body = RelatesBodySchema.parse(req.body);
+    await relateIssues({
+      workspaceId: req.scope.workspaceId,
+      aKey: req.params.key,
+      bKey: body.relatedKey,
+    });
+    const view = await getIssue(req.scope.workspaceId, req.params.key);
+    res.status(200).json({ success: true, data: view });
+  })
+);
+
+// DELETE /:key/relates/:relatedKey
+router.delete(
+  '/:key/relates/:relatedKey',
+  authorize('write'),
+  requireActiveTenant,
+  requireActiveWorkspace,
+  asyncHandler(async (req, res) => {
+    if (!req.scope?.workspaceId) throw new AppError('Workspace scope missing', 500);
+    if (!ISSUE_KEY_RE.test(req.params.relatedKey)) {
+      throw new AppError('Invalid issue key', 400);
+    }
+    await resolveProject(req);
+    await unrelateIssues({
+      workspaceId: req.scope.workspaceId,
+      aKey: req.params.key,
+      bKey: req.params.relatedKey,
+    });
+    const view = await getIssue(req.scope.workspaceId, req.params.key);
+    res.status(200).json({ success: true, data: view });
+  })
+);
+
+// POST /:key/dependencies  body { blockerKey }  (this issue depends on blockerKey)
+router.post(
+  '/:key/dependencies',
+  authorize('write'),
+  requireActiveTenant,
+  requireActiveWorkspace,
+  asyncHandler(async (req, res) => {
+    if (!req.scope?.workspaceId) throw new AppError('Workspace scope missing', 500);
+    await resolveProject(req);
+    const body = DependencyBodySchema.parse(req.body);
+    await addDependency({
+      workspaceId: req.scope.workspaceId,
+      blockerKey: body.blockerKey,
+      dependentKey: req.params.key,
+    });
+    const view = await getIssue(req.scope.workspaceId, req.params.key);
+    res.status(200).json({ success: true, data: view });
+  })
+);
+
+// DELETE /:key/dependencies/:blockerKey
+router.delete(
+  '/:key/dependencies/:blockerKey',
+  authorize('write'),
+  requireActiveTenant,
+  requireActiveWorkspace,
+  asyncHandler(async (req, res) => {
+    if (!req.scope?.workspaceId) throw new AppError('Workspace scope missing', 500);
+    if (!ISSUE_KEY_RE.test(req.params.blockerKey)) {
+      throw new AppError('Invalid issue key', 400);
+    }
+    await resolveProject(req);
+    await removeDependency({
+      workspaceId: req.scope.workspaceId,
+      blockerKey: req.params.blockerKey,
+      dependentKey: req.params.key,
+    });
+    const view = await getIssue(req.scope.workspaceId, req.params.key);
+    res.status(200).json({ success: true, data: view });
   })
 );
 

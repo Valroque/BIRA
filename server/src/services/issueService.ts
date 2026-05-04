@@ -18,6 +18,9 @@ const COLUMNS = [
   'assignee_user_id',
   'reporter_user_id',
   'parent_issue_id',
+  'start_date',
+  'end_date',
+  'estimate',
   'created_at',
   'updated_at',
 ] as const;
@@ -99,6 +102,9 @@ export interface CreateIssueInput {
   assigneeUserId?: string | null;
   reporterUserId?: string | null;
   parentIssueId?: string | null;
+  startDate?: string | null;
+  endDate?: string | null;
+  estimate?: number | null;
 }
 
 export async function create(input: CreateIssueInput, trx?: Q): Promise<Issue> {
@@ -117,6 +123,9 @@ export async function create(input: CreateIssueInput, trx?: Q): Promise<Issue> {
       assigneeUserId: input.assigneeUserId ?? null,
       reporterUserId: input.reporterUserId ?? null,
       parentIssueId: input.parentIssueId ?? null,
+      startDate: input.startDate ?? null,
+      endDate: input.endDate ?? null,
+      estimate: input.estimate ?? null,
     })
     .returning(COLUMNS)) as IssueRow[];
   return Issue.fromRow(row);
@@ -135,6 +144,9 @@ export interface UpdateIssueInput {
   // endpoint to keep the type-pair / cycle / scope validation in one
   // spot.
   parentIssueId?: string | null;
+  startDate?: string | null;
+  endDate?: string | null;
+  estimate?: number | null;
 }
 
 export async function updateById(

@@ -6,7 +6,9 @@ import {
   PRIORITIES,
   type StatusId,
   type Priority,
+  type Role,
 } from '../../lib/constants.js';
+import { evaluateTransition } from '../workflows/evaluateTransition.js';
 
 export interface UpdateIssuePatch {
   title?: string;
@@ -15,22 +17,41 @@ export interface UpdateIssuePatch {
   priority?: Priority;
   assigneeUserId?: string | null;
   labels?: string[];
+  startDate?: string | null;
+  endDate?: string | null;
+  estimate?: number | null;
 }
 
 /**
- * Update an issue by id. Status transitions are NOT validated against any
- * workflow yet — slice 5 will introduce the workflow guard. For now any
- * value within the closed STATUSES enum is accepted.
+ * Acting context for the workflow status guard. When provided and the
+ * patch includes a status change, `evaluateTransition` is consulted
+ * before the write.
+ *
+ * If `actingUserId` is omitted (e.g. an internal system call) the
+ * guard is skipped — keeps the seeders / migrations from needing to
+ * fabricate user identity. The HTTP route ALWAYS supplies it.
+ */
+export interface UpdateIssueActingContext {
+  actingUserId?: string;
+  actingUserRole?: Role | null;
+}
+
+const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+
+/**
+ * Update an issue by key. Status changes are validated against the
+ * project's workflow (via `evaluateTransition`) when actor context is
+ * supplied; same-status patches and unguarded internal calls bypass.
  *
  * `parentIssueId` is intentionally NOT in the patch shape — hierarchy
- * mutations go through `setIssueParent` so the type-pair / scope /
- * cycle validation lives in one place. The route schema also rejects
- * `parent` here.
+ * mutations go through `setIssueParent`. Schedule (start/end) and
+ * `estimate` are gated by issue type (Tasks/Bugs only).
  */
 export async function updateIssue(
   workspaceId: string,
   key: string,
-  patch: UpdateIssuePatch
+  patch: UpdateIssuePatch,
+  actor: UpdateIssueActingContext = {}
 ): Promise<Issue> {
   const provided = Object.keys(patch).filter(
     (k) => (patch as Record<string, unknown>)[k] !== undefined
@@ -51,10 +72,65 @@ export async function updateIssue(
       throw new AppError('title must be 500 characters or fewer', 400);
     }
   }
+  if (patch.startDate !== undefined && patch.startDate !== null && !ISO_DATE_RE.test(patch.startDate)) {
+    throw new AppError('startDate must be YYYY-MM-DD', 400);
+  }
+  if (patch.endDate !== undefined && patch.endDate !== null && !ISO_DATE_RE.test(patch.endDate)) {
+    throw new AppError('endDate must be YYYY-MM-DD', 400);
+  }
+  if (patch.estimate !== undefined && patch.estimate !== null) {
+    if (!Number.isInteger(patch.estimate) || patch.estimate < 0) {
+      throw new AppError('estimate must be a non-negative integer', 400);
+    }
+  }
 
   const existing = await issueService.findByKey(workspaceId, key);
   if (!existing) {
     throw new AppError(`Issue '${key}' not found`, 404);
+  }
+
+  // Type gates: schedules + estimates live on Tasks and Bugs only.
+  const isLeaf = existing.type === 'T' || existing.type === 'B';
+  if (!isLeaf) {
+    if (patch.startDate !== undefined || patch.endDate !== undefined) {
+      throw new AppError('Schedules live on Tasks and Bugs only', 400);
+    }
+    if (patch.estimate !== undefined) {
+      throw new AppError(
+        'Effort estimates are not set on Stories or Epics — they roll up from leaves',
+        400
+      );
+    }
+  }
+
+  // Cross-field date sanity. The DB CHECK catches this too, but a 400
+  // with a friendlier message beats a generic 500-shaped constraint
+  // violation rendered by the global handler.
+  const finalStart =
+    patch.startDate !== undefined ? patch.startDate : existing.startDate;
+  const finalEnd = patch.endDate !== undefined ? patch.endDate : existing.endDate;
+  if (finalStart && finalEnd && finalEnd < finalStart) {
+    throw new AppError('endDate must be on or after startDate', 400);
+  }
+
+  // Workflow status guard (slice 5). Skipped when actor context is
+  // missing (internal callers) or when status is unchanged.
+  if (
+    patch.status !== undefined &&
+    patch.status !== existing.status &&
+    actor.actingUserId
+  ) {
+    const result = await evaluateTransition({
+      issue: existing,
+      toStatus: patch.status,
+      actingUserId: actor.actingUserId,
+      actingUserRole: actor.actingUserRole ?? null,
+    });
+    if (!result.allowed) {
+      throw new AppError(result.reason ?? 'Transition not allowed', 403);
+    }
+    // result.noWorkflow === true → permissive fallback. Could log here;
+    // staying quiet for now to keep test output clean.
   }
 
   const updated = await issueService.updateById(existing.id, patch);
