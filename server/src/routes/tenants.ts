@@ -10,6 +10,7 @@ import { setTenantStatus } from '../usecases/tenants/setTenantStatus.js';
 import workspacesRouter from './workspaces.js';
 import projectsRouter from './projects.js';
 import tenantMembersRouter from './tenantMembers.js';
+import issuesRouter from './issues.js';
 
 const slugSchema = z
   .string()
@@ -116,6 +117,14 @@ router.use(
   '/:tenantSlug/workspaces/:workspaceSlug/projects',
   resolveWorkspaceScope,
   projectsRouter
+);
+
+// /api/tenants/:tenantSlug/workspaces/:workspaceSlug/issues — workspace-scoped
+// issue listing (across all projects in the workspace).
+router.use(
+  '/:tenantSlug/workspaces/:workspaceSlug/issues',
+  resolveWorkspaceScope,
+  issuesRouter
 );
 
 // /api/tenants/:tenantSlug/members — tenant member admin actions (e.g. admin

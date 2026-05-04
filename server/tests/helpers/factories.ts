@@ -5,11 +5,19 @@ import * as workspaceService from '../../src/services/workspaceService.js';
 import * as projectService from '../../src/services/projectService.js';
 import * as membershipService from '../../src/services/membershipService.js';
 import { login as loginUseCase } from '../../src/usecases/auth/login.js';
+import { createIssue as createIssueUseCase } from '../../src/usecases/issues/createIssue.js';
 import type { User } from '../../src/entities/User.js';
 import type { Tenant } from '../../src/entities/Tenant.js';
 import type { Workspace } from '../../src/entities/Workspace.js';
 import type { Project } from '../../src/entities/Project.js';
-import type { Role, WorkspaceStatus } from '../../src/lib/constants.js';
+import type { Issue } from '../../src/entities/Issue.js';
+import type {
+  Role,
+  WorkspaceStatus,
+  IssueType,
+  StatusId,
+  Priority,
+} from '../../src/lib/constants.js';
 
 /**
  * Test factories. EVERY helper goes through a service or usecase — never
@@ -174,5 +182,36 @@ export async function createProject(opts: CreateProjectOpts): Promise<Project> {
     color: '#0891b2',
     bg: '#cffafe',
     createdByUserId: opts.createdByUserId,
+  });
+}
+
+// ── Issue factories ───────────────────────────────────────────────────────
+
+export interface CreateIssueOpts {
+  workspaceId: string;
+  projectId: string;
+  reporterUserId: string;
+  type?: IssueType;
+  title?: string;
+  description?: string | null;
+  status?: StatusId;
+  priority?: Priority;
+  labels?: string[];
+  assigneeUserId?: string | null;
+}
+
+export async function createIssue(opts: CreateIssueOpts): Promise<Issue> {
+  const tag = uniq();
+  return createIssueUseCase({
+    workspaceId: opts.workspaceId,
+    projectId: opts.projectId,
+    reporterUserId: opts.reporterUserId,
+    type: opts.type ?? 'T',
+    title: opts.title ?? `Issue ${tag}`,
+    description: opts.description,
+    status: opts.status,
+    priority: opts.priority,
+    labels: opts.labels,
+    assigneeUserId: opts.assigneeUserId,
   });
 }
