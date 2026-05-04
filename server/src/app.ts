@@ -13,6 +13,7 @@ import { errorHandler } from './middleware/errorHandler.js';
 import { db, disconnectDB } from './db/knex.js';
 
 import healthRoutes from './routes/health.js';
+import authRoutes from './routes/auth.js';
 
 const app = express();
 const server = http.createServer(app);
@@ -31,6 +32,7 @@ app.use(loggerMiddleware);
 
 // Routes
 app.use('/healthcheck', healthRoutes);
+app.use('/api/auth', authRoutes);
 
 // 404
 app.use((_req, res) => {
