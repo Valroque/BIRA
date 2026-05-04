@@ -66,6 +66,58 @@ describe('GET /api/tenants/:t/workspaces/:w/projects/:projectSlug/issues/:key', 
     expect(res.status).toBe(404);
   });
 
+  it('200 returns parent (key) and children (keys, seq-ordered)', async () => {
+    const { user, password } = await createUser();
+    const tenant = await createTenant();
+    await addTenantMember(user.id, tenant.id, 'admin');
+    const ws = await createWorkspace({ tenantId: tenant.id });
+    const proj = await createProject({
+      workspaceId: ws.id,
+      createdByUserId: user.id,
+      key: 'HIE',
+    });
+    const epic = await createIssue({
+      workspaceId: ws.id,
+      projectId: proj.id,
+      reporterUserId: user.id,
+      type: 'E',
+      title: 'Epic',
+    });
+    const t1 = await createIssue({
+      workspaceId: ws.id,
+      projectId: proj.id,
+      reporterUserId: user.id,
+      type: 'T',
+      title: 'Task 1',
+      parentIssueId: epic.id,
+    });
+    const t2 = await createIssue({
+      workspaceId: ws.id,
+      projectId: proj.id,
+      reporterUserId: user.id,
+      type: 'T',
+      title: 'Task 2',
+      parentIssueId: epic.id,
+    });
+    const { token } = await loginAs(user.email, password);
+
+    // Epic: parent null, children = [t1.key, t2.key] in seq order.
+    const epicRes = await api()
+      .get(`/api/tenants/${tenant.slug}/workspaces/${ws.slug}/projects/${proj.slug}/issues/${epic.key}`)
+      .set('Authorization', `Bearer ${token}`);
+    expect(epicRes.status).toBe(200);
+    expect(epicRes.body.data.parent).toBeNull();
+    expect(epicRes.body.data.children).toEqual([t1.key, t2.key]);
+
+    // Task 1: parent is the Epic key, children empty.
+    const taskRes = await api()
+      .get(`/api/tenants/${tenant.slug}/workspaces/${ws.slug}/projects/${proj.slug}/issues/${t1.key}`)
+      .set('Authorization', `Bearer ${token}`);
+    expect(taskRes.status).toBe(200);
+    expect(taskRes.body.data.parent).toBe(epic.key);
+    expect(taskRes.body.data.children).toEqual([]);
+  });
+
   it('cross-workspace isolation: an issue in WS A is not visible from WS B URL', async () => {
     const { user, password } = await createUser();
     const tenant = await createTenant();

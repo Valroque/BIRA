@@ -198,6 +198,10 @@ export interface CreateIssueOpts {
   priority?: Priority;
   labels?: string[];
   assigneeUserId?: string | null;
+  // Optional parent — accepts a uuid directly. Tests that need to
+  // create a Story must pass an Epic's id here (Story-without-parent
+  // is rejected by the usecase). Tasks/Bugs may omit it.
+  parentIssueId?: string | null;
 }
 
 export async function createIssue(opts: CreateIssueOpts): Promise<Issue> {
@@ -213,5 +217,6 @@ export async function createIssue(opts: CreateIssueOpts): Promise<Issue> {
     priority: opts.priority,
     labels: opts.labels,
     assigneeUserId: opts.assigneeUserId,
+    parentIssueId: opts.parentIssueId,
   });
 }

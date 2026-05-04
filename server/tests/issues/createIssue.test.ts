@@ -198,6 +198,39 @@ describe('POST /api/tenants/:t/workspaces/:w/projects/:projectSlug/issues', () =
     expect(res.status).toBe(409);
   });
 
+  it('400 when creating a Story without a parent', async () => {
+    const { tenant, ws, proj, token } = await setupAdmin();
+    const res = await api()
+      .post(`/api/tenants/${tenant.slug}/workspaces/${ws.slug}/projects/${proj.slug}/issues`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ type: 'S', title: 'Orphan story' });
+    expect(res.status).toBe(400);
+  });
+
+  it('201 when creating a Story under an Epic parent', async () => {
+    const { tenant, ws, proj, token } = await setupAdmin();
+    const epicRes = await api()
+      .post(`/api/tenants/${tenant.slug}/workspaces/${ws.slug}/projects/${proj.slug}/issues`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ type: 'E', title: 'Big initiative' });
+    expect(epicRes.status).toBe(201);
+    const epicKey = epicRes.body.data.key;
+
+    const storyRes = await api()
+      .post(`/api/tenants/${tenant.slug}/workspaces/${ws.slug}/projects/${proj.slug}/issues`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ type: 'S', title: 'Sub story', parent: epicKey });
+    expect(storyRes.status).toBe(201);
+    expect(storyRes.body.data.parent).toBe(epicKey);
+
+    // The Epic should now list the Story as a child.
+    const epicGet = await api()
+      .get(`/api/tenants/${tenant.slug}/workspaces/${ws.slug}/projects/${proj.slug}/issues/${epicKey}`)
+      .set('Authorization', `Bearer ${token}`);
+    expect(epicGet.status).toBe(200);
+    expect(epicGet.body.data.children).toContain(storyRes.body.data.key);
+  });
+
   it('cross-workspace isolation: cannot create an issue under a project that lives in another workspace', async () => {
     const { user, password } = await createUser();
     const tenant = await createTenant();

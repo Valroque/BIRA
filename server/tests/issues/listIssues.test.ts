@@ -18,6 +18,8 @@ interface IssueDTO {
   priority: string;
   assigneeUserId: string | null;
   labels: string[];
+  parent: string | null;
+  children: string[];
 }
 
 async function setup() {
@@ -129,6 +131,52 @@ describe('GET /api/tenants/:t/workspaces/:w/projects/:projectSlug/issues', () =>
       .set('Authorization', `Bearer ${token}`);
     expect(res.status).toBe(200);
     expect(res.body.data).toHaveLength(2);
+  });
+
+  it('list returns correct parent/children denormalisation across the page', async () => {
+    const { user, tenant, ws, proj, token } = await setup();
+    const epic = await createIssue({
+      workspaceId: ws.id,
+      projectId: proj.id,
+      reporterUserId: user.id,
+      type: 'E',
+      title: 'Epic',
+    });
+    const a = await createIssue({
+      workspaceId: ws.id,
+      projectId: proj.id,
+      reporterUserId: user.id,
+      type: 'T',
+      parentIssueId: epic.id,
+    });
+    const b = await createIssue({
+      workspaceId: ws.id,
+      projectId: proj.id,
+      reporterUserId: user.id,
+      type: 'B',
+      parentIssueId: epic.id,
+    });
+    const orphan = await createIssue({
+      workspaceId: ws.id,
+      projectId: proj.id,
+      reporterUserId: user.id,
+      type: 'T',
+    });
+
+    const res = await api()
+      .get(`/api/tenants/${tenant.slug}/workspaces/${ws.slug}/projects/${proj.slug}/issues`)
+      .set('Authorization', `Bearer ${token}`);
+    expect(res.status).toBe(200);
+    const byKey: Record<string, IssueDTO> = Object.fromEntries(
+      res.body.data.map((i: IssueDTO) => [i.key, i])
+    );
+    expect(byKey[epic.key].parent).toBeNull();
+    expect(byKey[epic.key].children).toEqual([a.key, b.key]);
+    expect(byKey[a.key].parent).toBe(epic.key);
+    expect(byKey[a.key].children).toEqual([]);
+    expect(byKey[b.key].parent).toBe(epic.key);
+    expect(byKey[orphan.key].parent).toBeNull();
+    expect(byKey[orphan.key].children).toEqual([]);
   });
 
   it('filter: priority', async () => {

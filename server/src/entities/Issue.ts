@@ -23,6 +23,7 @@ export interface IssueRow {
   labels: string[];
   assigneeUserId: string | null;
   reporterUserId: string | null;
+  parentIssueId: string | null;
   createdAt: Date | string;
   updatedAt: Date | string | null;
 }
@@ -45,6 +46,11 @@ export class Issue {
   readonly labels: string[];
   readonly assigneeUserId: string | null;
   readonly reporterUserId: string | null;
+  // The uuid of this issue's parent, or null. The hierarchy type rules
+  // (Epics top-level, Stories under Epics, Tasks/Bugs leaves) are NOT
+  // enforced at the entity layer because validation needs the parent
+  // type — the usecase layer owns that. Entity stays a pure row mirror.
+  readonly parentIssueId: string | null;
   readonly createdAt: string;
   readonly updatedAt: string | null;
 
@@ -93,6 +99,7 @@ export class Issue {
     this.labels = Array.isArray(row.labels) ? row.labels : [];
     this.assigneeUserId = row.assigneeUserId ?? null;
     this.reporterUserId = row.reporterUserId ?? null;
+    this.parentIssueId = row.parentIssueId ?? null;
     this.createdAt = toISO(row.createdAt, ENTITY, 'createdAt');
     this.updatedAt = row.updatedAt ? toISO(row.updatedAt, ENTITY, 'updatedAt') : null;
   }

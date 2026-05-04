@@ -17,6 +17,7 @@ const COLUMNS = [
   'labels',
   'assignee_user_id',
   'reporter_user_id',
+  'parent_issue_id',
   'created_at',
   'updated_at',
 ] as const;
@@ -97,6 +98,7 @@ export interface CreateIssueInput {
   labels?: string[];
   assigneeUserId?: string | null;
   reporterUserId?: string | null;
+  parentIssueId?: string | null;
 }
 
 export async function create(input: CreateIssueInput, trx?: Q): Promise<Issue> {
@@ -114,6 +116,7 @@ export async function create(input: CreateIssueInput, trx?: Q): Promise<Issue> {
       labels: input.labels ?? [],
       assigneeUserId: input.assigneeUserId ?? null,
       reporterUserId: input.reporterUserId ?? null,
+      parentIssueId: input.parentIssueId ?? null,
     })
     .returning(COLUMNS)) as IssueRow[];
   return Issue.fromRow(row);
@@ -126,6 +129,12 @@ export interface UpdateIssueInput {
   priority?: Priority;
   assigneeUserId?: string | null;
   labels?: string[];
+  // parentIssueId is settable via this service so setIssueParent can
+  // route through one place. The general-purpose updateIssue usecase
+  // does NOT expose it — parent mutations have their own usecase +
+  // endpoint to keep the type-pair / cycle / scope validation in one
+  // spot.
+  parentIssueId?: string | null;
 }
 
 export async function updateById(
@@ -139,4 +148,59 @@ export async function updateById(
     .update({ ...patch, updatedAt: (trx ?? db).fn.now() })
     .returning(COLUMNS)) as IssueRow[];
   return row ? Issue.fromRow(row) : null;
+}
+
+/**
+ * Return the ids of the direct children of `parentIssueId`, ordered by
+ * `seq` ascending. Used by `getIssue` to populate the denormalised
+ * `children` view in the API response.
+ */
+export async function findChildrenIds(parentIssueId: string, trx?: Q): Promise<string[]> {
+  const rows = (await (trx ?? db)('issues')
+    .where('parent_issue_id', parentIssueId)
+    .select('id', 'seq')
+    .orderBy('seq', 'asc')) as Array<{ id: string; seq: number }>;
+  return rows.map((r) => r.id);
+}
+
+/**
+ * Batch-fetch direct children for many parents at once. Used by list
+ * endpoints to avoid N+1 — pass every issue id in the page and get a
+ * `Map<parentId, childIds[]>` back. Parents with zero children are
+ * NOT included in the map (callers should default to `[]`).
+ *
+ * Children come back ordered by `seq` ascending within each parent.
+ */
+export async function findChildrenIdsByParentIds(
+  parentIds: string[],
+  trx?: Q
+): Promise<Map<string, string[]>> {
+  if (parentIds.length === 0) return new Map();
+  const rows = (await (trx ?? db)('issues')
+    .whereIn('parent_issue_id', parentIds)
+    .select('id', 'parent_issue_id', 'seq')
+    .orderBy('seq', 'asc')) as Array<{ id: string; parentIssueId: string; seq: number }>;
+  const map = new Map<string, string[]>();
+  for (const r of rows) {
+    const arr = map.get(r.parentIssueId);
+    if (arr) arr.push(r.id);
+    else map.set(r.parentIssueId, [r.id]);
+  }
+  return map;
+}
+
+/**
+ * Batch-fetch issue keys for a set of issue ids. Used by list / get
+ * endpoints to translate the internal `parentIssueId` (uuid) into the
+ * external `parent` (key) without N+1.
+ */
+export async function findKeysByIds(
+  ids: string[],
+  trx?: Q
+): Promise<Map<string, string>> {
+  if (ids.length === 0) return new Map();
+  const rows = (await (trx ?? db)('issues')
+    .whereIn('id', ids)
+    .select('id', 'key')) as Array<{ id: string; key: string }>;
+  return new Map(rows.map((r) => [r.id, r.key]));
 }
