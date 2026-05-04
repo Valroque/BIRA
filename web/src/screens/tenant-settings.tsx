@@ -5,7 +5,7 @@
 import { useState } from 'react';
 import { NavLink, Outlet, useLocation, useParams } from 'react-router-dom';
 import { Icon } from '../components/icons';
-import { TopBar, Avatar } from '../components/shell';
+import { TopBar, Avatar, useTenantBreadcrumbs, useTenantContext } from '../components/shell';
 import { Modal, ModalHeader, ModalBody, ModalFooter } from '../components/modal';
 import { Field, Hint, DangerRow } from '../components/forms';
 import { Section } from '../components/section';
@@ -15,11 +15,9 @@ import { useTenants } from '../state/tenants';
 // --- Outer layout (header + secondary tab strip + outlet) ---
 
 export function TenantSettingsLayout() {
-  const { tenant = '' } = useParams<{ tenant: string }>();
-  const { getTenant } = useTenants();
-  const tenantName = getTenant(tenant)?.name ?? tenant;
+  const { tenant, workspace, tenantName, workspaceName } = useTenantBreadcrumbs();
   const { pathname } = useLocation();
-  const base = `/${tenant}/settings`;
+  const base = `/${tenant}/${workspace}/tenant-settings`;
   const sections = [
     { id: 'general', to: `${base}/general`, label: 'General', icon: 'settings' },
     { id: 'members', to: `${base}/members`, label: 'Members', icon: 'users' },
@@ -30,10 +28,9 @@ export function TenantSettingsLayout() {
       <TopBar
         breadcrumbs={[
           { label: tenantName, to: `/${tenant}/workspaces` },
-          'Settings',
+          { label: workspaceName, to: `/${tenant}/${workspace}/projects` },
+          'Tenant settings',
         ]}
-        showSearch={false}
-        showNewIssue={false}
       />
       <div style={{
         padding: '20px 28px 0', borderBottom: '1px solid var(--border-muted)',
@@ -87,35 +84,29 @@ export function TenantSettingsLayout() {
 // --- General (tenant) ---
 
 export function TenantGeneralSettings() {
-  const [name, setName] = useState('Acme Corp');
-  const [slug, setSlug] = useState('acme-corp');
-  const [description, setDescription] = useState('');
+  const { tenant: tenantSlug } = useTenantContext();
+  const { getTenant } = useTenants();
+  const currentTenant = getTenant(tenantSlug);
+
+  const [name, setName] = useState(currentTenant?.name ?? '');
+  const slug = currentTenant?.slug ?? tenantSlug;
 
   return (
     <>
       <Section title="Tenant details" subtitle="How your tenant appears to its members." card>
         <Field label="Name">
-          <input className="input" value={name} onChange={(e) => setName(e.target.value)} />
+          <input className="input" value={name} onChange={(e) => setName(e.target.value)} disabled />
         </Field>
         <Field label="Slug">
           <input
             className="input mono"
             value={slug}
-            onChange={(e) => setSlug(e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, ''))}
+            disabled
           />
-          <Hint>Changing the slug will redirect existing URLs.</Hint>
+          <Hint>Tenant slugs cannot be changed.</Hint>
         </Field>
-        <Field label="Description">
-          <textarea
-            className="input"
-            rows={3}
-            value={description}
-            onChange={(e) => setDescription(e.target.value)}
-            placeholder="A short description of your tenant."
-            style={{ height: 'auto', padding: '8px 10px', fontFamily: 'var(--font-sans)', resize: 'vertical' }}
-          />
-        </Field>
-        <SaveBar />
+        <SaveBar disabled />
+        <Hint>Tenant name editing is not yet available.</Hint>
       </Section>
 
       <Section title="Logo" card>
@@ -319,11 +310,10 @@ function InviteModal({ email, role, onEmail, onRole, onSend, onClose }: InviteMo
 
 // --- Helpers ---
 
-function SaveBar() {
+function SaveBar({ disabled }: { disabled?: boolean }) {
   return (
     <div style={{ marginTop: 12, display: 'flex', gap: 8 }}>
-      <button className="btn btn-primary btn-sm">Save changes</button>
-      <button className="btn btn-sm">Discard</button>
+      <button className="btn btn-primary btn-sm" disabled={disabled}>Save changes</button>
     </div>
   );
 }

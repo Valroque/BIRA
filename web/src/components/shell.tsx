@@ -94,8 +94,10 @@ interface TopBarProps {
   showSearch?: boolean;
   /** The "New issue" button needs a project; hide it on workspace-less screens (e.g. /workspaces). */
   showNewIssue?: boolean;
+  /** Hide on pre-auth screens (e.g. tenant picker) where the user hasn't signed in yet. */
+  showUserMenu?: boolean;
 }
-export const TopBar = ({ breadcrumbs = [], showSearch = true, showNewIssue = true }: TopBarProps) => (
+export const TopBar = ({ breadcrumbs = [], showSearch = true, showNewIssue = true, showUserMenu = true }: TopBarProps) => (
   <div style={{
     height: 44, borderBottom: '1px solid var(--border-muted)', background: 'var(--bg)',
     display: 'flex', alignItems: 'center', padding: '0 12px 0 8px', gap: 8, flexShrink: 0,
@@ -150,9 +152,9 @@ export const TopBar = ({ breadcrumbs = [], showSearch = true, showNewIssue = tru
         <KBD k="⌘K" />
       </button>
     )}
-    <NotificationsButton />
+    {showUserMenu && <NotificationsButton />}
     {showNewIssue && <NewIssueButton />}
-    <UserMenu />
+    {showUserMenu && <UserMenu />}
   </div>
 );
 
@@ -363,7 +365,7 @@ export const Sidebar = ({ collapsed = false, active = '' }: SidebarProps) => {
       </div>
 
       <div style={{ borderTop: '1px solid var(--border-muted)', padding: '8px 0' }}>
-        <Item id="tenant-settings" icon="building" label="Tenant settings" to={`/${tenant}/settings`} />
+        <Item id="tenant-settings" icon="building" label="Tenant settings" to={`/${tenant}/${workspace}/tenant-settings`} />
         <Item id="settings"        icon="settings" label="Settings"        to={`/${tenant}/${workspace}/settings`} />
         <Item id="help"            icon="question" label="Help" />
       </div>

@@ -4,6 +4,7 @@ import { ErrorState } from './components/states';
 import { ProjectsProvider, useProjects } from './state/projects';
 import { WorkspacesProvider } from './state/workspaces';
 import { IssuesProvider } from './state/issues';
+import { useAuth } from './state/auth';
 import { LoginPage } from './screens/login';
 import { TenantsPage } from './screens/tenants';
 import { WorkspacesPage } from './screens/workspaces';
@@ -15,7 +16,6 @@ import { WorkflowPage } from './screens/workflow';
 import { RuleEditorPage } from './screens/rule-editor';
 import { CreateIssuePage } from './screens/create-issue';
 import { AcceptInvitePage } from './screens/accept-invite';
-import { SetupPage } from './screens/setup';
 import { SettingsLayout, GeneralSettings, MembersSettings, ProfileSettings } from './screens/settings';
 import { TenantSettingsLayout, TenantGeneralSettings, TenantMembersSettings } from './screens/tenant-settings';
 import { ProjectsPage } from './screens/projects';
@@ -27,6 +27,13 @@ import { TeamsPage, TeamDetailPage } from './screens/teams';
 import { MemberProfilePage } from './screens/member-profile';
 import { ProjectMembersPage } from './screens/project-members';
 import { DesignCanvasPage } from './screens/design-canvas';
+
+function RequireAuth() {
+  const { user, loading } = useAuth();
+  if (loading) return null; // brief flash while checking stored token
+  if (!user) return <Navigate to="/tenants" replace />;
+  return <Outlet />;
+}
 
 function TenantLayout() {
   const { tenant = '' } = useParams<{ tenant: string }>();
@@ -59,12 +66,9 @@ function WorkspaceLayout() {
     sidebarActive = m ? `team-${m[1]}` : 'all-teams';
   }
   else if (pathname.endsWith('/teams')) sidebarActive = 'all-teams';
+  else if (/\/tenant-settings(\/|$)/.test(pathname)) sidebarActive = 'tenant-settings';
   // Workspace-level settings (3 segments deep): /:tenant/:workspace/settings
   else if (/^\/[^/]+\/[^/]+\/settings(\/|$)/.test(pathname)) sidebarActive = 'settings';
-  // Tenant-level settings (2 segments deep): /:tenant/settings — tenant settings is
-  // full-bleed (no sidebar) so this case currently can't render the sidebar; included
-  // for completeness in case a sidebar is added later.
-  else if (/^\/[^/]+\/settings(\/|$)/.test(pathname)) sidebarActive = 'tenant-settings';
   else if (project) {
     if (pathname.endsWith('/board')) sidebarActive = `${project}-board`;
     else if (pathname.endsWith('/list')) sidebarActive = `${project}-list`;
@@ -128,55 +132,54 @@ export default function App() {
   return (
     <BrowserRouter>
       <Routes>
-        {/* Tenant-less top-level */}
+        {/* Tenant-less top-level — anonymous, no auth required */}
         <Route path="/" element={<Navigate to="/tenants" replace />} />
         {/* Compat redirect — /login is no longer a real screen; tenant must be picked first. */}
         <Route path="/login" element={<Navigate to="/tenants" replace />} />
-        <Route path="/setup" element={<SetupPage />} />
         <Route path="/invite/:token" element={<AcceptInvitePage />} />
         <Route path="/design-canvas" element={<DesignCanvasPage />} />
         <Route path="/tenants" element={<TenantsPage />} />
         {/* Tenant-scoped login lives outside TenantLayout — it doesn't need WorkspacesProvider. */}
         <Route path="/:tenant/login" element={<LoginPage />} />
 
-        {/* Tenant-scoped */}
-        <Route element={<TenantLayout />}>
-          <Route path="/:tenant" element={<TenantHomeRedirect />} />
-          {/* Workspace picker — literal segment, ordered before `/:tenant/:workspace`. */}
-          <Route path="/:tenant/workspaces" element={<WorkspacesPage />} />
+        {/* Tenant-scoped — all routes inside require authentication */}
+        <Route element={<RequireAuth />}>
+          <Route element={<TenantLayout />}>
+            <Route path="/:tenant" element={<TenantHomeRedirect />} />
+            {/* Workspace picker — literal segment, ordered before `/:tenant/:workspace`. */}
+            <Route path="/:tenant/workspaces" element={<WorkspacesPage />} />
 
-          {/* Tenant-level settings — full-bleed (no sidebar), outside WorkspaceLayout. */}
-          <Route path="/:tenant/settings" element={<TenantSettingsLayout />}>
-            <Route index element={<Navigate to="general" replace />} />
-            <Route path="general" element={<TenantGeneralSettings />} />
-            <Route path="members" element={<TenantMembersSettings />} />
-          </Route>
+            <Route element={<WorkspaceLayout />}>
+              <Route path="/:tenant/:workspace" element={<WorkspaceHomeRedirect />} />
+              <Route path="/:tenant/:workspace/tenant-settings" element={<TenantSettingsLayout />}>
+                <Route index element={<Navigate to="general" replace />} />
+                <Route path="general" element={<TenantGeneralSettings />} />
+                <Route path="members" element={<TenantMembersSettings />} />
+              </Route>
+              <Route path="/:tenant/:workspace/inbox" element={<InboxPage />} />
+              <Route path="/:tenant/:workspace/my-issues" element={<MyIssuesPage />} />
+              <Route path="/:tenant/:workspace/all-issues" element={<AllIssuesPage />} />
+              <Route path="/:tenant/:workspace/projects" element={<ProjectsPage />} />
+              <Route path="/:tenant/:workspace/workflows" element={<WorkflowsPage />} />
+              <Route path="/:tenant/:workspace/teams" element={<TeamsPage />} />
+              <Route path="/:tenant/:workspace/teams/:teamSlug" element={<TeamDetailPage />} />
+              <Route path="/:tenant/:workspace/u/:email" element={<MemberProfilePage />} />
+              <Route path="/:tenant/:workspace/:project" element={<ProjectOverviewPage />} />
+              <Route path="/:tenant/:workspace/:project/members" element={<ProjectMembersPage />} />
+              <Route path="/:tenant/:workspace/:project/settings" element={<ProjectSettingsPage />} />
+              <Route path="/:tenant/:workspace/:project/board" element={<BoardPage />} />
+              <Route path="/:tenant/:workspace/:project/list" element={<ListPage />} />
+              <Route path="/:tenant/:workspace/:project/workflow" element={<WorkflowPage />} />
+              <Route path="/:tenant/:workspace/:project/workflow/rules" element={<RuleEditorPage />} />
+              <Route path="/:tenant/:workspace/:project/issue/new" element={<CreateIssuePage />} />
+              <Route path="/:tenant/:workspace/:project/issue/:key" element={<IssueDetailPage />} />
 
-          <Route element={<WorkspaceLayout />}>
-            <Route path="/:tenant/:workspace" element={<WorkspaceHomeRedirect />} />
-            <Route path="/:tenant/:workspace/inbox" element={<InboxPage />} />
-            <Route path="/:tenant/:workspace/my-issues" element={<MyIssuesPage />} />
-            <Route path="/:tenant/:workspace/all-issues" element={<AllIssuesPage />} />
-            <Route path="/:tenant/:workspace/projects" element={<ProjectsPage />} />
-            <Route path="/:tenant/:workspace/workflows" element={<WorkflowsPage />} />
-            <Route path="/:tenant/:workspace/teams" element={<TeamsPage />} />
-            <Route path="/:tenant/:workspace/teams/:teamSlug" element={<TeamDetailPage />} />
-            <Route path="/:tenant/:workspace/u/:email" element={<MemberProfilePage />} />
-            <Route path="/:tenant/:workspace/:project" element={<ProjectOverviewPage />} />
-            <Route path="/:tenant/:workspace/:project/members" element={<ProjectMembersPage />} />
-            <Route path="/:tenant/:workspace/:project/settings" element={<ProjectSettingsPage />} />
-            <Route path="/:tenant/:workspace/:project/board" element={<BoardPage />} />
-            <Route path="/:tenant/:workspace/:project/list" element={<ListPage />} />
-            <Route path="/:tenant/:workspace/:project/workflow" element={<WorkflowPage />} />
-            <Route path="/:tenant/:workspace/:project/workflow/rules" element={<RuleEditorPage />} />
-            <Route path="/:tenant/:workspace/:project/issue/new" element={<CreateIssuePage />} />
-            <Route path="/:tenant/:workspace/:project/issue/:key" element={<IssueDetailPage />} />
-
-            <Route path="/:tenant/:workspace/settings" element={<SettingsLayout />}>
-              <Route index element={<Navigate to="general" replace />} />
-              <Route path="general" element={<GeneralSettings />} />
-              <Route path="members" element={<MembersSettings />} />
-              <Route path="profile" element={<ProfileSettings />} />
+              <Route path="/:tenant/:workspace/settings" element={<SettingsLayout />}>
+                <Route index element={<Navigate to="general" replace />} />
+                <Route path="general" element={<GeneralSettings />} />
+                <Route path="members" element={<MembersSettings />} />
+                <Route path="profile" element={<ProfileSettings />} />
+              </Route>
             </Route>
           </Route>
         </Route>
