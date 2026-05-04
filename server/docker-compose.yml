@@ -1,0 +1,23 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: bira_postgres_dev
+    restart: unless-stopped
+    ports:
+      # 5433 on the host so we don't collide with other local Postgres
+      # instances (e.g. the ABHA repo also uses 5432).
+      - "5433:5432"
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: bira_dev
+    volumes:
+      - bira_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d bira_dev"]
+      interval: 3s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  bira_pgdata:
