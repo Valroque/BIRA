@@ -210,23 +210,38 @@ curl -s -X POST http://localhost:5001/api/auth/login \
 
 ## Tests
 
-Tests live under `server/tests/` and use Vitest + supertest. They share a
-single Postgres database (`bira_test`) on the same docker-composed
-container as dev; isolation comes from `truncateAll()` in `beforeEach`,
-so vitest is pinned to a single forked worker (no parallelism between
-files).
+Tests live under `server/tests/` and use Vitest + supertest against a real
+Postgres test database (`bira_test`). Isolation comes from `truncateAll()`
+in `beforeEach`; vitest runs a single forked worker so there's no
+cross-file interference.
+
+**Coverage** (27 files, 179 tests):
+
+| Area | Files |
+|---|---|
+| Unit | `tests/unit/` — passwordUtils, errorHandler, roleAtLeast, User entity |
+| Auth | `tests/auth/` — register, login, refresh-token, profile, updateProfile, changePassword |
+| Middleware | `tests/middleware/` — passwordResetGate (423 gate) |
+| Tenants | `tests/tenants/` — list, create, get, deactivate, reactivate, deactivated gate |
+| Tenant members | `tests/admin/` — admin password reset |
+| Workspaces | `tests/workspaces/` — list, create, get, update, archive, unarchive |
+| Projects | `tests/projects/` — list, create, get |
 
 ```bash
-# one-time (and after any migration change): drop + recreate + migrate bira_test
+# one-time: copy the test env file and set up bira_test DB
 cp .env.test.example .env.test
-npm run db:test:reset
+npm run db:test:reset   # drops + recreates bira_test and runs migrations
 
 # run all specs
 npm test
 
-# watch mode
+# watch mode during development
 npm run test:watch
 ```
+
+Factories are in `tests/helpers/factories.ts` — every helper goes through a
+real service or usecase (never raw knex inserts) so tests stay honest about
+the app's invariants.
 
 Tests build their own state via `tests/helpers/factories.ts`. Don't call
 the demo seed from a test — the seed is for manual QA. Factories go
