@@ -1,11 +1,15 @@
 import { hashPassword } from '../../src/lib/passwordUtils.js';
 import * as userService from '../../src/services/userService.js';
 import * as tenantService from '../../src/services/tenantService.js';
+import * as workspaceService from '../../src/services/workspaceService.js';
+import * as projectService from '../../src/services/projectService.js';
 import * as membershipService from '../../src/services/membershipService.js';
 import { login as loginUseCase } from '../../src/usecases/auth/login.js';
 import type { User } from '../../src/entities/User.js';
 import type { Tenant } from '../../src/entities/Tenant.js';
-import type { Role } from '../../src/lib/constants.js';
+import type { Workspace } from '../../src/entities/Workspace.js';
+import type { Project } from '../../src/entities/Project.js';
+import type { Role, WorkspaceStatus } from '../../src/lib/constants.js';
 
 /**
  * Test factories. EVERY helper goes through a service or usecase — never
@@ -110,4 +114,65 @@ export async function loginAs(email: string, password: string): Promise<LoginRes
     refreshToken: result.refreshToken,
     user: result.user,
   };
+}
+
+// ── Workspace factories ───────────────────────────────────────────────────
+
+export interface CreateWorkspaceOpts {
+  tenantId: string;
+  slug?: string;
+  name?: string;
+  status?: WorkspaceStatus;
+}
+
+export async function createWorkspace(opts: CreateWorkspaceOpts): Promise<Workspace> {
+  const tag = uniq();
+  const ws = await workspaceService.create({
+    tenantId: opts.tenantId,
+    slug: opts.slug ?? `ws-${tag}`,
+    name: opts.name ?? `Workspace ${tag}`,
+    letter: 'W',
+    color: '#4f46e5',
+    bg: '#e0e7ff',
+  });
+  if (opts.status && opts.status !== 'active') {
+    const updated = await workspaceService.setStatus(ws.id, opts.status);
+    if (!updated) throw new Error('createWorkspace: failed to set status');
+    return updated;
+  }
+  return ws;
+}
+
+export async function addWorkspaceMember(
+  userId: string,
+  workspaceId: string,
+  role: Role
+): Promise<void> {
+  await membershipService.addWorkspaceMember({ userId, workspaceId, role });
+}
+
+// ── Project factories ─────────────────────────────────────────────────────
+
+export interface CreateProjectOpts {
+  workspaceId: string;
+  createdByUserId: string;
+  slug?: string;
+  key?: string;
+  name?: string;
+}
+
+export async function createProject(opts: CreateProjectOpts): Promise<Project> {
+  const tag = uniq();
+  // Use counter directly — timestamp can repeat within the same ms, but counter is always unique.
+  const autoKey = `P${counter}`;
+  return projectService.create({
+    workspaceId: opts.workspaceId,
+    slug: opts.slug ?? `proj-${tag}`,
+    key: opts.key ?? autoKey,
+    name: opts.name ?? `Project ${tag}`,
+    letter: 'P',
+    color: '#0891b2',
+    bg: '#cffafe',
+    createdByUserId: opts.createdByUserId,
+  });
 }
