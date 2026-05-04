@@ -7,8 +7,15 @@ export interface TenantListItem {
   role: string;
 }
 
-export async function listTenants(userId: string): Promise<TenantListItem[]> {
-  const tenants = await tenantService.listForUser(userId);
+export interface ListTenantsOptions {
+  includeDeactivated?: boolean;
+}
+
+export async function listTenants(
+  userId: string,
+  opts: ListTenantsOptions = {}
+): Promise<TenantListItem[]> {
+  const tenants = await tenantService.listForUser(userId, opts);
   const out: TenantListItem[] = [];
   for (const tenant of tenants) {
     const tm = await membershipService.getTenantMembership(userId, tenant.id);

@@ -23,3 +23,6 @@ export type ProjectStatus = (typeof PROJECT_STATUSES)[number];
 
 export const WORKSPACE_STATUSES = ['active', 'archived'] as const;
 export type WorkspaceStatus = (typeof WORKSPACE_STATUSES)[number];
+
+export const TENANT_STATUSES = ['active', 'deactivated'] as const;
+export type TenantStatus = (typeof TENANT_STATUSES)[number];

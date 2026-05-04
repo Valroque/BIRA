@@ -73,9 +73,12 @@ tool(
 
 tool(
   'list_tenants',
-  'List tenants visible to the logged-in user.',
-  z.object({}),
-  async () => ok(await client.request('GET', '/api/tenants'))
+  'List tenants visible to the logged-in user. Deactivated tenants are excluded by default; pass includeDeactivated=true to see them too.',
+  z.object({ includeDeactivated: z.boolean().optional() }),
+  async ({ includeDeactivated }) => {
+    const qs = includeDeactivated ? '?includeDeactivated=true' : '';
+    return ok(await client.request('GET', `/api/tenants${qs}`));
+  }
 );
 
 tool(
@@ -84,6 +87,36 @@ tool(
   z.object({ tenantSlug: z.string().min(1) }),
   async ({ tenantSlug }) =>
     ok(await client.request('GET', `/api/tenants/${tenantSlug}`))
+);
+
+tool(
+  'create_tenant',
+  'Create a new tenant. The caller is granted admin membership on the new tenant in the same transaction. Slug must be globally unique.',
+  z.object({
+    slug: z.string().min(1),
+    name: z.string().min(1),
+    letter: z.string().min(1).max(4),
+    color: z.string().min(1),
+    bg: z.string().min(1),
+    plan: z.string().min(1).optional(),
+  }),
+  async (body) => ok(await client.request('POST', '/api/tenants', body))
+);
+
+tool(
+  'deactivate_tenant',
+  'Deactivate a tenant. No data is destroyed; the tenant disappears from the default list until reactivated. Requires tenant admin role.',
+  z.object({ tenantSlug: z.string().min(1) }),
+  async ({ tenantSlug }) =>
+    ok(await client.request('POST', `/api/tenants/${tenantSlug}/deactivate`))
+);
+
+tool(
+  'reactivate_tenant',
+  'Restore a previously deactivated tenant to active. Requires tenant admin role.',
+  z.object({ tenantSlug: z.string().min(1) }),
+  async ({ tenantSlug }) =>
+    ok(await client.request('POST', `/api/tenants/${tenantSlug}/reactivate`))
 );
 
 // ── Workspaces ─────────────────────────────────────────────────────────────

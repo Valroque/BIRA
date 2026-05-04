@@ -20,7 +20,9 @@ const PUBLIC_COLUMNS = [
   'first_name',
   'last_name',
   'avatar',
+  'phone',
   'is_active',
+  'must_reset_password',
   'last_login',
   'created_at',
   'updated_at',
@@ -49,6 +51,18 @@ export async function findByEmailWithHash(email: string): Promise<UserRowWithHas
   const row = (await db('users')
     .whereRaw('LOWER(email) = LOWER(?)', [email])
     .first()) as UserRowWithHash | undefined;
+  return row ?? null;
+}
+
+/**
+ * Returns the row WITH `passwordHash` looked up by id. Use only in flows
+ * that need to verify credentials for a known user (e.g. self-driven
+ * change-password). Never expose the hash to callers.
+ */
+export async function findByIdWithHash(id: string): Promise<UserRowWithHash | null> {
+  const row = (await db('users').where('id', id).first()) as
+    | UserRowWithHash
+    | undefined;
   return row ?? null;
 }
 
@@ -83,4 +97,39 @@ export async function getByIds(ids: string[]): Promise<User[]> {
     .whereIn('id', ids)
     .select(PUBLIC_COLUMNS)) as UserRow[];
   return rows.map(User.fromRow);
+}
+
+export interface UpdateUserInput {
+  firstName?: string;
+  lastName?: string;
+  /** Caller MUST lowercase before passing — service does not normalise. */
+  email?: string;
+  phone?: string | null;
+  avatar?: string | null;
+}
+
+export async function update(id: string, patch: UpdateUserInput): Promise<User | null> {
+  if (Object.keys(patch).length === 0) return getById(id);
+  const [row] = (await db('users')
+    .where('id', id)
+    .update({ ...patch, updatedAt: db.fn.now() })
+    .returning(PUBLIC_COLUMNS)) as UserRow[];
+  return row ? User.fromRow(row) : null;
+}
+
+/**
+ * Set both `passwordHash` and `mustResetPassword` in a single UPDATE so the
+ * two never drift apart — admin reset sets `mustReset: true`; the user's
+ * own change-password flow sets `mustReset: false`.
+ */
+export async function setPassword(
+  id: string,
+  passwordHash: string,
+  opts: { mustReset: boolean }
+): Promise<void> {
+  await db('users').where('id', id).update({
+    passwordHash,
+    mustResetPassword: opts.mustReset,
+    updatedAt: db.fn.now(),
+  });
 }

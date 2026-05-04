@@ -1,7 +1,11 @@
 import { Router } from 'express';
 import { z } from 'zod';
 import { asyncHandler } from '../middleware/errorHandler.js';
-import { authorize, requireActiveWorkspace } from '../middleware/tenantScope.js';
+import {
+  authorize,
+  requireActiveTenant,
+  requireActiveWorkspace,
+} from '../middleware/tenantScope.js';
 import { AppError } from '../lib/errors.js';
 import { listProjects } from '../usecases/projects/listProjects.js';
 import { createProject } from '../usecases/projects/createProject.js';
@@ -41,6 +45,7 @@ router.get(
 router.post(
   '/',
   authorize('write'),
+  requireActiveTenant,
   requireActiveWorkspace,
   asyncHandler(async (req, res) => {
     if (!req.user || !req.scope?.workspaceId) {

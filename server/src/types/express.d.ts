@@ -1,5 +1,5 @@
 import type { User } from '../entities/User.js';
-import type { Role, WorkspaceStatus } from '../lib/constants.js';
+import type { Role, TenantStatus, WorkspaceStatus } from '../lib/constants.js';
 
 declare global {
   namespace Express {
@@ -21,6 +21,7 @@ declare global {
         tenantId: string;
         tenantSlug: string;
         tenantRole: Role;
+        tenantStatus: TenantStatus;
         workspaceId?: string;
         workspaceSlug?: string;
         workspaceStatus?: WorkspaceStatus;

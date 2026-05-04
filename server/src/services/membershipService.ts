@@ -1,3 +1,4 @@
+import type { Knex } from 'knex';
 import { db } from '../db/knex.js';
 import type { Role, TenantMembershipStatus } from '../lib/constants.js';
 
@@ -36,8 +37,12 @@ export interface AddTenantMemberInput {
   status?: TenantMembershipStatus;
 }
 
-export async function addTenantMember(input: AddTenantMemberInput): Promise<TenantMembershipRow> {
-  const [row] = (await db('tenant_memberships')
+export async function addTenantMember(
+  input: AddTenantMemberInput,
+  trx?: Knex.Transaction
+): Promise<TenantMembershipRow> {
+  const q = (trx ?? db)('tenant_memberships');
+  const [row] = (await q
     .insert({
       userId: input.userId,
       tenantId: input.tenantId,

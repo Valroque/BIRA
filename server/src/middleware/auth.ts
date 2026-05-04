@@ -91,3 +91,28 @@ export const authenticate: RequestHandler = async (
     next(err);
   }
 };
+
+/**
+ * Gate that blocks any request from a user whose `mustResetPassword` flag
+ * is set. Mount AFTER `authenticate` on routers that should be off-limits
+ * to locked accounts (notably `/api/tenants/*`). The user can still hit
+ * `/api/auth/profile` (to discover they're locked) and
+ * `/api/auth/change-password` (to escape) — those routes intentionally
+ * skip this gate.
+ */
+export const requirePasswordResetCleared: RequestHandler = (req, res, next) => {
+  if (!req.user) {
+    res.status(401).json({ success: false, message: 'Authentication required' });
+    return;
+  }
+  if (req.user.mustResetPassword) {
+    res.status(423).json({
+      success: false,
+      code: 'PASSWORD_RESET_REQUIRED',
+      message:
+        'Your password must be reset before you can continue. Use POST /api/auth/change-password.',
+    });
+    return;
+  }
+  next();
+};

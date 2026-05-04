@@ -7,7 +7,9 @@ export interface UserRow {
   firstName: string;
   lastName: string;
   avatar: string | null;
+  phone: string | null;
   isActive: boolean;
+  mustResetPassword: boolean;
   lastLogin: Date | string | null;
   createdAt: Date | string;
   updatedAt: Date | string | null;
@@ -21,7 +23,9 @@ export class User {
   readonly firstName: string;
   readonly lastName: string;
   readonly avatar: string | null;
+  readonly phone: string | null;
   readonly isActive: boolean;
+  readonly mustResetPassword: boolean;
   readonly lastLogin: string | null;
   readonly createdAt: string;
   readonly updatedAt: string | null;
@@ -38,7 +42,11 @@ export class User {
     this.firstName = row.firstName;
     this.lastName = row.lastName;
     this.avatar = row.avatar ?? null;
+    this.phone = row.phone ?? null;
     this.isActive = row.isActive;
+    // `mustResetPassword` is non-null with a DB default of false; coerce
+    // defensively for older rows that predate the column.
+    this.mustResetPassword = row.mustResetPassword ?? false;
     this.lastLogin = row.lastLogin ? toISO(row.lastLogin, ENTITY, 'lastLogin') : null;
     this.createdAt = toISO(row.createdAt, ENTITY, 'createdAt');
     this.updatedAt = row.updatedAt ? toISO(row.updatedAt, ENTITY, 'updatedAt') : null;
@@ -59,7 +67,9 @@ export class User {
       firstName: this.firstName,
       lastName: this.lastName,
       avatar: this.avatar,
+      phone: this.phone,
       isActive: this.isActive,
+      mustResetPassword: this.mustResetPassword,
       lastLogin: this.lastLogin,
       createdAt: this.createdAt,
       updatedAt: this.updatedAt,
