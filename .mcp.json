@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "bira": {
+      "command": "npx",
+      "args": ["tsx", "mcp/src/index.ts"],
+      "env": {
+        "BIRA_API_URL": "http://localhost:5001"
+      }
+    }
+  }
+}

@@ -584,6 +584,13 @@ export interface Workspace {
   memberCount: number;
   /** Effective role of the current user in this workspace. */
   role: WorkspaceRole;
+  /**
+   * Soft-delete state. Archived workspaces are hidden from the default
+   * picker view and frozen against further mutation. The picker exposes a
+   * "Show archived" toggle for users who need to view or restore them.
+   * Mirrors `workspaces.status` ('active' | 'archived') on the backend.
+   */
+  archived?: boolean;
 }
 
 export const WORKSPACES: Workspace[] = [

@@ -74,7 +74,11 @@ themselves live at [`.claude/rules/v1-constraints.md`](.claude/rules/v1-constrai
    tenant-unaware), `bira:tenants`
    (user-created tenants — merged with `TENANTS` by `TenantsProvider`),
    `bira:workspaces:<tenant>` (per-tenant workspace list — `WorkspacesProvider`
-   is mounted per tenant inside `TenantLayout`), `bira:projects:<tenant>:<workspace>`
+   is mounted per tenant inside `TenantLayout`),
+   `bira:workspace-archived:<tenant>` (`Record<slug, boolean>` overlay so seed
+   workspaces can be archived without shadowing the whole row — merged into
+   `Workspace.archived` on read; mirrors backend `workspaces.status`),
+   `bira:projects:<tenant>:<workspace>`
    (per-workspace project list — only the demo `acme-corp/acme` workspace
    gets `SEED_PROJECTS` seeded), `bira:board-columns:<tenant>:<workspace>:<project>`
    (per-project board config), and `bira:issue-overrides:<tenant>:<workspace>`

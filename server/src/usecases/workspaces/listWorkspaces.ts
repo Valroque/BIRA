@@ -9,17 +9,28 @@ export interface WorkspaceListItem {
   role: Role;
 }
 
+export interface ListWorkspacesOptions {
+  /** Include archived workspaces in the result. Default false. */
+  includeArchived?: boolean;
+}
+
 /**
  * Workspaces under a tenant that the user can access. Tenant admins see
  * every workspace; non-admins see only workspaces where they have an
  * explicit `workspace_memberships` row.
+ *
+ * By default archived workspaces are filtered out — pass
+ * `includeArchived: true` to opt into seeing them (e.g. settings UIs).
  */
 export async function listWorkspaces(
   userId: string,
   tenantId: string,
-  tenantRole: Role
+  tenantRole: Role,
+  opts: ListWorkspacesOptions = {}
 ): Promise<WorkspaceListItem[]> {
-  const workspaces = await workspaceService.listByTenant(tenantId);
+  const workspaces = await workspaceService.listByTenant(tenantId, {
+    includeArchived: opts.includeArchived,
+  });
   const out: WorkspaceListItem[] = [];
   for (const w of workspaces) {
     if (tenantRole === 'admin') {

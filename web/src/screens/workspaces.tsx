@@ -7,7 +7,7 @@
 // button opens a small create flow that persists to localStorage via
 // `useWorkspaces()` (scoped per tenant by the provider).
 
-import { useMemo, useState, type FormEvent } from 'react';
+import { useMemo, useState, type FormEvent, type MouseEvent } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { Icon } from '../components/icons';
 import { Field, Hint } from '../components/forms';
@@ -26,12 +26,19 @@ export function WorkspacesPage() {
   const { workspaces } = useWorkspaces();
   const [showCreate, setShowCreate] = useState(false);
   const [filter, setFilter] = useState('');
+  const [showArchived, setShowArchived] = useState(false);
+
+  const archivedCount = useMemo(
+    () => workspaces.filter((w) => w.archived).length,
+    [workspaces],
+  );
 
   const filtered = useMemo(() => {
     const f = filter.trim().toLowerCase();
-    if (!f) return workspaces;
-    return workspaces.filter((w) => w.name.toLowerCase().includes(f));
-  }, [workspaces, filter]);
+    const visible = showArchived ? workspaces : workspaces.filter((w) => !w.archived);
+    if (!f) return visible;
+    return visible.filter((w) => w.name.toLowerCase().includes(f));
+  }, [workspaces, filter, showArchived]);
 
   return (
     <div className="bira" style={{
@@ -69,28 +76,48 @@ export function WorkspacesPage() {
           </div>
 
           {workspaces.length > 0 && (
-            <div style={{ position: 'relative', marginBottom: 10 }}>
-              <span style={{
-                position: 'absolute', left: 8, top: '50%', transform: 'translateY(-50%)',
-                color: 'var(--fg-faint)', display: 'inline-flex',
-              }}>
-                <Icon name="search" size={13} />
-              </span>
-              <input
-                autoFocus
-                className="input input-sm"
-                value={filter}
-                onChange={(e) => setFilter(e.target.value)}
-                placeholder="Search workspaces by name"
-                style={{ paddingLeft: 28 }}
-              />
+            <div style={{
+              display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10,
+            }}>
+              <div style={{ position: 'relative', flex: 1 }}>
+                <span style={{
+                  position: 'absolute', left: 8, top: '50%', transform: 'translateY(-50%)',
+                  color: 'var(--fg-faint)', display: 'inline-flex',
+                }}>
+                  <Icon name="search" size={13} />
+                </span>
+                <input
+                  autoFocus
+                  className="input input-sm"
+                  value={filter}
+                  onChange={(e) => setFilter(e.target.value)}
+                  placeholder="Search workspaces by name"
+                  style={{ paddingLeft: 28 }}
+                />
+              </div>
+              {archivedCount > 0 && (
+                <button
+                  type="button"
+                  onClick={() => setShowArchived((v) => !v)}
+                  className={`btn btn-sm${showArchived ? ' btn-primary' : ''}`}
+                  data-tip={showArchived ? 'Hide archived workspaces' : 'Show archived workspaces'}
+                  style={{ flexShrink: 0 }}
+                >
+                  <Icon name="archive" size={13} />
+                  {showArchived ? 'Hide archived' : `Show archived (${archivedCount})`}
+                </button>
+              )}
             </div>
           )}
 
           {workspaces.length === 0
             ? <EmptyState onCreate={() => setShowCreate(true)} />
             : filtered.length === 0
-              ? <NoMatch query={filter} />
+              ? <NoMatch
+                  query={filter}
+                  onlyArchived={!showArchived && archivedCount > 0 && workspaces.every((w) => w.archived)}
+                  onShowArchived={() => setShowArchived(true)}
+                />
               : <WorkspaceList workspaces={filtered} tenant={tenant} />}
 
           <Footer />
@@ -102,7 +129,37 @@ export function WorkspacesPage() {
   );
 }
 
-function NoMatch({ query }: { query: string }) {
+function NoMatch({
+  query,
+  onlyArchived,
+  onShowArchived,
+}: {
+  query: string;
+  onlyArchived: boolean;
+  onShowArchived: () => void;
+}) {
+  // "Only archived" wins over "no search match" — the more useful nudge is
+  // toward the toggle. Otherwise fall back to the generic search-empty.
+  if (onlyArchived) {
+    return (
+      <div style={{
+        padding: '24px 18px', textAlign: 'center',
+        background: 'var(--bg)', border: '1px dashed var(--border)',
+        borderRadius: 8, color: 'var(--fg-muted)',
+      }}>
+        <Icon name="archive" size={18} color="var(--fg-faint)" />
+        <div style={{ fontSize: 13, fontWeight: 600, marginTop: 8, color: 'var(--fg)' }}>
+          All workspaces are archived
+        </div>
+        <div style={{ fontSize: 12, marginTop: 4, marginBottom: 10 }}>
+          Toggle "Show archived" to view them, or create a new workspace.
+        </div>
+        <button onClick={onShowArchived} className="btn btn-sm">
+          <Icon name="archive" size={13} />Show archived
+        </button>
+      </div>
+    );
+  }
   return (
     <div style={{
       padding: '24px 18px', textAlign: 'center',
@@ -111,7 +168,7 @@ function NoMatch({ query }: { query: string }) {
     }}>
       <Icon name="search" size={18} color="var(--fg-faint)" />
       <div style={{ fontSize: 13, fontWeight: 600, marginTop: 8, color: 'var(--fg)' }}>
-        No workspaces match "{query.trim()}"
+        {query.trim() ? `No workspaces match "${query.trim()}"` : 'No workspaces to show'}
       </div>
       <div style={{ fontSize: 12, marginTop: 4 }}>
         Try a different name, or create a new workspace.
@@ -146,41 +203,82 @@ function WorkspaceList({ workspaces, tenant }: { workspaces: Workspace[]; tenant
 }
 
 function WorkspaceRow({ w, tenant }: { w: Workspace; tenant: string }) {
+  const { setArchived } = useWorkspaces();
+  const archived = !!w.archived;
+
+  const onToggleArchived = (e: MouseEvent<HTMLButtonElement>) => {
+    // The archive button overlays the Link — stop propagation so the
+    // surrounding card click (navigate into the workspace) doesn't fire.
+    e.preventDefault();
+    e.stopPropagation();
+    setArchived(w.slug, !archived);
+  };
+
   return (
-    <Link
-      to={`/${tenant}/${w.slug}`}
-      className="card"
-      style={{
-        display: 'flex', alignItems: 'center', gap: 12,
-        padding: 14, textDecoration: 'none', color: 'inherit',
-      }}
-    >
-      <div style={{
-        width: 38, height: 38, borderRadius: 8, flexShrink: 0,
-        background: w.bg, color: w.color,
-        display: 'flex', alignItems: 'center', justifyContent: 'center',
-        fontWeight: 700, fontSize: 16,
-      }}>{w.letter}</div>
-
-      <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <span style={{ fontSize: 14, fontWeight: 600 }}>{w.name}</span>
-          <RolePill role={w.role} />
-        </div>
+    <div style={{ position: 'relative' }}>
+      <Link
+        to={`/${tenant}/${w.slug}`}
+        className="card"
+        style={{
+          display: 'flex', alignItems: 'center', gap: 12,
+          padding: 14, paddingRight: 56, textDecoration: 'none', color: 'inherit',
+          opacity: archived ? 0.7 : 1,
+        }}
+      >
         <div style={{
-          display: 'flex', alignItems: 'center', gap: 8, marginTop: 3,
-          fontSize: 12, color: 'var(--fg-muted)',
-        }}>
-          <span className="mono" style={{ color: 'var(--fg-faint)' }}>/{w.slug}</span>
-          <Sep />
-          <span><span className="tnum" style={{ color: 'var(--fg)', fontWeight: 500 }}>{w.projectCount}</span> projects</span>
-          <Sep />
-          <span><span className="tnum" style={{ color: 'var(--fg)', fontWeight: 500 }}>{w.memberCount}</span> members</span>
-        </div>
-      </div>
+          width: 38, height: 38, borderRadius: 8, flexShrink: 0,
+          background: w.bg, color: w.color,
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          fontWeight: 700, fontSize: 16,
+          filter: archived ? 'grayscale(0.4)' : undefined,
+        }}>{w.letter}</div>
 
-      <Icon name="chevronRight" size={14} color="var(--fg-faint)" />
-    </Link>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <span style={{ fontSize: 14, fontWeight: 600 }}>{w.name}</span>
+            <RolePill role={w.role} />
+            {archived && <ArchivedPill />}
+          </div>
+          <div style={{
+            display: 'flex', alignItems: 'center', gap: 8, marginTop: 3,
+            fontSize: 12, color: 'var(--fg-muted)',
+          }}>
+            <span className="mono" style={{ color: 'var(--fg-faint)' }}>/{w.slug}</span>
+            <Sep />
+            <span><span className="tnum" style={{ color: 'var(--fg)', fontWeight: 500 }}>{w.projectCount}</span> projects</span>
+            <Sep />
+            <span><span className="tnum" style={{ color: 'var(--fg)', fontWeight: 500 }}>{w.memberCount}</span> members</span>
+          </div>
+        </div>
+
+        <Icon name="chevronRight" size={14} color="var(--fg-faint)" />
+      </Link>
+
+      <button
+        type="button"
+        onClick={onToggleArchived}
+        className="btn btn-ghost btn-sm"
+        data-tip={archived ? 'Unarchive workspace' : 'Archive workspace'}
+        style={{
+          position: 'absolute', top: '50%', right: 36, transform: 'translateY(-50%)',
+          width: 26, padding: 0,
+        }}
+      >
+        <Icon name={archived ? 'refresh' : 'archive'} size={13} />
+      </button>
+    </div>
+  );
+}
+
+function ArchivedPill() {
+  return (
+    <span className="pill" style={{
+      background: 'var(--bg-muted)', color: 'var(--fg-muted)',
+      height: 18, fontSize: 11, fontWeight: 600, padding: '0 6px',
+      display: 'inline-flex', alignItems: 'center', gap: 3,
+    }}>
+      <Icon name="archive" size={10} />Archived
+    </span>
   );
 }
 
