@@ -69,6 +69,29 @@ Zod parse failures are auto-converted to 400 with a flat message.
   recomputes `role` using the tenant-admin-wins rule.
 - `authorize(required: Role)` gates a handler on the ladder
   `read < write < admin`.
+- `requireActiveWorkspace` rejects writes to a workspace whose status is
+  `archived` (HTTP 409). Mount on any workspace-scoped mutation handler
+  after `resolveWorkspaceScope`.
+
+### Workspace lifecycle
+
+Workspaces carry `status` (`active` | `archived`, default `active`).
+Archive is a soft-freeze, not a delete — no rows are removed; instead
+mutation paths under the workspace (currently project create) refuse
+the request via `requireActiveWorkspace` until the workspace is
+unarchived.
+
+| Method | Path                                                            | Auth                |
+|--------|-----------------------------------------------------------------|---------------------|
+| GET    | `/api/tenants/:t/workspaces?includeArchived=true`               | tenant member       |
+| POST   | `/api/tenants/:t/workspaces`                                    | tenant admin        |
+| GET    | `/api/tenants/:t/workspaces/:w?includeArchived=true`            | workspace member    |
+| PATCH  | `/api/tenants/:t/workspaces/:w` (name/letter/color/bg)          | workspace admin     |
+| POST   | `/api/tenants/:t/workspaces/:w/archive`                         | tenant admin        |
+| POST   | `/api/tenants/:t/workspaces/:w/unarchive`                       | tenant admin        |
+
+Slug is intentionally immutable — it's load-bearing in URLs and FE
+localStorage keys; renaming is a separate migration story.
 
 ## Quickstart
 

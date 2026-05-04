@@ -51,3 +51,27 @@ These need explicit user input. **Don't pick on their behalf:**
 - No business logic in route handlers.
 - No new dependencies without explicit approval.
 - No Docker for the Node app — Postgres only.
+
+## After any API change — companion-update checklist
+
+When you ship a backend change that adds, removes, alters the shape of, or
+changes the auth/behaviour of any HTTP endpoint (fix, feature, refactor —
+doesn't matter), pause before declaring done and ask, for each of the
+three companions: *does this need to move?* If yes, do it in the same
+change; if no, say so explicitly so it's a deliberate skip, not an
+oversight.
+
+1. **Tests** — does an existing test now lie about behaviour? Is there a
+   new path with no coverage? (Test infra doesn't exist yet — when it does,
+   this becomes a hard gate. Until then, flag the gap in the PR/summary.)
+2. **Docs** — `server/README.md`, `CLAUDE.md`, `.claude/rules/v1-constraints.md`,
+   any `docs/*.md`. New endpoint, changed auth model, new env var, new
+   migration — at least one of these usually needs a touch.
+3. **MCP server** (`mcp/`) — the BIRA MCP exposes tools that wrap the API
+   (`mcp__bira__*`). New endpoint → likely a new tool. Renamed/removed
+   field → existing tool drifts. Changed auth/scoping → tool behaviour
+   shifts. Update the tool, its description, and any input schema.
+
+Skipping all three is fine for, e.g., an internal refactor with no
+external surface change — but the skip should be a stated decision,
+not silence.

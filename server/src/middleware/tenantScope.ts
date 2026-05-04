@@ -33,6 +33,7 @@ export const resolveTenantScope: RequestHandler = async (req, _res, next) => {
     req.scope = {
       tenantId: tenant.id,
       tenantSlug: tenant.slug,
+      tenantRole: tm.role,
       role: tm.role,
     };
     next();
@@ -76,12 +77,35 @@ export const resolveWorkspaceScope: RequestHandler = async (req, _res, next) => 
       ...req.scope,
       workspaceId: workspace.id,
       workspaceSlug: workspace.slug,
+      workspaceStatus: workspace.status,
       role,
     };
     next();
   } catch (err) {
     next(err);
   }
+};
+
+/**
+ * requireActiveWorkspace — gate write paths on workspace status. Mount on
+ * any handler that mutates workspace-scoped data; archived workspaces are
+ * frozen and return 409 here. Must run after `resolveWorkspaceScope`.
+ */
+export const requireActiveWorkspace: RequestHandler = (req, _res, next) => {
+  if (!req.scope?.workspaceId) {
+    next(new AppError('Workspace scope must be resolved first', 500));
+    return;
+  }
+  if (req.scope.workspaceStatus !== 'active') {
+    next(
+      new AppError(
+        `Workspace '${req.scope.workspaceSlug}' is archived — unarchive it before making changes`,
+        409
+      )
+    );
+    return;
+  }
+  next();
 };
 
 /**

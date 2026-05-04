@@ -7,6 +7,13 @@
 // `bira:workspaces` key is abandoned (no migration code in Phase 0 — it
 // becomes an orphan).
 //
+// Archived state is tracked separately under
+// `bira:workspace-archived:<tenant>` as a `Record<slug, boolean>` —
+// kept out of the workspace list itself so seed `WORKSPACES` stay
+// immutable and we can flip a seed workspace's archived bit without
+// having to "shadow" the whole row. Mirrors the backend `status`
+// column ('active' | 'archived').
+//
 // Note (prototype scope): projects, issues, and members are NOT yet scoped
 // per workspace beyond the project list itself. Membership reshape is a
 // later phase.
@@ -18,6 +25,7 @@ import {
 import { WORKSPACES, type Workspace } from '../fixtures';
 
 const storageKey = (tenant: string) => `bira:workspaces:${tenant}`;
+const archivedKey = (tenant: string) => `bira:workspace-archived:${tenant}`;
 
 /** Fields the create-workspace form supplies. The provider fills the rest. */
 export interface AddWorkspaceInput {
@@ -29,12 +37,19 @@ export interface AddWorkspaceInput {
 }
 
 export interface WorkspacesCtxValue {
-  /** Seeded workspaces + user-added workspaces (in that order), all scoped to the active tenant. */
+  /**
+   * Seeded workspaces + user-added workspaces (in that order), all scoped
+   * to the active tenant. Archived state is merged in from the overrides
+   * map. Both active and archived workspaces are present here — callers
+   * filter on `archived` themselves so the picker can offer a toggle.
+   */
   workspaces: Workspace[];
   /** Lookup by slug. Returns undefined for unknown slugs. */
   getWorkspace: (slug: string) => Workspace | undefined;
   /** Append a new workspace under the active tenant. Returns the newly-created `Workspace`. */
   addWorkspace: (input: AddWorkspaceInput) => Workspace;
+  /** Flip the archived bit on a workspace. No-op for unknown slugs. */
+  setArchived: (slug: string, archived: boolean) => void;
 }
 
 const WorkspacesContext = createContext<WorkspacesCtxValue | undefined>(undefined);
@@ -57,8 +72,25 @@ function loadAdded(tenant: string): Workspace[] {
   }
 }
 
+function loadArchived(tenant: string): Record<string, boolean> {
+  try {
+    const raw = localStorage.getItem(archivedKey(tenant));
+    if (!raw) return {};
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {};
+    const out: Record<string, boolean> = {};
+    for (const [k, v] of Object.entries(parsed)) {
+      if (typeof k === 'string' && typeof v === 'boolean') out[k] = v;
+    }
+    return out;
+  } catch {
+    return {};
+  }
+}
+
 export function WorkspacesProvider({ tenant, children }: { tenant: string; children: ReactNode }) {
   const [added, setAdded] = useState<Workspace[]>(() => loadAdded(tenant));
+  const [archived, setArchivedMap] = useState<Record<string, boolean>>(() => loadArchived(tenant));
 
   useEffect(() => {
     try {
@@ -68,7 +100,20 @@ export function WorkspacesProvider({ tenant, children }: { tenant: string; child
     }
   }, [tenant, added]);
 
-  const workspaces = useMemo(() => [...seedFor(tenant), ...added], [tenant, added]);
+  useEffect(() => {
+    try {
+      localStorage.setItem(archivedKey(tenant), JSON.stringify(archived));
+    } catch {
+      // best-effort, ignore.
+    }
+  }, [tenant, archived]);
+
+  const workspaces = useMemo<Workspace[]>(() => {
+    const base = [...seedFor(tenant), ...added];
+    return base.map((w) =>
+      archived[w.slug] ? { ...w, archived: true } : { ...w, archived: false },
+    );
+  }, [tenant, added, archived]);
 
   const getWorkspace = useCallback(
     (slug: string) => workspaces.find((w) => w.slug === slug),
@@ -85,12 +130,27 @@ export function WorkspacesProvider({ tenant, children }: { tenant: string; child
       role: 'admin',
       projectCount: 0,
       memberCount: 1,
+      archived: false,
     };
     setAdded((prev) => [...prev, next]);
     return next;
   }, [tenant]);
 
-  const value: WorkspacesCtxValue = { workspaces, getWorkspace, addWorkspace };
+  const setArchived = useCallback((slug: string, value: boolean) => {
+    setArchivedMap((prev) => {
+      // false is the default — drop the key instead of writing `false` so
+      // the persisted map stays minimal.
+      if (!value) {
+        if (!(slug in prev)) return prev;
+        const { [slug]: _, ...rest } = prev;
+        return rest;
+      }
+      if (prev[slug]) return prev;
+      return { ...prev, [slug]: true };
+    });
+  }, []);
+
+  const value: WorkspacesCtxValue = { workspaces, getWorkspace, addWorkspace, setArchived };
 
   return <WorkspacesContext.Provider value={value}>{children}</WorkspacesContext.Provider>;
 }
