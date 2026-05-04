@@ -12,6 +12,11 @@ dist
 dist-ssr
 *.local
 
+# Env files — keep .env.*.example checked in, ignore the real ones
+.env
+.env.*
+!.env.*.example
+
 # Local Claude Code state
 .claude/settings.local.json
 
