@@ -3,11 +3,15 @@
 import { useState } from 'react';
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { Icon } from '../components/icons';
-import { TopBar, Avatar, useTenantBreadcrumbs } from '../components/shell';
+import { TopBar, Avatar, useTenantBreadcrumbs, useTenantContext } from '../components/shell';
 import { Modal, ModalHeader, ModalBody, ModalFooter } from '../components/modal';
 import { Field, Hint, DangerRow } from '../components/forms';
 import { Section } from '../components/section';
-import { MEMBERS, type Member, type WorkspaceRole } from '../fixtures';
+import {
+  workspaceMembersDerived,
+  type WorkspaceMemberView, type WorkspaceMemberProvenance, type WorkspaceRole,
+} from '../fixtures';
+import { useProjects } from '../state/projects';
 
 // --- Outer layout (header + secondary tab strip + outlet) ---
 
@@ -138,12 +142,15 @@ export function GeneralSettings() {
 // --- Members ---
 
 export function MembersSettings() {
+  const { tenant, workspace } = useTenantContext();
+  const { projects, getProject } = useProjects();
   const [filter, setFilter] = useState('');
   const [showInvite, setShowInvite] = useState(false);
   const [inviteEmail, setInviteEmail] = useState('');
   const [inviteRole, setInviteRole] = useState<WorkspaceRole>('write');
 
-  const filtered = MEMBERS.filter((m) => {
+  const members = workspaceMembersDerived(tenant, workspace, projects);
+  const filtered = members.filter((m) => {
     if (!filter) return true;
     const f = filter.toLowerCase();
     return m.name.toLowerCase().includes(f) || m.email.toLowerCase().includes(f);
@@ -152,8 +159,8 @@ export function MembersSettings() {
   return (
     <>
       <Section
-        title={`Members · ${MEMBERS.length}`}
-        subtitle="Anyone in the workspace. Admins can invite, change roles, and deactivate."
+        title={`Members · ${members.length}`}
+        subtitle="Anyone with access to this workspace — direct grants, via project membership, or inherited from tenant admins."
         card
       >
         <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 12 }}>
@@ -175,7 +182,7 @@ export function MembersSettings() {
         </div>
 
         <div className="card" style={{ padding: 0 }}>
-          {filtered.map((m: Member, i) => (
+          {filtered.map((m: WorkspaceMemberView, i) => (
             <div
               key={m.email}
               style={{
@@ -191,19 +198,28 @@ export function MembersSettings() {
               <div style={{ minWidth: 0 }}>
                 <div style={{ fontSize: 13, fontWeight: 500 }}>{m.name}</div>
                 <div style={{ fontSize: 11.5, color: 'var(--fg-muted)' }}>{m.email}</div>
+                <ProvenanceLine
+                  provenance={m.provenance}
+                  resolveProjectName={(slug) => getProject(slug)?.name ?? slug}
+                />
               </div>
               <RoleSelect
-                value={m.role}
-                disabled={m.status !== 'active'}
+                value={m.effectiveRole}
+                provenance={m.provenance}
+                deactivated={m.status === 'deactivated'}
               />
               <span style={{ fontSize: 11.5, color: 'var(--fg-faint)' }}>
                 {m.status === 'invited' ? <span style={{ color: 'var(--in-progress)' }}>Invite pending</span>
                 : m.status === 'deactivated' ? 'Deactivated'
                 : m.lastSeen}
               </span>
-              <button className="btn btn-ghost btn-sm" style={{ width: 24, padding: 0 }} data-tip="Member actions">
-                <Icon name="moreV" size={13} color="var(--fg-muted)" />
-              </button>
+              {m.provenance.kind === 'explicit' ? (
+                <button className="btn btn-ghost btn-sm" style={{ width: 24, padding: 0 }} data-tip="Member actions">
+                  <Icon name="moreV" size={13} color="var(--fg-muted)" />
+                </button>
+              ) : (
+                <span />
+              )}
             </div>
           ))}
           {filtered.length === 0 && (
@@ -228,12 +244,53 @@ export function MembersSettings() {
   );
 }
 
-function RoleSelect({ value, disabled }: { value: WorkspaceRole; disabled?: boolean }) {
+function ProvenanceLine({
+  provenance, resolveProjectName,
+}: {
+  provenance: WorkspaceMemberProvenance;
+  resolveProjectName: (slug: string) => string;
+}) {
+  if (provenance.kind === 'explicit') return null;
+  if (provenance.kind === 'inherited') {
+    return (
+      <div style={{ fontSize: 11, color: 'var(--accent-active)', marginTop: 2 }}>
+        Inherited from tenant admin
+      </div>
+    );
+  }
+  // project
+  const names = provenance.projectSlugs.map(resolveProjectName);
+  const text = names.length === 1
+    ? `Via project: ${names[0]}`
+    : `Via ${names.length} projects: ${names.join(', ')}`;
+  return (
+    <div style={{ fontSize: 11, color: 'var(--fg-faint)', marginTop: 2 }}>
+      {text}
+    </div>
+  );
+}
+
+function RoleSelect({
+  value, provenance, deactivated,
+}: {
+  value: WorkspaceRole;
+  provenance: WorkspaceMemberProvenance;
+  deactivated?: boolean;
+}) {
+  // inherited / project rows are read-only because their role isn't stored on
+  // the workspace itself — it's resolved from the tenant or from project
+  // membership. Editing them in this surface would be misleading.
+  const disabled = deactivated || provenance.kind !== 'explicit';
+  const tip =
+    provenance.kind === 'inherited' ? 'Tenant admins are admin in every workspace.'
+    : provenance.kind === 'project' ? 'Project access grants implicit workspace read. Add a direct grant to change role.'
+    : undefined;
   return (
     <select
       defaultValue={value}
       disabled={disabled}
       className="input input-sm"
+      data-tip={tip}
       style={{ width: 'auto', padding: '0 6px' }}
     >
       <option value="admin">admin</option>

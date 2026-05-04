@@ -5,14 +5,14 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Icon } from '../components/icons';
-import { TopBar, Tabs, projectTabs, useTenantBreadcrumbs } from '../components/shell';
+import { TopBar, Tabs, projectTabs, useTenantBreadcrumbs, useTenantContext } from '../components/shell';
 import { Modal, ModalHeader } from '../components/modal';
 import { Section } from '../components/section';
 import { AddMembersModal, AvatarStack, MemberRow, TeamBadge } from './teams';
 import {
   TEAMS,
-  teamBySlug, memberByEmail,
-  type Member, type Team,
+  teamBySlug, tenantMemberByEmail,
+  type TenantMember, type Team,
 } from '../fixtures';
 import { useProjects } from '../state/projects';
 
@@ -27,14 +27,16 @@ export function ProjectMembersPage() {
   const [showAddMember, setShowAddMember] = useState(false);
 
   const teams = teamSlugs.map(teamBySlug).filter((t): t is Team => !!t);
-  const explicitUsers = userEmails.map(memberByEmail).filter((m): m is Member => !!m);
+  const explicitUsers = userEmails
+    .map((e) => tenantMemberByEmail(tenant, e))
+    .filter((m): m is TenantMember => !!m);
 
   // Effective members: dedupe across teams + explicit users.
   const effectiveEmails = new Set<string>(userEmails);
   teams.forEach((t) => t.memberEmails.forEach((e) => effectiveEmails.add(e)));
   const effective = Array.from(effectiveEmails)
-    .map(memberByEmail)
-    .filter((m): m is Member => !!m && m.status === 'active');
+    .map((e) => tenantMemberByEmail(tenant, e))
+    .filter((m): m is TenantMember => !!m && m.status === 'active');
 
   const removeTeam = (slug: string) => setTeamSlugs((prev) => prev.filter((s) => s !== slug));
   const addTeam = (slug: string) => setTeamSlugs((prev) => prev.includes(slug) ? prev : [...prev, slug]);
@@ -147,7 +149,9 @@ export function ProjectMembersPage() {
 }
 
 function TeamRow({ team, tenant, workspace, first, onRemove }: { team: Team; tenant: string; workspace: string; first?: boolean; onRemove: () => void }) {
-  const teamMembers = team.memberEmails.map(memberByEmail).filter((m): m is Member => !!m);
+  const teamMembers = team.memberEmails
+    .map((e) => tenantMemberByEmail(tenant, e))
+    .filter((m): m is TenantMember => !!m);
   return (
     <div style={{
       display: 'grid', gridTemplateColumns: '36px 1fr auto auto auto',
@@ -186,6 +190,7 @@ function AddTeamModal({
   onAdd: (slug: string) => void;
   onClose: () => void;
 }) {
+  const { tenant } = useTenantContext();
   const [filter, setFilter] = useState('');
   const candidates = TEAMS.filter((t) => !excludeSlugs.includes(t.slug)).filter((t) => {
     if (!filter) return true;
@@ -217,7 +222,9 @@ function AddTeamModal({
           </div>
         )}
         {candidates.map((t) => {
-          const teamMembers = t.memberEmails.map(memberByEmail).filter((m): m is Member => !!m);
+          const teamMembers = t.memberEmails
+            .map((e) => tenantMemberByEmail(tenant, e))
+            .filter((m): m is TenantMember => !!m);
           return (
             <button
               key={t.slug}

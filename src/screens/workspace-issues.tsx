@@ -3,7 +3,8 @@
 import { TopBar, useTenantBreadcrumbs } from '../components/shell';
 import { IssuesTable, type IssueGroupKey } from '../components/issues-table';
 import { type Filter } from '../components/issue-filters';
-import { ISSUES, CURRENT_USER } from '../fixtures';
+import { CURRENT_USER } from '../fixtures';
+import { useIssues } from '../state/issues';
 import type { Crumb } from '../components/shell';
 
 interface WorkspaceIssuesViewProps {
@@ -14,10 +15,12 @@ interface WorkspaceIssuesViewProps {
   /** Initial filter chips. Use `locked: true` for filters that define the page (e.g. "Assignee: Me"). */
   initialFilters: Filter[];
   defaultGroup: IssueGroupKey;
+  persistKey: string;
 }
 
 function WorkspaceIssuesView(props: WorkspaceIssuesViewProps) {
   const { tenant, workspace, tenantName, workspaceName } = useTenantBreadcrumbs();
+  const { issues } = useIssues();
   const breadcrumbs: Crumb[] = [
     { label: tenantName, to: `/${tenant}/workspaces` },
     { label: workspaceName, to: `/${tenant}/${workspace}/projects` },
@@ -27,11 +30,12 @@ function WorkspaceIssuesView(props: WorkspaceIssuesViewProps) {
     <div className="bira" style={{ height: '100%', display: 'flex', flexDirection: 'column', background: 'var(--bg)' }}>
       <TopBar breadcrumbs={breadcrumbs} />
       <IssuesTable
-        issues={ISSUES}
+        issues={issues}
         initialFilters={props.initialFilters}
         defaultGroup={props.defaultGroup}
         groupOptions={['status', 'project', 'assignee']}
         pageHeader={{ title: props.pageTitle, description: props.pageDescription }}
+        persistKey={props.persistKey}
       />
     </div>
   );
@@ -44,6 +48,7 @@ export function MyIssuesPage() {
       pageTitle="My issues"
       pageDescription="Issues assigned to you across every project in this workspace."
       defaultGroup="status"
+      persistKey="my-issues"
       // Locked "Assignee: Me" — defines the page; user can layer more filters on top.
       initialFilters={[{
         id: 'me', type: 'assignee', values: [CURRENT_USER.name], locked: true,
@@ -59,6 +64,7 @@ export function AllIssuesPage() {
       pageTitle="All issues"
       pageDescription="Every issue across every project. Group, filter, and bulk-edit from here."
       defaultGroup="project"
+      persistKey="all-issues"
       initialFilters={[]}
     />
   );

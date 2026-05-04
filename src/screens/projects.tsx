@@ -7,10 +7,10 @@ import { Modal, ModalHeader, ModalFooter } from '../components/modal';
 import { Field, Hint } from '../components/forms';
 import { ProjectBadge } from '../components/project-chip';
 import {
-  CURRENT_USER, DEFAULT_PROJECT_WORKFLOWS, ISSUES, ISSUE_TYPE_NAMES, MEMBERS,
+  CURRENT_USER, DEFAULT_PROJECT_WORKFLOWS, ISSUES, ISSUE_TYPE_NAMES, TENANT_MEMBERS,
   RESERVED_PROJECT_SLUGS, TEAMS, WORKFLOWS,
   pickProjectColor, projectEffectiveMembers,
-  type IssueTypeLetter, type Member, type Project,
+  type IssueTypeLetter, type TenantMember, type Project,
 } from '../fixtures';
 import { useProjects } from '../state/projects';
 
@@ -109,7 +109,7 @@ function Group({ label, projects, tenant, workspace, dim }: { label: string; pro
           const open = ISSUES.filter(
             (i) => i.project === p.slug && i.status !== 'done' && i.status !== 'canceled',
           ).length;
-          const memberCount = projectEffectiveMembers(p).length;
+          const memberCount = projectEffectiveMembers(p, tenant).length;
           return (
             <Link
               key={p.slug}
@@ -143,7 +143,6 @@ function Group({ label, projects, tenant, workspace, dim }: { label: string; pro
 }
 
 const TYPE_ORDER: IssueTypeLetter[] = ['T', 'B', 'S', 'E'];
-const ACTIVE_MEMBERS: Member[] = MEMBERS.filter((m) => m.status === 'active');
 
 function slugify(name: string): string {
   return name.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
@@ -157,6 +156,7 @@ function CreateProjectModal({ onClose }: { onClose: () => void }) {
   const navigate = useNavigate();
   const { tenant, workspace } = useTenantContext();
   const { projects, addProject } = useProjects();
+  const activeMembers: TenantMember[] = (TENANT_MEMBERS[tenant] ?? []).filter((m) => m.status === 'active');
 
   const [name, setName] = useState('');
   // The user can override the auto-derived key but not the slug (slug is the
@@ -331,7 +331,7 @@ function CreateProjectModal({ onClose }: { onClose: () => void }) {
 
           <Field label="People with edit access">
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-              {ACTIVE_MEMBERS.map((m) => {
+              {activeMembers.map((m) => {
                 const on = userEmails.includes(m.email);
                 const isSelf = m.email === CURRENT_USER.email;
                 return (

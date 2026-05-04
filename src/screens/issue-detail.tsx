@@ -1,12 +1,13 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { Icon } from '../components/icons';
 import { TopBar, TypeChip, IssueId, StatusDot, Priority, Avatar, STATUSES, useTenantContext, useTenantBreadcrumbs } from '../components/shell';
 import { AttachmentRow, renderRichText, useComposer, type Attachment } from '../components/composer';
 import { IssuePickerModal } from '../components/issue-picker';
 import { useDismiss } from '../components/use-dismiss';
-import { CURRENT_USER, ISSUES, issueById, themeById, type Issue } from '../fixtures';
+import { CURRENT_USER, IDEAL_POINTS_PER_DAY, ISSUES, computeTaskLoad, dependsOnWouldCycle, issueById, themeById, type Issue } from '../fixtures';
 import { useProjects } from '../state/projects';
+import { useIssues } from '../state/issues';
 
 const STATUS_LABEL: Record<Issue['status'], string> = {
   backlog: 'Backlog',
@@ -55,8 +56,9 @@ export function IssueDetailPage() {
   const { key } = useParams<{ key: string }>();
   const { tenant, workspace, project, tenantName, workspaceName } = useTenantBreadcrumbs();
   const { getProject } = useProjects();
+  const { getIssue } = useIssues();
   const projectInfo = getProject(project);
-  const issue = key ? ISSUES.find((i) => i.id === key) : undefined;
+  const issue = key ? getIssue(key) : undefined;
 
   if (!issue) {
     return (
@@ -100,6 +102,7 @@ export function IssueDetailPage() {
 function IssueDetail({ issue = ISSUES[0] }: { issue?: Issue }) {
   const { tenant, workspace, project, tenantName, workspaceName } = useTenantBreadcrumbs();
   const { getProject } = useProjects();
+  const { updateIssue } = useIssues();
   // Inner detail: drive everything off the issue's owning project rather than
   // the URL slug, so the breadcrumb is right even when this is rendered inside
   // the design-canvas with a default issue.
@@ -126,16 +129,52 @@ function IssueDetail({ issue = ISSUES[0] }: { issue?: Issue }) {
   // string     = user picked a new parent;
   // null       = user explicitly cleared the parent.
   const [parentOverride, setParentOverride] = useState<string | null | undefined>(undefined);
-  // Picker mode is null when closed; set to 'child', 'related', or 'parent'.
-  const [pickerMode, setPickerMode] = useState<null | 'child' | 'related' | 'parent'>(null);
+  // Picker mode is null when closed; set to 'child', 'related', 'parent', or
+  // 'depends-on'. Depends-on is Task-only and validated against the existing
+  // graph to keep it acyclic.
+  const [pickerMode, setPickerMode] = useState<null | 'child' | 'related' | 'parent' | 'depends-on'>(null);
+  // Date + estimate edits flow through the IssuesProvider so they survive a
+  // refresh and stay in sync with the gantt. Local state mirrors the live
+  // value so the EditableDate / EditableEstimate controls keep their existing
+  // controlled-input shape.
+  const [startDate, setStartDateLocal] = useState<string | undefined>(issue.startDate);
+  const [endDate, setEndDateLocal] = useState<string | undefined>(issue.endDate);
+  const setStartDate = (next: string | undefined) => {
+    setStartDateLocal(next);
+    updateIssue(issue.id, { startDate: next });
+  };
+  const setEndDate = (next: string | undefined) => {
+    setEndDateLocal(next);
+    updateIssue(issue.id, { endDate: next });
+  };
+  // Depends-on (predecessors). Editable in-session — both add and remove —
+  // because the cycle check needs a single coherent view of "this Task's
+  // current dependencies", not "fixture + additions" as a layered overlay.
+  // Persistence for relation edits is deferred (depends-on / parent / themes
+  // / related need symmetric writes on both ends).
+  const [dependsOn, setDependsOn] = useState<string[]>(issue.dependsOn ?? []);
+  // Effort estimate. Mandatory on Tasks (the unit of scheduled work).
+  const [estimate, setEstimateLocal] = useState<number | undefined>(issue.estimate);
+  const setEstimate = (next: number | undefined) => {
+    setEstimateLocal(next);
+    updateIssue(issue.id, { estimate: next });
+  };
 
-  // Reset session additions when navigating to a different issue.
+  // Resync local-state mirrors when navigating to a different issue OR when
+  // the live override store changes the field underneath us (e.g. a gantt
+  // drag updates startDate while this page is mounted). Uses the *local*
+  // setter, not the persist-through one, to avoid feeding the store back
+  // into itself.
   useEffect(() => {
     setAddedChildren([]);
     setAddedRelated([]);
     setParentOverride(undefined);
     setPickerMode(null);
-  }, [issue.id]);
+    setStartDateLocal(issue.startDate);
+    setEndDateLocal(issue.endDate);
+    setDependsOn(issue.dependsOn ?? []);
+    setEstimateLocal(issue.estimate);
+  }, [issue.id, issue.startDate, issue.endDate, issue.dependsOn, issue.estimate]);
 
   const allChildren = [...(issue.children ?? []), ...addedChildren];
   const allRelated = [...(issue.relatedTo ?? []), ...addedRelated];
@@ -164,14 +203,28 @@ function IssueDetail({ issue = ISSUES[0] }: { issue?: Issue }) {
   const openChildPicker = () => setPickerMode('child');
   const openRelatedPicker = () => setPickerMode('related');
   const openParentPicker = () => setPickerMode('parent');
+  const openDependencyPicker = () => setPickerMode('depends-on');
   const clearParent = () => setParentOverride(null);
+  const removeDependency = (id: string) =>
+    setDependsOn((prev) => prev.filter((d) => d !== id));
 
   const handlePickerSelect = (target: Issue) => {
     if (pickerMode === 'child') setAddedChildren((prev) => [...prev, target.id]);
     else if (pickerMode === 'related') setAddedRelated((prev) => [...prev, target.id]);
     else if (pickerMode === 'parent') setParentOverride(target.id);
+    else if (pickerMode === 'depends-on') setDependsOn((prev) => [...prev, target.id]);
     setPickerMode(null);
   };
+
+  // Predecessors map for the depends-on cycle check: fixture state for every
+  // issue, with this issue's row swapped for the live session value so the
+  // picker reflects what the user has staged.
+  const dependencyGraph = useMemo(() => {
+    const m = new Map<string, string[]>();
+    for (const i of ISSUES) m.set(i.id, [...(i.dependsOn ?? [])]);
+    m.set(issue.id, dependsOn);
+    return m;
+  }, [issue.id, dependsOn]);
 
   const startInspectorResize = (e: React.MouseEvent) => {
     e.preventDefault();
@@ -321,9 +374,13 @@ function IssueDetail({ issue = ISSUES[0] }: { issue?: Issue }) {
               issue={issue}
               childIds={allChildren}
               relatedIds={allRelated}
+              dependsOnIds={dependsOn}
+              dependedOnByIds={issue.dependedOnBy ?? []}
               onCreateChild={goCreateChild}
               onLinkChild={openChildPicker}
               onLinkRelated={openRelatedPicker}
+              onLinkDependency={openDependencyPicker}
+              onRemoveDependency={removeDependency}
             />
 
             {/* Activity */}
@@ -410,7 +467,24 @@ function IssueDetail({ issue = ISSUES[0] }: { issue?: Issue }) {
               {owningProject?.name ?? issue.project}
             </span>
           </Meta>
-          {/* Drift fix: removed Sprint and Estimate metas (sprint/velocity out of v1 scope). */}
+          {/* Effort. Required on Tasks (the unit of scheduled work);
+              shown read-only on Bugs (handy context, not enforced); hidden
+              on Stories and Epics — those roll up from leaves. The "≈ N
+              days" hint is calendar-translated using IDEAL_POINTS_PER_DAY.
+              For Tasks with both dates set we also surface the actual
+              points-per-day load — anything above 1× ideal is flagged. */}
+          {(issue.type === 'T' || issue.type === 'B') && (
+            <Meta label={issue.type === 'T' ? 'Effort (required)' : 'Effort'}>
+              <EditableEstimate
+                value={estimate}
+                onChange={setEstimate}
+                required={issue.type === 'T'}
+              />
+              {issue.type === 'T' && (
+                <WorkloadHint estimate={estimate} startDate={startDate} endDate={endDate} />
+              )}
+            </Meta>
+          )}
           <Meta label="Labels">
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
               {issue.labels.length === 0 && (
@@ -421,22 +495,37 @@ function IssueDetail({ issue = ISSUES[0] }: { issue?: Issue }) {
               ))}
             </div>
           </Meta>
-          <Meta label="Start date">
-            {issue.startDate
-              ? <DateValue iso={issue.startDate} />
-              : <NotSet />}
-          </Meta>
-          <Meta label="Due date">
-            {issue.endDate
-              ? <DateValue iso={issue.endDate} />
-              : <NotSet />}
-          </Meta>
-          {/* Hierarchy. Epics have no parent (so the Parent Meta is hidden);
-              leaves (Task / Bug) cannot have children (so the Children Meta
-              is hidden). For others, an empty state explains the gap. */}
+          {/* Schedules live on leaf work (Tasks and Bugs) only. Story and
+              Epic timelines are derived from the leaves underneath them on
+              the Gantt — they don't carry their own dates. */}
+          {(issue.type === 'T' || issue.type === 'B') && (
+            <>
+              <Meta
+                label="Start date"
+                extras={startDate ? <ClearDateButton onClear={() => setStartDate(undefined)} label="Clear start date" /> : undefined}
+              >
+                <EditableDate value={startDate} max={endDate} onChange={setStartDate} />
+              </Meta>
+              <Meta
+                label="End date"
+                extras={endDate ? <ClearDateButton onClear={() => setEndDate(undefined)} label="Clear end date" /> : undefined}
+              >
+                <EditableDate value={endDate} min={startDate} onChange={setEndDate} />
+              </Meta>
+            </>
+          )}
+          {/* Hierarchy.
+              - Epics are top-level; they cannot have a parent, so the Parent
+                Meta is hidden entirely for type 'E'.
+              - Stories require an Epic parent — the clear (×) button is
+                hidden, and the empty state flags the requirement.
+              - Tasks / Bugs can sit under an Epic or a Story (or be
+                top-level); parent is optional, the × clears it.
+              Leaves (Task / Bug) cannot have children, so the Children Meta
+              is hidden for them. */}
           {issue.type !== 'E' && (
             <Meta
-              label="Parent"
+              label={issue.type === 'S' ? 'Parent (required)' : 'Parent'}
               extras={
                 <button
                   type="button"
@@ -452,52 +541,45 @@ function IssueDetail({ issue = ISSUES[0] }: { issue?: Issue }) {
               {effectiveParent ? (
                 <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
                   <IssueLink id={effectiveParent} />
-                  <button
-                    type="button"
-                    onClick={clearParent}
-                    aria-label="Clear parent"
-                    data-tip="Clear parent"
-                    style={{
-                      display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-                      width: 16, height: 16, padding: 0, borderRadius: 3,
-                      background: 'transparent', border: 'none', cursor: 'pointer',
-                      color: 'var(--fg-faint)',
-                    }}
-                    onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--bg-muted)'; e.currentTarget.style.color = 'var(--fg)'; }}
-                    onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'var(--fg-faint)'; }}
-                  >
-                    <Icon name="x" size={11} />
-                  </button>
+                  {/* Stories must always have a parent — no clear affordance. */}
+                  {issue.type !== 'S' && (
+                    <button
+                      type="button"
+                      onClick={clearParent}
+                      aria-label="Clear parent"
+                      data-tip="Clear parent"
+                      style={{
+                        display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                        width: 16, height: 16, padding: 0, borderRadius: 3,
+                        background: 'transparent', border: 'none', cursor: 'pointer',
+                        color: 'var(--fg-faint)',
+                      }}
+                      onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--bg-muted)'; e.currentTarget.style.color = 'var(--fg)'; }}
+                      onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'var(--fg-faint)'; }}
+                    >
+                      <Icon name="x" size={11} />
+                    </button>
+                  )}
+                </span>
+              ) : issue.type === 'S' ? (
+                <span style={{
+                  display: 'inline-flex', alignItems: 'center', gap: 6,
+                  fontSize: 11.5, color: 'var(--blocked)',
+                }}>
+                  <Icon name="alert" size={12} />
+                  Pick an Epic — Stories must roll up to one
                 </span>
               ) : (
                 <NotSet />
               )}
             </Meta>
           )}
-          {(issue.type === 'E' || issue.type === 'S') && (
-            <Meta
-              label="Children"
-              extras={<AddChildMenu onCreate={goCreateChild} onLink={openChildPicker} variant="compact" />}
-            >
-              <IssueList ids={allChildren} emptyText="No children yet" />
-            </Meta>
-          )}
-          <Meta
-            label="Related"
-            extras={
-              <button
-                type="button"
-                onClick={openRelatedPicker}
-                className="btn btn-ghost btn-sm"
-                style={{ padding: '0 6px', height: 20, fontSize: 11 }}
-                aria-label="Link an issue"
-              >
-                <Icon name="link" size={11} /> Link
-              </button>
-            }
-          >
-            <IssueList ids={allRelated} emptyText="No related issues" />
-          </Meta>
+          {/* Multi-issue relations (Children, Related, Depends on, Blocks)
+              live in the main column below the description, not in the
+              inspector — the lists need horizontal room and tend to be the
+              context the user wants while reading the issue. The inspector
+              keeps the singular Parent reference so structural placement
+              stays one click away. */}
           <Meta label="Themes">
             {issue.themes && issue.themes.length > 0 ? (
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
@@ -515,7 +597,8 @@ function IssueDetail({ issue = ISSUES[0] }: { issue?: Issue }) {
           title={
             pickerMode === 'child' ? 'Link child issue'
               : pickerMode === 'related' ? 'Link related issue'
-                : 'Set parent issue'
+                : pickerMode === 'depends-on' ? 'Add a dependency'
+                  : 'Set parent issue'
           }
           subtitle={
             pickerMode === 'child'
@@ -524,22 +607,27 @@ function IssueDetail({ issue = ISSUES[0] }: { issue?: Issue }) {
                 }`
               : pickerMode === 'related'
                 ? 'Pick any issue to mark as related. Relates is symmetric.'
-                : `Pick the parent of ${issue.id}. ${
-                    issue.type === 'S' ? 'Only Epics are valid parents of a Story.' : 'Epics and Stories are valid parents of a Task or Bug.'
-                  }`
+                : pickerMode === 'depends-on'
+                  ? `Pick a Task that ${issue.id} should wait on. Only other Tasks are valid; candidates that would close a cycle are filtered out.`
+                  : `Pick the parent of ${issue.id}. ${
+                      issue.type === 'S' ? 'Only Epics are valid parents of a Story.' : 'Epics and Stories are valid parents of a Task or Bug.'
+                    }`
           }
           excludeIds={[
             issue.id,
             ...allChildren,
             ...allRelated,
             ...(effectiveParent ? [effectiveParent] : []),
+            ...(pickerMode === 'depends-on' ? dependsOn : []),
           ]}
           filter={
             pickerMode === 'child'
               ? (i) => allowedChildTypes.includes(i.type)
               : pickerMode === 'parent'
                 ? (i) => allowedParentTypes.includes(i.type)
-                : undefined
+                : pickerMode === 'depends-on'
+                  ? (i) => i.type === 'T' && !dependsOnWouldCycle(issue.id, i.id, dependencyGraph)
+                  : undefined
           }
           onSelect={handlePickerSelect}
           onClose={() => setPickerMode(null)}
@@ -658,6 +746,264 @@ function DateValue({ iso }: { iso: string }) {
 
 function NotSet() {
   return <span style={{ fontSize: 11.5, color: 'var(--fg-faint)' }}>Not set</span>;
+}
+
+/**
+ * Inline-editable ISO date field. Click the value to swap in a native
+ * date input; commits on blur or Enter, cancels on Escape. Session-only
+ * — like the rest of the inspector, no fixture writeback.
+ */
+function EditableDate({
+  value, min, max, onChange,
+}: {
+  value: string | undefined;
+  min?: string;
+  max?: string;
+  onChange: (next: string | undefined) => void;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(value ?? '');
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => { setDraft(value ?? ''); }, [value]);
+  useEffect(() => {
+    if (!editing) return;
+    const el = inputRef.current;
+    if (!el) return;
+    el.focus();
+    // Try to surface the picker UI directly so the user doesn't need a
+    // second click. `showPicker` is gated on a recent user interaction;
+    // any browser that disallows it will silently no-op and the input
+    // still works via keyboard.
+    try { el.showPicker?.(); } catch { /* ignore */ }
+  }, [editing]);
+
+  if (editing) {
+    const commit = () => {
+      onChange(draft || undefined);
+      setEditing(false);
+    };
+    const cancel = () => {
+      setDraft(value ?? '');
+      setEditing(false);
+    };
+    return (
+      <input
+        ref={inputRef}
+        type="date"
+        value={draft}
+        min={min}
+        max={max}
+        onChange={(e) => setDraft(e.target.value)}
+        onBlur={commit}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') { e.preventDefault(); commit(); }
+          else if (e.key === 'Escape') { e.preventDefault(); cancel(); }
+        }}
+        style={{
+          fontSize: 12.5, padding: '2px 6px', height: 24,
+          border: '1px solid var(--border)', borderRadius: 4,
+          background: 'var(--bg)', color: 'var(--fg)',
+          fontFamily: 'inherit',
+        }}
+      />
+    );
+  }
+
+  return (
+    <button
+      type="button"
+      onClick={() => setEditing(true)}
+      style={{
+        display: 'inline-flex', alignItems: 'center', gap: 6,
+        padding: '2px 4px', margin: '-2px -4px',
+        border: '1px solid transparent', borderRadius: 4,
+        background: 'transparent', color: 'var(--fg)',
+        fontSize: 12.5, fontFamily: 'inherit', cursor: 'pointer',
+        textAlign: 'left',
+      }}
+      onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--bg-muted)'; e.currentTarget.style.borderColor = 'var(--border-muted)'; }}
+      onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.borderColor = 'transparent'; }}
+    >
+      {value ? <DateValue iso={value} /> : (
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, color: 'var(--fg-faint)' }}>
+          <Icon name="calendar" size={13} color="var(--fg-faint)" />
+          <span>Set date</span>
+        </span>
+      )}
+    </button>
+  );
+}
+
+/**
+ * Inline-editable effort estimate, in the same units as `Issue.estimate`.
+ * Click the value (or the "Set effort" prompt) to reveal a number input;
+ * commit on blur or Enter, cancel on Escape. When `required` is true and
+ * the value is missing, the empty state surfaces a "Required" prompt
+ * instead of plain "Not set", matching the Story-without-parent treatment.
+ *
+ * The "≈ N days" hint translates effort points to calendar days using
+ * IDEAL_POINTS_PER_DAY (4) — a single project-agnostic constant for v1.
+ */
+function EditableEstimate({
+  value, onChange, required,
+}: {
+  value: number | undefined;
+  onChange: (next: number | undefined) => void;
+  required: boolean;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(value !== undefined ? String(value) : '');
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => { setDraft(value !== undefined ? String(value) : ''); }, [value]);
+  useEffect(() => {
+    if (editing) inputRef.current?.focus();
+  }, [editing]);
+
+  if (editing) {
+    const commit = () => {
+      const trimmed = draft.trim();
+      if (trimmed === '') {
+        onChange(undefined);
+      } else {
+        const n = Number.parseFloat(trimmed);
+        if (Number.isFinite(n) && n >= 0) onChange(n);
+      }
+      setEditing(false);
+    };
+    const cancel = () => {
+      setDraft(value !== undefined ? String(value) : '');
+      setEditing(false);
+    };
+    return (
+      <input
+        ref={inputRef}
+        type="number"
+        min={0}
+        step={1}
+        value={draft}
+        onChange={(e) => setDraft(e.target.value)}
+        onBlur={commit}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') { e.preventDefault(); commit(); }
+          else if (e.key === 'Escape') { e.preventDefault(); cancel(); }
+        }}
+        style={{
+          fontSize: 12.5, padding: '2px 6px', height: 24, width: 80,
+          border: '1px solid var(--border)', borderRadius: 4,
+          background: 'var(--bg)', color: 'var(--fg)',
+          fontFamily: 'inherit',
+        }}
+      />
+    );
+  }
+
+  if (value === undefined) {
+    return (
+      <button
+        type="button"
+        onClick={() => setEditing(true)}
+        style={{
+          display: 'inline-flex', alignItems: 'center', gap: 6,
+          padding: '2px 4px', margin: '-2px -4px',
+          border: '1px solid transparent', borderRadius: 4,
+          background: 'transparent',
+          fontSize: 11.5, fontFamily: 'inherit', cursor: 'pointer', textAlign: 'left',
+          color: required ? 'var(--blocked)' : 'var(--fg-faint)',
+        }}
+      >
+        <Icon name={required ? 'alert' : 'asterisk'} size={12} />
+        <span>{required ? 'Required — set effort' : 'Set effort'}</span>
+      </button>
+    );
+  }
+
+  const days = value / IDEAL_POINTS_PER_DAY;
+  // "Working days" — Sat/Sun don't count under the v1 working-week policy.
+  // Show fractional days for sub-day work, whole days for >= 1.
+  const daysLabel =
+    days === 0 ? '0 working days'
+      : days < 1 ? `≈ ${days.toFixed(2).replace(/\.?0+$/, '')} working day`
+        : days === 1 ? '≈ 1 working day'
+          : `≈ ${(Math.round(days * 10) / 10).toString().replace(/\.0$/, '')} working days`;
+  return (
+    <button
+      type="button"
+      onClick={() => setEditing(true)}
+      style={{
+        display: 'inline-flex', alignItems: 'center', gap: 8,
+        padding: '2px 4px', margin: '-2px -4px',
+        border: '1px solid transparent', borderRadius: 4,
+        background: 'transparent', color: 'var(--fg)',
+        fontSize: 12.5, fontFamily: 'inherit', cursor: 'pointer', textAlign: 'left',
+      }}
+      onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--bg-muted)'; e.currentTarget.style.borderColor = 'var(--border-muted)'; }}
+      onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.borderColor = 'transparent'; }}
+    >
+      <span className="tnum" style={{ fontWeight: 600 }}>{value} pt{value === 1 ? '' : 's'}</span>
+      <span style={{ fontSize: 11, color: 'var(--fg-faint)' }}>{daysLabel} at {IDEAL_POINTS_PER_DAY}/day</span>
+    </button>
+  );
+}
+
+/**
+ * Compares the Task's effort against its scheduled working-day span and
+ * shows the resulting points-per-day. Anything above ideal is rendered
+ * in the blocked colour with an explicit "overworked" call-out so the
+ * planner can see the cost of squeezing the bar without doing the math.
+ * Renders nothing when load can't be computed (no estimate, missing
+ * date, span lands entirely on weekends/holidays).
+ */
+function WorkloadHint({
+  estimate, startDate, endDate,
+}: {
+  estimate: number | undefined;
+  startDate: string | undefined;
+  endDate: string | undefined;
+}) {
+  const load = computeTaskLoad(estimate, startDate, endDate);
+  if (!load) return null;
+  const ppd = (Math.round(load.pointsPerDay * 10) / 10).toString().replace(/\.0$/, '');
+  const overloaded = load.overload > 1.0001;
+  const overloadX = (Math.round(load.overload * 10) / 10).toString().replace(/\.0$/, '');
+  if (!overloaded) {
+    return (
+      <div style={{ marginTop: 4, fontSize: 11, color: 'var(--fg-faint)' }}>
+        Scheduled: {ppd} pt{ppd === '1' ? '' : 's'}/day across {load.workingDays} working day{load.workingDays === 1 ? '' : 's'} — within ideal load.
+      </div>
+    );
+  }
+  return (
+    <div style={{
+      marginTop: 6,
+      display: 'flex', alignItems: 'flex-start', gap: 6,
+      padding: '6px 8px', borderRadius: 4,
+      background: 'var(--blocked-bg)', color: 'var(--blocked)',
+      fontSize: 11.5, fontWeight: 500,
+    }}>
+      <Icon name="alert" size={12} />
+      <span>
+        Overworked: {ppd} pts/day across {load.workingDays} working day{load.workingDays === 1 ? '' : 's'}
+        {' '}({overloadX}× the {IDEAL_POINTS_PER_DAY}/day ideal).
+        {' '}Lengthen the bar on the Gantt to bring the load down.
+      </span>
+    </div>
+  );
+}
+
+function ClearDateButton({ onClear, label }: { onClear: () => void; label: string }) {
+  return (
+    <button
+      type="button"
+      onClick={onClear}
+      className="btn btn-ghost btn-sm"
+      style={{ padding: '0 6px', height: 20, fontSize: 11 }}
+      aria-label={label}
+    >
+      <Icon name="x" size={11} /> Clear
+    </button>
+  );
 }
 
 /**
@@ -1075,17 +1421,6 @@ function IssueLink({ id }: { id: string }) {
   );
 }
 
-function IssueList({ ids, emptyText }: { ids: string[]; emptyText: string }) {
-  if (ids.length === 0) {
-    return <span style={{ fontSize: 11.5, color: 'var(--fg-faint)' }}>{emptyText}</span>;
-  }
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-      {ids.map((id) => <IssueLink key={id} id={id} />)}
-    </div>
-  );
-}
-
 /**
  * Trigger + dropdown for "Create new issue" / "Link existing issue".
  * Owns its own open/close state so it can be dropped into multiple
@@ -1164,21 +1499,33 @@ function LinkedIssuesPanel({
   issue,
   childIds,
   relatedIds,
+  dependsOnIds,
+  dependedOnByIds,
   onCreateChild,
   onLinkChild,
   onLinkRelated,
+  onLinkDependency,
+  onRemoveDependency,
 }: {
   issue: Issue;
   childIds: string[];
   relatedIds: string[];
+  dependsOnIds: string[];
+  dependedOnByIds: string[];
   onCreateChild: () => void;
   onLinkChild: () => void;
   onLinkRelated: () => void;
+  onLinkDependency: () => void;
+  onRemoveDependency: (id: string) => void;
 }) {
   const showChildren = issue.type === 'E' || issue.type === 'S';
   const childEmpty = issue.type === 'E'
     ? 'No child issues yet. Break this epic down into stories, tasks, or bugs.'
     : 'No child issues yet. Add the tasks or bugs that make up this story.';
+  // Depends-on / Blocks are Task-only — Stories and Epics roll up to leaves
+  // and don't carry their own dependency edges.
+  const showDependencies = issue.type === 'T';
+  const showBlocks = issue.type === 'T' && dependedOnByIds.length > 0;
   return (
     <section style={{ marginTop: 28 }}>
       {showChildren && (
@@ -1188,6 +1535,33 @@ function LinkedIssuesPanel({
           ids={childIds}
           emptyText={childEmpty}
           action={<AddChildMenu onCreate={onCreateChild} onLink={onLinkChild} />}
+        />
+      )}
+      {showDependencies && (
+        <LinkedSection
+          label="Depends on"
+          count={dependsOnIds.length}
+          ids={dependsOnIds}
+          emptyText="Nothing blocking — this task is ready to start once scheduled."
+          onRemove={onRemoveDependency}
+          action={
+            <button
+              type="button"
+              onClick={onLinkDependency}
+              className="btn btn-sm"
+              aria-label="Add a dependency"
+            >
+              <Icon name="link" size={12} /> Add dependency
+            </button>
+          }
+        />
+      )}
+      {showBlocks && (
+        <LinkedSection
+          label="Blocks"
+          count={dependedOnByIds.length}
+          ids={dependedOnByIds}
+          emptyText=""
         />
       )}
       <LinkedSection
@@ -1216,13 +1590,20 @@ function LinkedSection({
   ids,
   emptyText,
   action,
+  onRemove,
 }: {
   label: string;
   count: number;
   ids: string[];
   emptyText: string;
-  action: ReactNode;
+  action?: ReactNode;
+  /** When provided, each card shows a × that calls this with the id. */
+  onRemove?: (id: string) => void;
 }) {
+  // Hide the section entirely if there's nothing to show and no empty-state
+  // copy — used by "Blocks" which is read-only and should disappear when
+  // empty rather than render a placeholder card.
+  if (ids.length === 0 && !emptyText && !action) return null;
   return (
     <div style={{ marginBottom: 22 }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 10 }}>
@@ -1240,21 +1621,29 @@ function LinkedSection({
         {action}
       </div>
       {ids.length === 0 ? (
-        <div style={{
-          padding: '14px 12px', textAlign: 'center',
-          fontSize: 12.5, color: 'var(--fg-muted)',
-          border: '1px dashed var(--border-muted)', borderRadius: 6,
-        }}>{emptyText}</div>
+        emptyText ? (
+          <div style={{
+            padding: '14px 12px', textAlign: 'center',
+            fontSize: 12.5, color: 'var(--fg-muted)',
+            border: '1px dashed var(--border-muted)', borderRadius: 6,
+          }}>{emptyText}</div>
+        ) : null
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-          {ids.map((id) => <LinkedIssueCard key={id} id={id} />)}
+          {ids.map((id) => (
+            <LinkedIssueCard
+              key={id}
+              id={id}
+              onRemove={onRemove ? () => onRemove(id) : undefined}
+            />
+          ))}
         </div>
       )}
     </div>
   );
 }
 
-function LinkedIssueCard({ id }: { id: string }) {
+function LinkedIssueCard({ id, onRemove }: { id: string; onRemove?: () => void }) {
   const { tenant, workspace } = useTenantContext();
   const target = issueById(id);
   if (!target) {
@@ -1268,15 +1657,14 @@ function LinkedIssueCard({ id }: { id: string }) {
       </div>
     );
   }
+  // Card is a div with the body content wrapped in a Link; the optional ×
+  // sits as a sibling of the link so a click on it doesn't navigate.
   return (
-    <Link
-      to={`/${tenant}/${workspace}/${target.project}/issue/${target.id}`}
+    <div
       style={{
-        display: 'flex', alignItems: 'center', gap: 10, minWidth: 0,
-        padding: '8px 10px',
+        display: 'flex', alignItems: 'center', minWidth: 0,
         border: '1px solid var(--border-muted)', borderRadius: 6,
         background: 'var(--bg)',
-        color: 'var(--fg)', textDecoration: 'none',
         transition: 'border-color .12s, background .12s',
       }}
       onMouseEnter={(e) => {
@@ -1288,15 +1676,41 @@ function LinkedIssueCard({ id }: { id: string }) {
         e.currentTarget.style.background = 'var(--bg)';
       }}
     >
-      <StatusDot status={target.status} size={10} />
-      <TypeChip type={target.type} />
-      <span className="mono" style={{ color: 'var(--fg-muted)', flexShrink: 0, fontSize: 12 }}>{target.id}</span>
-      <span style={{
-        flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-        fontSize: 13,
-      }}>{target.title}</span>
-      <Avatar name={target.assignee} size={20} />
-    </Link>
+      <Link
+        to={`/${tenant}/${workspace}/${target.project}/issue/${target.id}`}
+        style={{
+          flex: 1, display: 'flex', alignItems: 'center', gap: 10, minWidth: 0,
+          padding: '8px 10px', color: 'var(--fg)', textDecoration: 'none',
+        }}
+      >
+        <StatusDot status={target.status} size={10} />
+        <TypeChip type={target.type} />
+        <span className="mono" style={{ color: 'var(--fg-muted)', flexShrink: 0, fontSize: 12 }}>{target.id}</span>
+        <span style={{
+          flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+          fontSize: 13,
+        }}>{target.title}</span>
+        <Avatar name={target.assignee} size={20} />
+      </Link>
+      {onRemove && (
+        <button
+          type="button"
+          onClick={onRemove}
+          aria-label={`Remove ${target.id}`}
+          data-tip="Remove"
+          style={{
+            display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+            width: 28, height: 28, marginRight: 4, padding: 0, borderRadius: 4,
+            background: 'transparent', border: 'none', cursor: 'pointer',
+            color: 'var(--fg-faint)', flexShrink: 0,
+          }}
+          onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--bg-muted)'; e.currentTarget.style.color = 'var(--fg)'; }}
+          onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'var(--fg-faint)'; }}
+        >
+          <Icon name="x" size={12} />
+        </button>
+      )}
+    </div>
   );
 }
 

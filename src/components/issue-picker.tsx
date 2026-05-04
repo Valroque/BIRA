@@ -7,7 +7,8 @@ import { useMemo, useState } from 'react';
 import { Modal, ModalHeader } from './modal';
 import { Icon } from './icons';
 import { TypeChip } from './shell';
-import { ISSUES, type Issue } from '../fixtures';
+import { type Issue } from '../fixtures';
+import { useIssues } from '../state/issues';
 
 // Issue ids look like `COM-123` (2–5 uppercase letters · dash · digits).
 // Used to lift an id out of a pasted URL or free-form text.
@@ -35,6 +36,7 @@ export function IssuePickerModal({
 }: IssuePickerModalProps) {
   const [query, setQuery] = useState('');
   const exclude = useMemo(() => new Set(excludeIds), [excludeIds]);
+  const { issues } = useIssues();
 
   const matches = useMemo(() => {
     const trimmed = query.trim();
@@ -45,13 +47,13 @@ export function IssuePickerModal({
     // any issue id via `id.includes(query)`.
     const idHit = trimmed.match(ISSUE_ID_RE);
     const q = (idHit ? idHit[0] : trimmed).toLowerCase();
-    return ISSUES.filter((i) => {
+    return issues.filter((i) => {
       if (exclude.has(i.id)) return false;
       if (filter && !filter(i)) return false;
       if (!q) return true;
       return i.id.toLowerCase().includes(q) || i.title.toLowerCase().includes(q);
     }).slice(0, 50);
-  }, [query, filter, exclude]);
+  }, [query, filter, exclude, issues]);
 
   return (
     <Modal onClose={onClose} maxWidth={560} maxHeight="70vh" align="top" label={title}>

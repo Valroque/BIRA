@@ -6,7 +6,7 @@ import { useNavigate } from 'react-router-dom';
 import { Icon } from './icons';
 import { KBD, useTenantContext } from './shell';
 import { Modal } from './modal';
-import { ISSUES } from '../fixtures';
+import { useIssues } from '../state/issues';
 
 interface Command {
   id: string;
@@ -23,6 +23,7 @@ export function CommandPalette() {
   const [cursor, setCursor] = useState(0);
   const navigate = useNavigate();
   const { tenant, workspace, project } = useTenantContext();
+  const { issues } = useIssues();
   const inputRef = useRef<HTMLInputElement>(null);
 
   // Open with ⌘K / Ctrl+K, or by dispatching the `bira:cmdk` custom event
@@ -64,13 +65,13 @@ export function CommandPalette() {
     { id: 'go-workflow', group: 'Navigate', label: 'Workflow editor',    icon: 'workflow', to: `/${tenant}/${workspace}/${project}/workflow` },
     { id: 'go-rules',    group: 'Navigate', label: 'Transition rules',   icon: 'shield',   to: `/${tenant}/${workspace}/${project}/workflow/rules` },
     { id: 'new-issue',   group: 'Create',   label: 'New issue',          icon: 'plus',     to: `/${tenant}/${workspace}/${project}/issue/new`, hint: 'C' },
-    ...ISSUES.map((i): Command => ({
+    ...issues.map((i): Command => ({
       id: `issue-${i.id}`, group: 'Issues',
       label: `${i.id} · ${i.title}`,
       icon: i.type === 'B' ? 'bug' : i.type === 'E' ? 'layers' : 'tasks',
       to: `/${tenant}/${workspace}/${project}/issue/${i.id}`,
     })),
-  ], [tenant, workspace, project]);
+  ], [tenant, workspace, project, issues]);
 
   const filtered = useMemo(() => {
     if (!q.trim()) return all.slice(0, 12);

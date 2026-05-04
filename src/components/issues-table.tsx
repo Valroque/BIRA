@@ -8,7 +8,7 @@
 // the Project column auto-hides and 'project' is dropped from the picker.
 
 import {
-  useMemo, useRef, useState,
+  useEffect, useMemo, useRef, useState,
   type CSSProperties, type ReactNode,
 } from 'react';
 import { Icon } from './icons';
@@ -29,10 +29,59 @@ import {
 import { useDismiss } from './use-dismiss';
 import { ProjectBadge } from './project-chip';
 import { EmptyState } from './states';
+import { IssuesGantt, type GanttGranularity } from './issues-gantt';
 import { ISSUE_TYPE_NAMES, type Issue, type IssueTypeLetter, type Project } from '../fixtures';
 import { useProjects } from '../state/projects';
 
 export type IssueGroupKey = 'none' | 'status' | 'project' | 'assignee' | 'priority' | 'type';
+export type IssueView = 'list' | 'gantt';
+// Level filter: which slice of the issue hierarchy to display.
+// 'all' shows everything (and Gantt nests children under parents);
+// 'epics' = type E only; 'stories-tasks' = Story / Task / Bug.
+export type IssueLevel = 'all' | 'epics' | 'stories-tasks';
+
+const LEVEL_LABELS: Record<IssueLevel, string> = {
+  all: 'All',
+  epics: 'Epics',
+  'stories-tasks': 'Stories & tasks',
+};
+
+// View persists across navigation — IssuesTable unmounts when the user
+// switches between My Issues / All Issues / project list, and re-mounting
+// shouldn't drop a deliberate view choice.
+const VIEW_STORAGE_KEY = 'bira:issues-view';
+const VIEW_SYNC_EVENT = 'bira:issues-view:changed';
+
+function loadView(): IssueView {
+  try {
+    const raw = localStorage.getItem(VIEW_STORAGE_KEY);
+    if (raw === 'gantt' || raw === 'list') return raw;
+  } catch { /* ignore */ }
+  return 'list';
+}
+function saveView(v: IssueView) {
+  try {
+    localStorage.setItem(VIEW_STORAGE_KEY, v);
+    window.dispatchEvent(new CustomEvent(VIEW_SYNC_EVENT));
+  } catch { /* ignore */ }
+}
+function useIssueView(): [IssueView, (v: IssueView) => void] {
+  const [view, setViewState] = useState<IssueView>(loadView);
+  useEffect(() => {
+    const sync = () => setViewState(loadView());
+    window.addEventListener(VIEW_SYNC_EVENT, sync);
+    window.addEventListener('storage', sync);
+    return () => {
+      window.removeEventListener(VIEW_SYNC_EVENT, sync);
+      window.removeEventListener('storage', sync);
+    };
+  }, []);
+  const setView = (next: IssueView) => {
+    setViewState(next);
+    saveView(next);
+  };
+  return [view, setView];
+}
 
 const GROUP_LABELS: Record<IssueGroupKey, string> = {
   none: 'None',
@@ -76,6 +125,54 @@ export interface IssuesTableProps {
   emptyDescription?: string;
   /** Action button for the "input is empty" state (e.g. "New issue"). */
   emptyAction?: ReactNode;
+  /**
+   * When set, the toolbar state (groupBy, filters, level, sortStack,
+   * granularity) is persisted to localStorage under
+   * `bira:issues-state:<tenant>:<workspace>:<persistKey>` and restored on
+   * the next mount. The Reset View button shows when state diverges from
+   * defaults. Locked filters from `initialFilters` are always re-applied
+   * on top of the persisted set so page semantics ("My Issues = me")
+   * survive even if the persisted blob is stale.
+   */
+  persistKey?: string;
+}
+
+interface PersistedView {
+  /** GroupBy on the List view (status / priority / type still allowed). */
+  groupByList?: IssueGroupKey;
+  /** GroupBy on the Gantt view (status / priority / type are not offered). */
+  groupByGantt?: IssueGroupKey;
+  level?: IssueLevel;
+  granularity?: GanttGranularity;
+  sortStack?: Sort[];
+  /** Unlocked filters only — locked filters come from `initialFilters`. */
+  filters?: Filter[];
+}
+
+// Grouping by status / priority / type doesn't translate to a Gantt:
+// the bars span time, but a status/priority/type group has no meaningful
+// time axis (and the same Task would jump groups as its status changed).
+// Restrict the Gantt picker to entity-shaped groupings.
+const GANTT_FORBIDDEN_GROUPS: ReadonlySet<IssueGroupKey> = new Set(['status', 'priority', 'type']);
+function pickGanttDefault(preferred: IssueGroupKey, allowed: IssueGroupKey[]): IssueGroupKey {
+  if (allowed.includes(preferred) && !GANTT_FORBIDDEN_GROUPS.has(preferred)) return preferred;
+  for (const candidate of ['project', 'assignee', 'none'] as IssueGroupKey[]) {
+    if (allowed.includes(candidate)) return candidate;
+  }
+  return 'none';
+}
+
+function loadPersistedView(key: string | null): PersistedView {
+  if (!key) return {};
+  try {
+    const raw = localStorage.getItem(key);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw) as PersistedView;
+    return parsed && typeof parsed === 'object' ? parsed : {};
+  } catch { return {}; }
+}
+function savePersistedView(key: string, view: PersistedView) {
+  try { localStorage.setItem(key, JSON.stringify(view)); } catch { /* ignore */ }
 }
 
 export function IssuesTable(props: IssuesTableProps) {
@@ -89,6 +186,7 @@ export function IssuesTable(props: IssuesTableProps) {
     emptyTitle = 'No issues yet',
     emptyDescription = 'Issues you create or that match your filters will appear here.',
     emptyAction,
+    persistKey,
   } = props;
 
   // Project-scoped pages drop the 'project' option from the picker so the user
@@ -101,12 +199,67 @@ export function IssuesTable(props: IssuesTableProps) {
   const { tenant, workspace } = useTenantContext();
   const { projects } = useProjects();
 
-  const [groupBy, setGroupBy] = useState<IssueGroupKey>(defaultGroup);
+  // Tenant + workspace scoped so a project filter from one workspace doesn't
+  // bleed into another (project slugs aren't globally unique here).
+  const fullPersistKey = persistKey
+    ? `bira:issues-state:${tenant}:${workspace}:${persistKey}`
+    : null;
+  // Read from storage exactly once per mount — useState initializer keeps
+  // the load out of the render path.
+  const persistedRef = useRef<PersistedView | null>(null);
+  if (persistedRef.current === null) {
+    persistedRef.current = loadPersistedView(fullPersistKey);
+  }
+  const persisted = persistedRef.current;
+
+  const ganttDefaultGroup = useMemo(
+    () => pickGanttDefault(defaultGroup, groupOptions),
+    [defaultGroup, groupOptions],
+  );
+  // Two independent groupBy slots — one per view. Switching List ↔ Gantt
+  // restores whatever the user last picked on that side, so changing
+  // grouping on one view doesn't disrupt the other.
+  const [groupByList, setGroupByList] = useState<IssueGroupKey>(
+    () => persisted.groupByList ?? defaultGroup,
+  );
+  const [groupByGantt, setGroupByGantt] = useState<IssueGroupKey>(() => {
+    // Defensive: ignore a persisted value that's no longer a valid Gantt
+    // grouping (e.g. user picked 'status' before this rule existed).
+    const candidate = persisted.groupByGantt ?? ganttDefaultGroup;
+    return GANTT_FORBIDDEN_GROUPS.has(candidate) ? ganttDefaultGroup : candidate;
+  });
+  const [view, setView] = useIssueView();
+  const groupBy = view === 'gantt' ? groupByGantt : groupByList;
+  const setGroupBy = (next: IssueGroupKey) => {
+    if (view === 'gantt') setGroupByGantt(next);
+    else setGroupByList(next);
+  };
+  const [level, setLevel] = useState<IssueLevel>(() => persisted.level ?? 'all');
+  const [granularity, setGranularity] = useState<GanttGranularity>(() => persisted.granularity ?? 'auto');
   const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set());
   const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set());
-  const [filters, setFilters] = useState<Filter[]>(initialFilters);
-  const [sortStack, setSortStack] = useState<Sort[]>([]);
+  const [filters, setFilters] = useState<Filter[]>(() => {
+    // Locked filters define the page; they come from initialFilters and
+    // override anything in the persisted blob. Persisted unlocked filters
+    // layer on top.
+    const locked = initialFilters.filter((f) => f.locked);
+    const persistedUnlocked = (persisted.filters ?? []).filter((f) => !f.locked);
+    return [...locked, ...persistedUnlocked];
+  });
+  const [sortStack, setSortStack] = useState<Sort[]>(() => persisted.sortStack ?? []);
   const [layout, setLayout] = useColumnLayout();
+
+  useEffect(() => {
+    if (!fullPersistKey) return;
+    savePersistedView(fullPersistKey, {
+      groupByList,
+      groupByGantt,
+      level,
+      granularity,
+      sortStack,
+      filters: filters.filter((f) => !f.locked),
+    });
+  }, [fullPersistKey, groupByList, groupByGantt, level, granularity, sortStack, filters]);
   const { widths, order, visible } = layout;
 
   const toggleCollapsed = (id: string) => setCollapsed((prev) => {
@@ -133,7 +286,12 @@ export function IssuesTable(props: IssuesTableProps) {
   // on the sort stack — otherwise changing "sort by assignee" would shuffle
   // the group order, which is disorienting. Items within each group do honour
   // the sort.
-  const filteredIssues = useMemo(() => applyFilters(issues, filters), [issues, filters]);
+  const filteredIssues = useMemo(() => {
+    const filtered = applyFilters(issues, filters);
+    if (level === 'epics') return filtered.filter((i) => i.type === 'E');
+    if (level === 'stories-tasks') return filtered.filter((i) => i.type !== 'E');
+    return filtered;
+  }, [issues, filters, level]);
   const sortedIssues = useMemo(
     () => applySortStack(filteredIssues, sortStack),
     [filteredIssues, sortStack],
@@ -166,6 +324,35 @@ export function IssuesTable(props: IssuesTableProps) {
   const inputIsEmpty = issues.length === 0;
   const filtersYieldEmpty = !inputIsEmpty && filteredIssues.length === 0;
 
+  // GroupBy options shown in the picker depend on the current view —
+  // status / priority / type don't make sense as Gantt groupings (the
+  // bars are time-shaped, those keys aren't).
+  const visibleGroupOptions = useMemo(
+    () => view === 'gantt'
+      ? groupOptions.filter((g) => !GANTT_FORBIDDEN_GROUPS.has(g))
+      : groupOptions,
+    [view, groupOptions],
+  );
+
+  const hasNonDefaultView =
+    groupByList !== defaultGroup ||
+    groupByGantt !== ganttDefaultGroup ||
+    level !== 'all' ||
+    granularity !== 'auto' ||
+    sortStack.length > 0 ||
+    hasUnlockedFilters;
+  const resetView = () => {
+    setGroupByList(defaultGroup);
+    setGroupByGantt(ganttDefaultGroup);
+    setLevel('all');
+    setGranularity('auto');
+    setSortStack([]);
+    setFilters(initialFilters.filter((f) => f.locked));
+    if (fullPersistKey) {
+      try { localStorage.removeItem(fullPersistKey); } catch { /* ignore */ }
+    }
+  };
+
   return (
     <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
       {pageHeader && (
@@ -185,9 +372,16 @@ export function IssuesTable(props: IssuesTableProps) {
       <Toolbar
         right={
           <>
-            <GroupSelect value={groupBy} onChange={setGroupBy} options={groupOptions} />
-            <ColumnsMenu layout={layout} onLayoutChange={setLayout} projectScoped={projectScoped} />
-            {sortStack.length > 0 && (
+            <ViewToggle value={view} onChange={setView} />
+            {view === 'gantt' && (
+              <GranularityToggle value={granularity} onChange={setGranularity} />
+            )}
+            <LevelSelect value={level} onChange={setLevel} />
+            <GroupSelect value={groupBy} onChange={setGroupBy} options={visibleGroupOptions} />
+            {view === 'list' && (
+              <ColumnsMenu layout={layout} onLayoutChange={setLayout} projectScoped={projectScoped} />
+            )}
+            {view === 'list' && sortStack.length > 0 && (
               <button
                 type="button"
                 onClick={() => setSortStack([])}
@@ -199,6 +393,17 @@ export function IssuesTable(props: IssuesTableProps) {
                 <span className="tnum" style={{ fontSize: 11, color: 'var(--fg-faint)', marginLeft: 2 }}>
                   {sortStack.length}
                 </span>
+              </button>
+            )}
+            {persistKey && hasNonDefaultView && (
+              <button
+                type="button"
+                onClick={resetView}
+                className="btn btn-sm"
+                data-tip="Reset to default grouping, filters, level, and sort"
+              >
+                <Icon name="rotate" size={12} />
+                Reset view
               </button>
             )}
           </>
@@ -219,17 +424,19 @@ export function IssuesTable(props: IssuesTableProps) {
       </Toolbar>
 
       <div className="scroll" style={{ flex: 1, overflow: 'auto' }}>
-        <TableHeader
-          showProject={showProject}
-          gridColumns={gridColumns}
-          layout={layout}
-          onLayoutChange={setLayout}
-          sortStack={sortStack}
-          onSortColumn={onHeaderSort}
-          allSelected={allSelected}
-          someSelected={someSelected}
-          onSelectAll={toggleSelectAll}
-        />
+        {view === 'list' && (
+          <TableHeader
+            showProject={showProject}
+            gridColumns={gridColumns}
+            layout={layout}
+            onLayoutChange={setLayout}
+            sortStack={sortStack}
+            onSortColumn={onHeaderSort}
+            allSelected={allSelected}
+            someSelected={someSelected}
+            onSelectAll={toggleSelectAll}
+          />
+        )}
         {filtersYieldEmpty ? (
           <EmptyState
             icon="list"
@@ -247,6 +454,17 @@ export function IssuesTable(props: IssuesTableProps) {
             title={emptyTitle}
             description={emptyDescription}
             action={emptyAction}
+          />
+        ) : view === 'gantt' ? (
+          <IssuesGantt
+            groups={groups}
+            groupBy={groupBy}
+            collapsed={collapsed}
+            onToggleCollapsed={toggleCollapsed}
+            tenant={tenant}
+            workspace={workspace}
+            hierarchical={level === 'all'}
+            granularity={granularity}
           />
         ) : (
           groups.map((g) => {
@@ -720,5 +938,133 @@ function GroupSelect({
       </select>
       <Icon name="chevronDown" size={11} color="var(--fg-faint)" />
     </label>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Gantt granularity — Auto / Day / Week segmented control
+// ---------------------------------------------------------------------------
+
+function GranularityToggle({
+  value, onChange,
+}: { value: GanttGranularity; onChange: (v: GanttGranularity) => void }) {
+  const buttonStyle = (active: boolean): CSSProperties => ({
+    display: 'inline-flex', alignItems: 'center',
+    padding: '3px 8px', height: 24,
+    border: 'none', borderRadius: 4,
+    background: active ? 'var(--bg)' : 'transparent',
+    color: active ? 'var(--fg)' : 'var(--fg-muted)',
+    fontSize: 12, fontWeight: 600, cursor: 'pointer',
+    boxShadow: active ? 'var(--shadow-sm)' : 'none',
+    fontFamily: 'var(--font-sans)',
+  });
+  const opts: { id: GanttGranularity; label: string; tip: string }[] = [
+    { id: 'auto', label: 'Auto', tip: 'Auto — switch to weekly past ~3 months' },
+    { id: 'day', label: 'Day', tip: 'One tick per day' },
+    { id: 'week', label: 'Week', tip: 'One tick per week' },
+  ];
+  return (
+    <div
+      role="tablist"
+      aria-label="Granularity"
+      style={{
+        display: 'inline-flex', alignItems: 'center', gap: 2,
+        padding: 2, borderRadius: 6,
+        background: 'var(--bg-subtle)',
+        border: '1px solid var(--border)',
+      }}
+    >
+      {opts.map((o) => (
+        <button
+          key={o.id}
+          type="button"
+          role="tab"
+          aria-selected={value === o.id}
+          onClick={() => onChange(o.id)}
+          style={buttonStyle(value === o.id)}
+          data-tip={o.tip}
+        >
+          {o.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Level select — All / Epics / Stories & tasks
+// ---------------------------------------------------------------------------
+
+function LevelSelect({ value, onChange }: { value: IssueLevel; onChange: (v: IssueLevel) => void }) {
+  return (
+    <label className="btn btn-sm" style={{ paddingRight: 4, cursor: 'pointer' }}>
+      <Icon name="branch" size={13} />
+      Level:
+      <select
+        value={value}
+        onChange={(e) => onChange(e.target.value as IssueLevel)}
+        style={{
+          appearance: 'none', border: 'none', background: 'transparent',
+          fontSize: 12, fontWeight: 600, color: 'var(--fg)',
+          padding: '0 2px', cursor: 'pointer', outline: 'none',
+          fontFamily: 'var(--font-sans)',
+        }}
+      >
+        {(['all', 'epics', 'stories-tasks'] as IssueLevel[]).map((o) => (
+          <option key={o} value={o}>{LEVEL_LABELS[o]}</option>
+        ))}
+      </select>
+      <Icon name="chevronDown" size={11} color="var(--fg-faint)" />
+    </label>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// View toggle — List / Gantt segmented control
+// ---------------------------------------------------------------------------
+
+function ViewToggle({ value, onChange }: { value: IssueView; onChange: (v: IssueView) => void }) {
+  const buttonStyle = (active: boolean): CSSProperties => ({
+    display: 'inline-flex', alignItems: 'center', gap: 4,
+    padding: '3px 8px', height: 24,
+    border: 'none', borderRadius: 4,
+    background: active ? 'var(--bg)' : 'transparent',
+    color: active ? 'var(--fg)' : 'var(--fg-muted)',
+    fontSize: 12, fontWeight: 600, cursor: 'pointer',
+    boxShadow: active ? 'var(--shadow-sm)' : 'none',
+    fontFamily: 'var(--font-sans)',
+  });
+  return (
+    <div
+      role="tablist"
+      aria-label="View"
+      style={{
+        display: 'inline-flex', alignItems: 'center', gap: 2,
+        padding: 2, borderRadius: 6,
+        background: 'var(--bg-subtle)',
+        border: '1px solid var(--border)',
+      }}
+    >
+      <button
+        type="button"
+        role="tab"
+        aria-selected={value === 'list'}
+        onClick={() => onChange('list')}
+        style={buttonStyle(value === 'list')}
+        data-tip="List view"
+      >
+        <Icon name="list" size={13} />List
+      </button>
+      <button
+        type="button"
+        role="tab"
+        aria-selected={value === 'gantt'}
+        onClick={() => onChange('gantt')}
+        style={buttonStyle(value === 'gantt')}
+        data-tip="Gantt timeline"
+      >
+        <Icon name="calendar" size={13} />Gantt
+      </button>
+    </div>
   );
 }

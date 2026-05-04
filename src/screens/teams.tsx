@@ -11,9 +11,9 @@ import { Section } from '../components/section';
 import { ProjectBadge } from '../components/project-chip';
 import { ErrorState } from '../components/states';
 import {
-  TEAMS, MEMBERS,
-  teamBySlug, memberByEmail,
-  type Member, type Team,
+  TEAMS, TENANT_MEMBERS,
+  teamBySlug, tenantMemberByEmail,
+  type TenantMember, type Team,
 } from '../fixtures';
 import { useProjects } from '../state/projects';
 
@@ -103,7 +103,7 @@ function TeamCard({ team, tenant, workspace }: { team: Team; tenant: string; wor
       </p>
       <div style={{ display: 'flex', alignItems: 'center', gap: 12, fontSize: 11.5, color: 'var(--fg-muted)' }}>
         <AvatarStack
-          members={team.memberEmails.map(memberByEmail).filter((m): m is Member => !!m)}
+          members={team.memberEmails.map((e) => tenantMemberByEmail(tenant, e)).filter((m): m is TenantMember => !!m)}
           max={4}
         />
         <span>
@@ -157,8 +157,8 @@ function TeamDetail({ team, tenant, workspace, tenantName, workspaceName }: { te
   };
 
   const teamMembers = memberEmails
-    .map(memberByEmail)
-    .filter((m): m is Member => !!m);
+    .map((e) => tenantMemberByEmail(tenant, e))
+    .filter((m): m is TenantMember => !!m);
   const projects = projectsForTeam(team.slug);
 
   return (
@@ -263,11 +263,15 @@ function TeamDetail({ team, tenant, workspace, tenantName, workspaceName }: { te
 export function MemberRow({
   member, first, onRemove, removeTip = 'Remove',
 }: {
-  member: Member;
+  member: TenantMember;
   first?: boolean;
   onRemove: () => void;
   removeTip?: string;
 }) {
+  // Display the tenant role pill — it's the most-true role label at this
+  // surface (team rosters and per-project explicit users). The effective
+  // workspace role is shown on Settings → Members instead.
+  const role = member.tenantRole;
   return (
     <div style={{
       display: 'grid', gridTemplateColumns: '32px 1fr auto auto',
@@ -281,14 +285,14 @@ export function MemberRow({
       </div>
       <span className="pill" style={{
         background:
-          member.role === 'admin' ? 'var(--accent-muted)' :
-          member.role === 'write' ? 'var(--done-bg)' :
+          role === 'admin' ? 'var(--accent-muted)' :
+          role === 'write' ? 'var(--done-bg)' :
           'var(--bg-muted)',
         color:
-          member.role === 'admin' ? 'var(--accent-active)' :
-          member.role === 'write' ? 'var(--done)' :
+          role === 'admin' ? 'var(--accent-active)' :
+          role === 'write' ? 'var(--done)' :
           'var(--fg-muted)',
-      }}>{member.role}</span>
+      }}>{role}</span>
       <button onClick={onRemove} className="btn btn-ghost btn-sm" data-tip={removeTip} style={{ width: 28, padding: 0 }}>
         <Icon name="x" size={13} color="var(--fg-muted)" />
       </button>
@@ -306,8 +310,10 @@ export function AddMembersModal({
   onAdd: (email: string) => void;
   onClose: () => void;
 }) {
+  const { tenant } = useTenantContext();
   const [filter, setFilter] = useState('');
-  const candidates = MEMBERS.filter((m) =>
+  const tenantMembers = TENANT_MEMBERS[tenant] ?? [];
+  const candidates = tenantMembers.filter((m) =>
     !excludeEmails.includes(m.email) && m.status === 'active'
   ).filter((m) => {
     if (!filter) return true;
@@ -386,7 +392,7 @@ export function TeamBadge({ team, size = 24 }: { team: Team; size?: number }) {
   );
 }
 
-export function AvatarStack({ members, max = 5, size = 22 }: { members: Member[]; max?: number; size?: number }) {
+export function AvatarStack({ members, max = 5, size = 22 }: { members: Array<{ email: string; name: string }>; max?: number; size?: number }) {
   const visible = members.slice(0, max);
   const overflow = members.length - visible.length;
   return (

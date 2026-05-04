@@ -8,6 +8,7 @@ import { ISSUES, CURRENT_USER, TEAMS } from '../fixtures';
 import { useProjects } from '../state/projects';
 import { useWorkspaces } from '../state/workspaces';
 import { useTenants } from '../state/tenants';
+import { useIssues } from '../state/issues';
 
 /**
  * Read tenant + workspace + project from the URL. Empty-string fallback when
@@ -179,6 +180,7 @@ export const Sidebar = ({ collapsed = false, active = '' }: SidebarProps) => {
   const w = collapsed ? 52 : 232;
   const { tenant, workspace } = useTenantContext();
   const { projects } = useProjects();
+  const { issues } = useIssues();
   const { getWorkspace } = useWorkspaces();
   const ws = getWorkspace(workspace);
   // Active projects render in the sidebar; archived ones are reachable via
@@ -189,7 +191,7 @@ export const Sidebar = ({ collapsed = false, active = '' }: SidebarProps) => {
   // counts on the My-issues / All-issues sidebar items so a fresh workspace
   // shows 0 instead of the global fixture total.
   const projectSlugs = new Set(projects.map((p) => p.slug));
-  const workspaceIssues = ISSUES.filter((i) => projectSlugs.has(i.project));
+  const workspaceIssues = issues.filter((i) => projectSlugs.has(i.project));
 
   /**
    * Sidebar Item.

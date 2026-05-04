@@ -9,7 +9,7 @@ import { TopBar, Avatar } from '../components/shell';
 import { Modal, ModalHeader, ModalBody, ModalFooter } from '../components/modal';
 import { Field, Hint, DangerRow } from '../components/forms';
 import { Section } from '../components/section';
-import { MEMBERS, type Member, type WorkspaceRole } from '../fixtures';
+import { TENANT_MEMBERS, type TenantMember, type TenantRole } from '../fixtures';
 import { useTenants } from '../state/tenants';
 
 // --- Outer layout (header + secondary tab strip + outlet) ---
@@ -158,15 +158,14 @@ export function TenantGeneralSettings() {
 // --- Members ---
 
 export function TenantMembersSettings() {
-  // Phase 2 placeholder: tenant Members shows the workspace MEMBERS roster as a
-  // stand-in. Phase 3 splits MEMBERS into TENANT_MEMBERS + per-workspace access
-  // lists and rewires this view.
+  const { tenant = '' } = useParams<{ tenant: string }>();
+  const members: TenantMember[] = TENANT_MEMBERS[tenant] ?? [];
   const [filter, setFilter] = useState('');
   const [showInvite, setShowInvite] = useState(false);
   const [inviteEmail, setInviteEmail] = useState('');
-  const [inviteRole, setInviteRole] = useState<WorkspaceRole>('write');
+  const [inviteRole, setInviteRole] = useState<TenantRole>('write');
 
-  const filtered = MEMBERS.filter((m) => {
+  const filtered = members.filter((m) => {
     if (!filter) return true;
     const f = filter.toLowerCase();
     return m.name.toLowerCase().includes(f) || m.email.toLowerCase().includes(f);
@@ -175,8 +174,8 @@ export function TenantMembersSettings() {
   return (
     <>
       <Section
-        title={`Members · ${MEMBERS.length}`}
-        subtitle="Anyone in the tenant. Tenant admins can invite, change roles, and deactivate."
+        title={`Members · ${members.length}`}
+        subtitle="Anyone in the tenant. Tenant admins manage the org, can create workspaces, and inherit admin in every workspace."
         card
       >
         <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 12 }}>
@@ -198,7 +197,7 @@ export function TenantMembersSettings() {
         </div>
 
         <div className="card" style={{ padding: 0 }}>
-          {filtered.map((m: Member, i) => (
+          {filtered.map((m: TenantMember, i) => (
             <div
               key={m.email}
               style={{
@@ -216,8 +215,8 @@ export function TenantMembersSettings() {
                 <div style={{ fontSize: 11.5, color: 'var(--fg-muted)' }}>{m.email}</div>
               </div>
               <RoleSelect
-                value={m.role}
-                disabled={m.status !== 'active'}
+                value={m.tenantRole}
+                disabled={m.status === 'deactivated'}
               />
               <span style={{ fontSize: 11.5, color: 'var(--fg-faint)' }}>
                 {m.status === 'invited' ? <span style={{ color: 'var(--in-progress)' }}>Invite pending</span>
@@ -251,7 +250,7 @@ export function TenantMembersSettings() {
   );
 }
 
-function RoleSelect({ value, disabled }: { value: WorkspaceRole; disabled?: boolean }) {
+function RoleSelect({ value, disabled }: { value: TenantRole; disabled?: boolean }) {
   return (
     <select
       defaultValue={value}
@@ -268,9 +267,9 @@ function RoleSelect({ value, disabled }: { value: WorkspaceRole; disabled?: bool
 
 interface InviteModalProps {
   email: string;
-  role: WorkspaceRole;
+  role: TenantRole;
   onEmail: (v: string) => void;
-  onRole: (v: WorkspaceRole) => void;
+  onRole: (v: TenantRole) => void;
   onSend: () => void;
   onClose: () => void;
 }
@@ -298,7 +297,7 @@ function InviteModal({ email, role, onEmail, onRole, onSend, onClose }: InviteMo
           <select
             className="input"
             value={role}
-            onChange={(e) => onRole(e.target.value as WorkspaceRole)}
+            onChange={(e) => onRole(e.target.value as TenantRole)}
           >
             <option value="read">read — view-only access</option>
             <option value="write">write — view and edit issues, projects, workflows</option>

@@ -3,6 +3,7 @@ import { AppShell } from './components/app-shell';
 import { ErrorState } from './components/states';
 import { ProjectsProvider, useProjects } from './state/projects';
 import { WorkspacesProvider } from './state/workspaces';
+import { IssuesProvider } from './state/issues';
 import { LoginPage } from './screens/login';
 import { TenantsPage } from './screens/tenants';
 import { WorkspacesPage } from './screens/workspaces';
@@ -77,9 +78,11 @@ function WorkspaceLayout() {
   // a fresh instance whenever the user navigates across pairs.
   return (
     <ProjectsProvider key={`${tenant}/${workspace}`} tenant={tenant} workspace={workspace ?? ''}>
-      <AppShell sidebarActive={sidebarActive}>
-        <Outlet />
-      </AppShell>
+      <IssuesProvider tenant={tenant} workspace={workspace ?? ''}>
+        <AppShell sidebarActive={sidebarActive}>
+          <Outlet />
+        </AppShell>
+      </IssuesProvider>
     </ProjectsProvider>
   );
 }

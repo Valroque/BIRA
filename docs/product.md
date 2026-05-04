@@ -56,8 +56,42 @@ URL shape: `/:workspace/:project/...`.
 ### Issue
 
 The unit of work. Every issue has a type (Task, Bug, Story, Epic), a
-status (driven by its workflow), priority, assignee, labels, and
-optionally a start and due date.
+status (driven by its workflow), priority, assignee, and labels.
+
+**Schedules** (start / end dates) live on **Tasks and Bugs only** —
+they're the ground truth for "when work happens." Stories and Epics
+don't carry their own dates; their span on the Gantt is **derived** from
+the union of descendant Task/Bug dates and is read-only there. Inspector
+date editors are only shown for `type === 'T' | 'B'`.
+
+**Effort estimates** are **required on Tasks** — Tasks are the unit of
+scheduled work, and the Gantt + capacity views need a number to plan
+against. Effort is optional on Bugs (handy context but not enforced)
+and hidden on Stories / Epics, which roll up from leaves.
+
+Ideal velocity is **`IDEAL_POINTS_PER_DAY = 4`** — one assignee
+delivers ~4 points of effort per **working** day. A working day is
+Mon-Fri minus any date in the `HOLIDAYS` set (currently
+`['2026-05-01']` — Labour Day). The inspector renders a "≈ N working
+days at 4/day" hint alongside any effort value so the planner can read
+calendar implications without doing the math. Single tenant-agnostic
+constant for v1; per-team / per-assignee / per-region overrides are
+deferred.
+
+The Gantt visualises non-working days: weekends are shaded with the
+neutral subtle surface, holidays with a faint warm wash and the holiday
+name as a hover tooltip.
+
+**Squeezed bars are allowed but flagged.** A Task's effort estimate and
+its scheduled dates are kept independent on purpose — the planner can
+drag a 12-pt bar from 3 working days down to 1 working day and the
+system accepts it. But it makes the cost obvious: the bar renders with
+a diagonal stripe in the blocked colour and a red border + alert icon,
+and the issue inspector surfaces an "Overworked: 12 pts/day (3× the
+4/day ideal)" callout under the Effort meta. The math comes from
+`computeTaskLoad(estimate, start, end)` in `fixtures.ts`, which returns
+`{estimate, workingDays, pointsPerDay, overload}`; anything with
+`overload > 1.0` is over-capacity.
 
 #### Hierarchy (parent / child)
 
@@ -85,12 +119,28 @@ keep both sides consistent.
 
 #### Issue ↔ Issue relations (links)
 
-The only link type in v1 is **`relates`** — symmetric, generic. Stored
-as a `relatedTo: string[]` of issue ids on each side. If A relates to B,
-A's array contains B *and* B's contains A.
+Two link types in v1:
 
-Other link types (`blocks`, `duplicates`, `causes`) are deferred to a
-later version. No "blocked by linked issue" transition rule yet.
+**`relates`** — symmetric, untyped beyond the verb. Available on every
+issue type. Stored as `relatedTo: string[]` of issue ids on each side;
+if A relates to B, A's array contains B *and* B's contains A.
+
+**`depends on`** — directed, **Task-only**. A *depends on* B means A
+cannot start until B has ended. A Task can depend on multiple Tasks.
+Storage is symmetric for fast inverse lookup: each Task carries
+`dependsOn: string[]` (predecessors — what blocks it) and
+`dependedOnBy: string[]` (successors — what it blocks). The graph
+**must stay a DAG** — edits that would close a cycle are rejected at
+the picker (`dependsOnWouldCycle` filters out invalid candidates). The
+inspector for a Task surfaces both directions: a "Depends on" list with
+add/remove, and a read-only "Blocks" list when other Tasks depend on
+this one.
+
+Other link types (`duplicates`, `causes`) are deferred to a later
+version. The "blocks" verb is subsumed by the `depends on` inverse —
+there's no separate type. No "blocked by linked issue" transition rule
+yet — the dependency graph drives Gantt semantics, not transition
+guards.
 
 ### Workflow
 

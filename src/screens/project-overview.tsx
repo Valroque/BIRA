@@ -1,12 +1,13 @@
 import { Link } from 'react-router-dom';
 import { TopBar, Tabs, projectTabs, useTenantBreadcrumbs } from '../components/shell';
 import { ListRow } from '../components/issue-row';
-import { ISSUES } from '../fixtures';
 import { useProjects } from '../state/projects';
+import { useIssues } from '../state/issues';
 
 export function ProjectOverviewPage() {
   const { tenant, workspace, project, tenantName, workspaceName } = useTenantBreadcrumbs();
   const { getProject } = useProjects();
+  const { issues } = useIssues();
   const projectInfo = getProject(project);
   return (
     <div className="bira" style={{ height: '100%', display: 'flex', flexDirection: 'column', background: 'var(--bg)' }}>
@@ -68,7 +69,7 @@ export function ProjectOverviewPage() {
           <div style={{ padding: '12px 16px', borderBottom: '1px solid var(--border-muted)', fontSize: 13, fontWeight: 600 }}>
             Recently updated
           </div>
-          {ISSUES.filter((i) => i.project === project).slice(0, 5).map((i) => (
+          {issues.filter((i) => i.project === project).slice(0, 5).map((i) => (
             <ListRow key={i.id} issue={i} tenant={tenant} workspace={workspace} />
           ))}
         </div>

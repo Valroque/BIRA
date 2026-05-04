@@ -17,6 +17,7 @@ import {
 import { AvatarStack } from './teams';
 import { ISSUES, projectEffectiveMembers, type Issue } from '../fixtures';
 import { useProjects } from '../state/projects';
+import { useIssues } from '../state/issues';
 
 const PRIORITY_LABEL: Record<Issue['priority'], string> = {
   urgent: 'Urgent', high: 'High', med: 'Medium', low: 'Low', none: 'No priority',
@@ -40,8 +41,9 @@ const DEMO_SELECTED = ['CMT-241', 'CMT-238', 'CMT-237', 'CMT-235', 'CMT-234'];
 export function BoardView({ selectedCount, showBulkBar = true }: BoardViewProps) {
   const { tenant, workspace, project, tenantName, workspaceName } = useTenantBreadcrumbs();
   const { getProject } = useProjects();
+  const { issues } = useIssues();
   const projectInfo = getProject(project);
-  const members = projectInfo ? projectEffectiveMembers(projectInfo) : [];
+  const members = projectInfo ? projectEffectiveMembers(projectInfo, tenant) : [];
   const { config, setConfig, reset } = useBoardConfig(tenant, workspace, project);
   const [configOpen, setConfigOpen] = useState(false);
   const [filters, setFilters] = useState<Filter[]>([]);
@@ -67,8 +69,8 @@ export function BoardView({ selectedCount, showBulkBar = true }: BoardViewProps)
   // Scope the board to issues that belong to the current project (fixtures
   // now include Orbit and Atlas issues too), then apply user filters.
   const projectIssues = useMemo(
-    () => applyFilters(ISSUES.filter((i) => i.project === project), filters),
-    [project, filters],
+    () => applyFilters(issues.filter((i) => i.project === project), filters),
+    [issues, project, filters],
   );
   const issuesIn = (col: BoardColumn) =>
     projectIssues.filter((i) => col.statuses.includes(i.status));

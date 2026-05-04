@@ -14,12 +14,12 @@ import { Section } from '../components/section';
 import { ProjectBadge } from '../components/project-chip';
 import { ErrorState } from '../components/states';
 import {
-  ISSUES, TEAMS, memberByEmail,
-  type Member, type Issue,
+  ISSUES, TEAMS, tenantMemberByEmail,
+  type TenantMember, type Issue,
 } from '../fixtures';
 import { useProjects } from '../state/projects';
 
-const ROLE_LABEL: Record<Member['role'], string> = {
+const ROLE_LABEL: Record<TenantMember['tenantRole'], string> = {
   admin: 'Admin',
   write: 'Write',
   read: 'Read',
@@ -30,7 +30,7 @@ export function MemberProfilePage() {
   const { email } = useParams<{ email: string }>();
   // React Router decodes path params for us, so `email` is already the
   // raw "jordan@acme.com" form — no manual decode needed.
-  const member = email ? memberByEmail(email) : undefined;
+  const member = email ? tenantMemberByEmail(tenant, email) : undefined;
 
   if (!member) {
     return (
@@ -56,7 +56,7 @@ export function MemberProfilePage() {
   return <MemberProfile member={member} />;
 }
 
-function MemberProfile({ member }: { member: Member }) {
+function MemberProfile({ member }: { member: TenantMember }) {
   const { tenant, workspace, tenantName, workspaceName } = useTenantBreadcrumbs();
   const { projects } = useProjects();
 
@@ -98,7 +98,7 @@ function MemberProfile({ member }: { member: Member }) {
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 4, flexWrap: 'wrap' }}>
               <span style={{ fontSize: 13, color: 'var(--fg-muted)' }}>{member.email}</span>
               <span style={{ color: 'var(--fg-faint)' }}>·</span>
-              <RolePill role={member.role} />
+              <RolePill role={member.tenantRole} />
               <StatusPill status={member.status} />
               {member.status === 'active' && (
                 <>
@@ -239,7 +239,7 @@ function AssignedIssueRow({ issue, first, tenant, workspace }: { issue: Issue; f
   );
 }
 
-function RolePill({ role }: { role: Member['role'] }) {
+function RolePill({ role }: { role: TenantMember['tenantRole'] }) {
   return (
     <span
       className="pill"
@@ -253,7 +253,7 @@ function RolePill({ role }: { role: Member['role'] }) {
   );
 }
 
-function StatusPill({ status }: { status: Member['status'] }) {
+function StatusPill({ status }: { status: TenantMember['status'] }) {
   if (status === 'active') return null;
   const label = status === 'invited' ? 'Invite pending' : 'Deactivated';
   return (

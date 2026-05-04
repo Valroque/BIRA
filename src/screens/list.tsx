@@ -6,8 +6,8 @@ import { Link } from 'react-router-dom';
 import { Icon } from '../components/icons';
 import { TopBar, Tabs, projectTabs, useTenantBreadcrumbs } from '../components/shell';
 import { IssuesTable } from '../components/issues-table';
-import { ISSUES } from '../fixtures';
 import { useProjects } from '../state/projects';
+import { useIssues } from '../state/issues';
 
 export function ListPage() {
   return <ListView />;
@@ -16,11 +16,12 @@ export function ListPage() {
 export function ListView() {
   const { tenant, workspace, project, tenantName, workspaceName } = useTenantBreadcrumbs();
   const { getProject } = useProjects();
+  const { issues } = useIssues();
   const projectInfo = getProject(project);
 
   const projectIssues = useMemo(
-    () => ISSUES.filter((i) => i.project === project),
-    [project],
+    () => issues.filter((i) => i.project === project),
+    [issues, project],
   );
 
   return (
