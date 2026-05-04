@@ -15,14 +15,24 @@ themselves live at [`.claude/rules/v1-constraints.md`](.claude/rules/v1-constrai
 > `memory/project_tenant_refactor.md` for the current scope and which
 > phases have landed. The full TL;DR + rules below will be reconciled
 > when Phase 5 lands.
+>
+> **Backend phase started (2026-05-04):** Design-first gate has been
+> lifted. Backend code lives in `server/` (Node + TS + Express + Knex
+> + Postgres); FE moved to `web/`; root is an npm workspace. Initial
+> scope: tenants, workspaces, users, login. Issues / themes /
+> workflows still fixture-only — wiring those up is a later phase.
+> The FE has **not** been rewired to call the API yet; that's a
+> separate phase once endpoints stabilise. See `memory/project_backend_phase.md`.
 
 ---
 
 ## TL;DR — if you only read this
 
-1. **Frontend prototype only.** No backend, no real auth, no API client. Do
-   NOT propose backend / persistence / fetch work — the user has explicitly
-   chosen a design-first phase. Wiring real submit handlers also off-limits.
+1. **Backend phase has started** (lifted 2026-05-04). FE under `web/`
+   is still fixture-driven for issues/workflows; backend under `server/`
+   is being built up incrementally (tenants → workspaces → users →
+   login first). Don't add API calls from the FE until told to —
+   endpoints are still moving.
 2. **Stack**: Vite + React 18 + TypeScript + `react-router-dom` v7. Plain CSS
    with design tokens in `src/index.css`. No Tailwind, no UI library,
    self-hosted Geist fonts.
@@ -38,27 +48,46 @@ themselves live at [`.claude/rules/v1-constraints.md`](.claude/rules/v1-constrai
 6. **Issue hierarchy** is a shallow tree: Epic → Story → Task/Bug, plus
    Epic → Task/Bug as a shortcut. Tasks and Bugs are always leaves. At
    most one parent per issue. Stored on **both ends** (`parent` on the
-   child, `children[]` on the parent). **Themes** are a separate
-   orthogonal entity — flat, no hierarchy, many-to-many with issues.
-   The only issue link type in v1 is `relates` (symmetric, stored on
-   both ends as `relatedTo[]`). See `docs/product.md`.
+   child, `children[]` on the parent). **Epics are top-level — they
+   cannot have a parent.** **Stories require an Epic parent** — the
+   inspector forbids clearing it and the picker only offers Epics.
+   Schedules (start/end dates) live on Tasks/Bugs only; Stories and
+   Epics derive their Gantt span from descendant leaves. **Themes** are
+   a separate orthogonal entity — flat, no hierarchy, many-to-many with
+   issues. Issue link types in v1: `relates` (symmetric, untyped,
+   every issue, stored on both ends as `relatedTo[]`) and `depends on`
+   (directed, **Task-only**, A can't start until B ends, stored on
+   both ends as `dependsOn[]` / `dependedOnBy[]`, must stay a DAG —
+   cycles are rejected at edit time via `dependsOnWouldCycle`). See
+   `docs/product.md`.
 7. **Out of scope for v1**: sprints, backlog grooming, sub-tasks below
-   Task/Bug, link types beyond `relates`, custom fields, JQL, SSO,
+   Task/Bug, link types beyond `relates` and `depends on`, custom fields, JQL, SSO,
    integrations, notifications, public REST API, granular roles. Full
    list in `.claude/rules/v1-constraints.md`.
 8. **State**: in-memory fixtures only (`src/fixtures.ts`), plus a few
    `localStorage` keys: `bira:list-layout` (column UI prefs, tenant-unaware),
-   `bira:issue-inspector-width` (UI prefs, tenant-unaware), `bira:tenants`
+   `bira:issues-view` (List vs Gantt toggle on the workspace + project
+   issue lists, tenant-unaware), `bira:issues-state:<tenant>:<workspace>:<persistKey>`
+   (per-page toolbar state — `groupByList` + `groupByGantt` (independent
+   per view), level, granularity, sort stack, unlocked filters — for My
+   Issues / All Issues; locked filters always come from `initialFilters`), `bira:issue-inspector-width` (UI prefs,
+   tenant-unaware), `bira:tenants`
    (user-created tenants — merged with `TENANTS` by `TenantsProvider`),
    `bira:workspaces:<tenant>` (per-tenant workspace list — `WorkspacesProvider`
    is mounted per tenant inside `TenantLayout`), `bira:projects:<tenant>:<workspace>`
    (per-workspace project list — only the demo `acme-corp/acme` workspace
-   gets `SEED_PROJECTS` seeded), and `bira:board-columns:<tenant>:<workspace>:<project>`
-   (per-project board config). Tenant + workspace + project come from the URL via
+   gets `SEED_PROJECTS` seeded), `bira:board-columns:<tenant>:<workspace>:<project>`
+   (per-project board config), and `bira:issue-overrides:<tenant>:<workspace>`
+   (per-workspace `Partial<Issue>` patches against the `ISSUES` fixture —
+   gantt date drag, gantt assignee picker, inspector date / estimate edits all
+   write here; `IssuesProvider` merges seeds with overrides on read).
+   Tenant + workspace + project come from the URL via
    `useTenantContext()` in `shell.tsx` — never hardcode `/acme-corp/acme/comet/`.
    Read tenant data via `useTenants()` from `src/state/tenants.tsx`, workspace data via
-   `useWorkspaces()` from `src/state/workspaces.tsx`, and project data via `useProjects()`
-   from `src/state/projects.tsx` — never from stale `WORKSPACES`/`TENANTS`-direct lookups.
+   `useWorkspaces()` from `src/state/workspaces.tsx`, project data via `useProjects()`
+   from `src/state/projects.tsx`, and issues via `useIssues()` from
+   `src/state/issues.tsx` — never from stale `WORKSPACES`/`TENANTS`-direct lookups
+   or `ISSUES`-direct reads (the fixture is the seed; `useIssues()` is the live view).
 9. **Reuse, don't reinvent**: every layout primitive lives in
    `src/components/` (especially `shell.tsx`). Adding a parallel `<button>`
    styled like an existing `Chip` is a defect, not a shortcut.
@@ -89,24 +118,33 @@ engine and rule-gated transitions.
 
 ## 2. Current status
 
-**Frontend prototype only.** No backend, no database, no real auth. Most
-data is in-memory fixtures in `src/fixtures.ts` and edits don't persist; the
-exceptions are written to `localStorage` (column-layout prefs, per-project
-board config, and projects created via the New-project flow — see TL;DR
-point 7 for the full key list).
+**Frontend** is feature-complete enough that we've started building the
+backend. FE lives under `web/`; data is still in-memory fixtures
+(`web/src/fixtures.ts`) plus a few `localStorage` keys. Issues/workflows/
+themes will *stay* fixture-driven until their backend phases land.
 
-The user has explicitly chosen to design-first: **do not propose backend or
-API or DB work until the entire UI and flows are signed off.** Wiring real
-state, authentication, or persistence is also off-limits during this phase.
-This is a hard rule — see `feedback_design_first` in user memory.
+**Backend** lives under `server/` and is being built incrementally —
+the layering is ported from the ABHA project (Node + Express + Knex +
+Postgres), translated to TypeScript. First slice is tenants /
+workspaces / users / login (no issues yet). See
+`memory/project_backend_phase.md` for current state and
+`server/README.md` for layout conventions.
+
+**FE↔BE wiring is intentionally deferred.** Endpoints are still
+moving; do not point the FE at the API until told to.
 
 ---
 
 ## 3. Stack
 
-- **Frontend**: Vite + React 18 + TypeScript at the repo root.
-- **Routing**: `react-router-dom` v7. Router definitions live in `src/App.tsx`.
-- **Styling**: plain CSS with design tokens in `src/index.css`. Inline styles
+- **Frontend** (`web/`): Vite + React 18 + TypeScript + `react-router-dom` v7.
+- **Backend** (`server/`): Node 20 + TypeScript (ESM) + Express + Knex
+  + Postgres 16. JWT auth (access + refresh). Layering: routes →
+  usecases → services → entities; middleware for auth + tenant scope;
+  errors via `EntityError` / `ServiceError` / `AppError`.
+- **Repo shape**: npm workspaces. Root coordinates `web/` + `server/`.
+- **Routing (FE)**: `react-router-dom` v7. Router definitions live in `web/src/App.tsx`.
+- **Styling**: plain CSS with design tokens in `web/src/index.css`. Inline styles
   on components for layout. No Tailwind, no CSS-in-JS library, no shadcn.
 - **Fonts**: Geist Sans + Geist Mono via `@fontsource/geist-sans` and
   `@fontsource/geist-mono` (self-hosted, no Google Fonts CDN — the app stays
@@ -214,18 +252,68 @@ practices. Don't propose changes to these without explicit user sign-off.
   - Task / Bug are always leaves
   - At most one parent per issue. Stored on **both ends** —
     `Issue.parent` on the child + `Issue.children[]` on the parent.
-- **Issue links**: only `relates` in v1 (symmetric, untyped beyond the verb).
-  Stored on both ends as `relatedTo[]`. `blocks` / `duplicates` / `causes`
-  are deferred. No transition rule like "blocked by linked issue" yet.
+  - **Epics are top-level — they cannot have a parent.** The Parent
+    meta is hidden for `type === 'E'`; `allowedParentTypes` is empty.
+  - **Stories require an Epic parent.** The picker for a Story only
+    surfaces Epics; the inspector hides the clear-parent (×) button so
+    the requirement can't be circumvented. A Story rendered without a
+    parent shows a "Pick an Epic" prompt instead of "Not set".
+- **Schedules**: `startDate`/`endDate` live on Tasks and Bugs only.
+  Stories and Epics carry no dates of their own — the Gantt derives
+  their bar from the union of descendant Task/Bug dates (read-only,
+  rendered in muted gray, not draggable). Inspector date editors only
+  show for `type === 'T' | 'B'`. The "No schedule" badge in the Gantt
+  label column is also leaf-only — Stories/Epics with no dated
+  descendants render a blank slot, not a "missing field" prompt.
+- **Working week is Mon-Fri**, plus **holidays** in the `HOLIDAYS`
+  set are non-working too. Sat/Sun and any HOLIDAYS entry don't count
+  toward effort capacity, working-day spans, or velocity math.
+  Helpers in `fixtures.ts`: `WORKING_WEEKDAYS`, `WORKING_DAYS_PER_WEEK
+  = 5`, `HOLIDAYS` (currently `['2026-05-01']` — Labour Day),
+  `isWorkingDay(iso)`, `isWorkingDate(date)`,
+  `workingDaysBetween(start, end)`, `addWorkingDays(iso, n)`. The
+  Gantt timeline shades both weekends and holidays.
+- **Effort estimates** are required on Tasks, optional on Bugs, and
+  hidden on Stories/Epics (those roll up). Ideal velocity is
+  `IDEAL_POINTS_PER_DAY = 4` (one assignee delivers ~4 points per
+  **working** day) — a single constant, no per-team overrides in v1.
+  Used to render "≈ N working days at 4/day" hints alongside any
+  effort value.
+- **Squeezed bars are allowed but flagged.** Estimate and dates are
+  independent — drag a Gantt bar tighter than the ideal span and the
+  bar is striped in the blocked colour, gets a red border + alert
+  icon, and the inspector shows "Overworked: N pts/day (M× ideal)".
+  `computeTaskLoad(estimate, start, end)` is the source of truth;
+  `overload > 1.0` is the threshold.
+- **Per-assignee daily load** is surfaced when the Gantt is grouped
+  by assignee. Each group's timeline row highlights days where the
+  combined scheduled pts/day exceeds ideal (red wash + hover with
+  exact load), and the group label gets a red `⚠ N` chip with the
+  overloaded day count. Catches cases where overlapping mid-sized
+  Tasks add up even though each one alone looks fine. Helper:
+  `dailyLoadFor(items)` in `issues-gantt.tsx`.
+- **Issue links**: two types in v1.
+  - **`relates`** — symmetric, untyped beyond the verb. Available on
+    every issue type. Stored on both ends as `relatedTo[]`.
+  - **`depends on`** — directed, **Task-only**. A depends on B means A
+    can't start until B ends; A Task can depend on many Tasks. Stored
+    on both ends as `dependsOn[]` (predecessors) and `dependedOnBy[]`
+    (successors). Must stay a DAG — cycles are rejected at the picker
+    via `dependsOnWouldCycle`. Subsumes the "blocks" link type that
+    was previously deferred.
+  - `duplicates` / `causes` are still deferred. No transition rule like
+    "blocked by linked issue" yet — the depends-on graph drives Gantt
+    semantics, not transition guards.
 - **Themes** are a separate, orthogonal entity:
   - Flat — no parent theme, no child theme, no theme↔theme relation.
   - Many-to-many with issues. Stored on both ends —
     `Theme.issues[]` and `Issue.themes[]`.
   - No status, no workflow, no end date — themes are long-running.
   - Just `{ id, name, description, color }` for v1.
-- **Symmetric storage rule**: parent/children, relatedTo, and theme
-  membership are all denormalised. Touching one side means touching the
-  other; there's no auto-mirroring.
+- **Symmetric storage rule**: parent/children, relatedTo, depends-on
+  (`dependsOn` ↔ `dependedOnBy`), and theme membership are all
+  denormalised. Touching one side means touching the other; there's no
+  auto-mirroring.
 - **Three roles**: `admin`, `write`, `read`. Ordered ladder
   (`read < write < admin`; write implies read, admin implies write). Roles
   can be assigned to **teams** (defaults) or **individual users** (overrides).
@@ -235,7 +323,7 @@ practices. Don't propose changes to these without explicit user sign-off.
   team. No granular per-feature permissions in v1.
 - **Explicitly out of scope for v1** (deferred — do not add):
   Sprints / backlog / burndown · Sub-tasks below Task/Bug · Issue link
-  types beyond `relates` · Granular roles · Notifications + @mentions +
+  types beyond `relates` and `depends on` · Granular roles · Notifications + @mentions +
   watchers · Custom fields · Custom per-project workflow editor UI ·
   Reports / dashboards · JQL · Integrations (Git/Slack/webhooks) ·
   SSO/SAML · Public REST API.
@@ -450,21 +538,14 @@ Substantive feature gaps to consider when scope expands:
 
 ## 13. Memory
 
-User-level memory for this project lives at:
+User-level memory for this project lives at the path printed by Claude
+on session start. `MEMORY.md` in that directory indexes all entries.
+Notable entries:
 
-```
-/home/valroque/.claude/projects/-home-valroque-Documents-projects-BIRA/memory/
-```
-
-Key entries to read on a fresh session:
-
-- `project_bira_goal.md` — what BIRA is and who it's for
-- `project_stack.md` — Node-on-host + Postgres-as-config decision
-- `project_scope_v1.md` — full v1 scope, workflow scope (revised),
-  transition-rule decisions
-- `feedback_design_first.md` — hard rule about no backend until UI ships
-
-`MEMORY.md` in that directory indexes all entries.
+- `project_tenant_refactor.md` — in-flight tenant-above-workspace work
+- `project_planner_mode.md` — Gantt-as-planner spec (not yet built)
+- `project_backend_phase.md` — backend phase started 2026-05-04;
+  layering ported from ABHA; first slice = tenants/workspaces/users/login
 
 ---
 
