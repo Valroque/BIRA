@@ -1,29 +1,18 @@
-// /tenants — post-login tenant picker.
+// /tenants — anonymous tenant picker (entry point before login).
 //
-// Lists the tenants the current user has access to. Selecting one lands on
-// `/:tenant/workspaces` (the per-tenant workspace picker). When the user has
-// no tenants, an empty state offers self-host setup or a different account.
-// A "+ New tenant" button opens a small create flow that persists to
-// localStorage via `useTenants()`.
-//
-// Phase 1: this is the entry point after login. The user always walks
-// through both tenant picker → workspace picker — no auto-skip even with a
-// single tenant.
+// Lists all known tenants from the FE fixture (kept in sync with the BE seed
+// by convention — tenants are seed-only in v1). Selecting a tenant lands on
+// `/:tenant/login`. Tenant creation is NOT exposed here.
 
-import { useMemo, useState, type FormEvent } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { useMemo, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { Icon } from '../components/icons';
-import { Field, Hint } from '../components/forms';
 import { TopBar } from '../components/shell';
-import {
-  RESERVED_TENANT_SLUGS, pickProjectColor,
-  type Tenant, type TenantRole,
-} from '../fixtures';
+import { type Tenant, type TenantRole } from '../fixtures';
 import { useTenants } from '../state/tenants';
 
 export function TenantsPage() {
   const { tenants } = useTenants();
-  const [showCreate, setShowCreate] = useState(false);
   const [filter, setFilter] = useState('');
 
   const filtered = useMemo(() => {
@@ -36,7 +25,7 @@ export function TenantsPage() {
     <div className="bira" style={{
       minHeight: '100%', display: 'flex', flexDirection: 'column',
     }}>
-      <TopBar breadcrumbs={['Tenants']} showSearch={false} showNewIssue={false} />
+      <TopBar breadcrumbs={['Tenants']} showSearch={false} showNewIssue={false} showUserMenu={false} />
       <div style={{
         flex: 1, display: 'flex', flexDirection: 'column',
         alignItems: 'center', background: 'var(--bg-subtle)', padding: '48px 24px',
@@ -44,22 +33,13 @@ export function TenantsPage() {
         <div style={{ width: '100%', maxWidth: 560 }}>
           <Brand />
 
-          <div style={{
-            display: 'flex', alignItems: 'flex-end', gap: 12, marginBottom: 14,
-          }}>
-            <div style={{ flex: 1 }}>
-              <h1 style={{ fontSize: 22, fontWeight: 600, letterSpacing: -0.4, margin: 0 }}>
-                Choose a tenant
-              </h1>
-              <p style={{ fontSize: 13, color: 'var(--fg-muted)', margin: '4px 0 0' }}>
-                Each tenant is a separate organization with its own workspaces, members, and projects.
-              </p>
-            </div>
-            {tenants.length > 0 && (
-              <button onClick={() => setShowCreate(true)} className="btn btn-primary btn-sm">
-                <Icon name="plus" size={13} />New tenant
-              </button>
-            )}
+          <div style={{ marginBottom: 14 }}>
+            <h1 style={{ fontSize: 22, fontWeight: 600, letterSpacing: -0.4, margin: 0 }}>
+              Choose a tenant
+            </h1>
+            <p style={{ fontSize: 13, color: 'var(--fg-muted)', margin: '4px 0 0' }}>
+              Each tenant is a separate organization with its own workspaces, members, and projects.
+            </p>
           </div>
 
           {tenants.length > 0 && (
@@ -82,7 +62,7 @@ export function TenantsPage() {
           )}
 
           {tenants.length === 0
-            ? <EmptyState onCreate={() => setShowCreate(true)} />
+            ? <EmptyState />
             : filtered.length === 0
               ? <NoMatch query={filter} />
               : <TenantList tenants={filtered} />}
@@ -90,8 +70,6 @@ export function TenantsPage() {
           <Footer />
         </div>
       </div>
-
-      {showCreate && <CreateTenantModal onClose={() => setShowCreate(false)} />}
     </div>
   );
 }
@@ -108,7 +86,7 @@ function NoMatch({ query }: { query: string }) {
         No tenants match "{query.trim()}"
       </div>
       <div style={{ fontSize: 12, marginTop: 4 }}>
-        Try a different name, or create a new tenant.
+        Try a different name.
       </div>
     </div>
   );
@@ -207,7 +185,7 @@ function RolePill({ role }: { role: TenantRole }) {
   );
 }
 
-function EmptyState({ onCreate }: { onCreate: () => void }) {
+function EmptyState() {
   return (
     <div style={{
       padding: '36px 24px', textAlign: 'center',
@@ -222,155 +200,18 @@ function EmptyState({ onCreate }: { onCreate: () => void }) {
       }}>
         <Icon name="users" size={18} />
       </div>
-      <div style={{ fontSize: 14, fontWeight: 600 }}>No tenants yet</div>
+      <div style={{ fontSize: 14, fontWeight: 600 }}>No tenants available</div>
       <p style={{
         fontSize: 12.5, color: 'var(--fg-muted)',
-        margin: '4px auto 14px', lineHeight: 1.5, maxWidth: 360,
+        margin: '4px auto 0', lineHeight: 1.5, maxWidth: 360,
       }}>
-        No tenants yet — create one to get started, or use a different account.
+        No tenants have been provisioned on this instance yet.
       </p>
-      <div style={{ display: 'flex', gap: 8, justifyContent: 'center' }}>
-        <button onClick={onCreate} className="btn btn-primary btn-sm">
-          <Icon name="plus" size={13} />New tenant
-        </button>
-        <Link to="/setup" className="btn btn-sm" style={{ textDecoration: 'none' }}>
-          Self-host setup
-        </Link>
-      </div>
     </div>
   );
 }
 
 function Footer() {
-  // /tenants is the anonymous picker — no signed-in identity to show. We
-  // keep a footer affordance pointed at self-host setup, since first-run
-  // admins also land here.
-  return (
-    <div style={{
-      display: 'flex', alignItems: 'center', justifyContent: 'flex-end',
-      marginTop: 18, fontSize: 12, color: 'var(--fg-muted)',
-    }}>
-      <Link to="/setup" style={{ color: 'var(--accent)', textDecoration: 'none' }}>
-        Self-hosting? Set up a new instance →
-      </Link>
-    </div>
-  );
+  return null;
 }
 
-// ---------------------------------------------------------------------------
-// Create tenant modal
-// ---------------------------------------------------------------------------
-
-function slugify(name: string): string {
-  return name.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
-}
-
-function CreateTenantModal({ onClose }: { onClose: () => void }) {
-  const navigate = useNavigate();
-  const { tenants, addTenant } = useTenants();
-  const [name, setName] = useState('');
-
-  const slug = slugify(name);
-
-  const error = useMemo<string | null>(() => {
-    if (!name.trim()) return null; // empty is the resting state, not an error
-    if (slug.length < 2) return 'Name must be at least 2 letters or digits.';
-    if (RESERVED_TENANT_SLUGS.has(slug)) return `"${slug}" is reserved — pick a different name.`;
-    if (tenants.some((t) => t.slug === slug)) return `A tenant with slug "${slug}" already exists.`;
-    return null;
-  }, [name, slug, tenants]);
-
-  const canSubmit = !!slug && slug.length >= 2 && !error;
-
-  const submit = (e: FormEvent) => {
-    e.preventDefault();
-    if (!canSubmit) return;
-    const palette = pickProjectColor(slug);
-    const created = addTenant({
-      slug,
-      name: name.trim(),
-      letter: (name.trim()[0] ?? slug[0] ?? '?').toUpperCase(),
-      color: palette.color,
-      bg: palette.bg,
-    });
-    onClose();
-    // Tenants page is the anonymous picker — newly-created tenants drop the
-    // user at the tenant-scoped login next, matching the row-click flow.
-    navigate(`/${created.slug}/login`);
-  };
-
-  return (
-    <div
-      onClick={onClose}
-      style={{
-        position: 'fixed', inset: 0, zIndex: 60, background: 'rgba(15,23,42,.4)',
-        display: 'flex', alignItems: 'flex-start', justifyContent: 'center',
-        padding: '6vh 24px', overflow: 'auto',
-      }}
-    >
-      <form
-        onSubmit={submit}
-        onClick={(e) => e.stopPropagation()}
-        style={{
-          width: '100%', maxWidth: 460, background: 'var(--bg)', borderRadius: 10,
-          boxShadow: 'var(--shadow-lg)', display: 'flex', flexDirection: 'column',
-        }}
-      >
-        <header style={{
-          padding: '14px 18px', borderBottom: '1px solid var(--border-muted)',
-          display: 'flex', alignItems: 'center', gap: 8,
-        }}>
-          <span style={{ fontSize: 14, fontWeight: 600 }}>New tenant</span>
-          <div style={{ flex: 1 }} />
-          <button
-            type="button" onClick={onClose} className="btn btn-ghost btn-sm"
-            style={{ width: 24, padding: 0 }} data-tip="Close"
-          >
-            <Icon name="x" size={13} />
-          </button>
-        </header>
-
-        <div style={{ padding: 18 }}>
-          <Field label="Name">
-            <input
-              autoFocus className="input"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              placeholder="e.g. Acme Corp"
-              required
-            />
-            {slug && <Hint>URL: <code>/{slug}</code></Hint>}
-          </Field>
-
-          <p style={{
-            fontSize: 12, color: 'var(--fg-muted)', margin: '0 0 8px', lineHeight: 1.5,
-          }}>
-            You'll be the admin of this tenant. You can add workspaces, members, and projects from inside.
-          </p>
-
-          {error && (
-            <div style={{
-              marginTop: 8, padding: '8px 10px', borderRadius: 6,
-              background: '#fef2f2', border: '1px solid #fecaca',
-              color: '#991b1b', fontSize: 12,
-              display: 'flex', alignItems: 'center', gap: 6,
-            }}>
-              <Icon name="alert" size={12} />{error}
-            </div>
-          )}
-        </div>
-
-        <footer style={{
-          padding: '10px 18px', borderTop: '1px solid var(--border-muted)',
-          background: 'var(--bg-subtle)', display: 'flex', gap: 8,
-        }}>
-          <div style={{ flex: 1 }} />
-          <button type="button" onClick={onClose} className="btn btn-sm">Cancel</button>
-          <button type="submit" disabled={!canSubmit} className="btn btn-primary btn-sm">
-            <Icon name="check" size={13} />Create tenant
-          </button>
-        </footer>
-      </form>
-    </div>
-  );
-}

@@ -18,6 +18,7 @@ import {
 } from '../fixtures';
 import { useWorkspaces } from '../state/workspaces';
 import { useTenants } from '../state/tenants';
+import { useAuth } from '../state/auth';
 
 export function WorkspacesPage() {
   const { tenant = '' } = useParams<{ tenant: string }>();
@@ -44,7 +45,7 @@ export function WorkspacesPage() {
     <div className="bira" style={{
       minHeight: '100%', display: 'flex', flexDirection: 'column',
     }}>
-      <TopBar breadcrumbs={[{ label: 'Tenants', to: '/tenants' }, tenantName]} showSearch={false} showNewIssue={false} />
+      <TopBar breadcrumbs={[tenantName, 'Workspaces']} showSearch={false} showNewIssue={false} />
       <div style={{
         flex: 1, display: 'flex', flexDirection: 'column',
         alignItems: 'center', background: 'var(--bg-subtle)', padding: '48px 24px',
@@ -328,8 +329,9 @@ function EmptyState({ onCreate }: { onCreate: () => void }) {
         <button onClick={onCreate} className="btn btn-primary btn-sm">
           <Icon name="plus" size={13} />New workspace
         </button>
+        <SignOutButton />
         <Link to="/tenants" className="btn btn-sm" style={{ textDecoration: 'none' }}>
-          Use a different account
+          Switch tenant
         </Link>
       </div>
     </div>
@@ -337,17 +339,34 @@ function EmptyState({ onCreate }: { onCreate: () => void }) {
 }
 
 function Footer() {
+  const { user, logout } = useAuth();
+  const navigate = useNavigate();
+  const signedInAs = user?.email ?? CURRENT_USER.email;
+  const signOut = () => { logout(); navigate('/tenants'); };
   return (
     <div style={{
       display: 'flex', alignItems: 'center', justifyContent: 'space-between',
       marginTop: 18, fontSize: 12, color: 'var(--fg-muted)',
     }}>
-      <span>Signed in as <span style={{ color: 'var(--fg)' }}>{CURRENT_USER.email}</span></span>
+      <span>Signed in as <span style={{ color: 'var(--fg)' }}>{signedInAs}</span></span>
       <span style={{ display: 'flex', gap: 12 }}>
         <Link to="/tenants" style={{ color: 'var(--accent)', textDecoration: 'none' }}>Switch tenant</Link>
-        <Link to="/tenants" style={{ color: 'var(--accent)', textDecoration: 'none' }}>Sign out</Link>
+        <button onClick={signOut} style={{
+          background: 'none', border: 'none', padding: 0, cursor: 'pointer',
+          color: 'var(--accent)', fontSize: 12,
+        }}>Sign out</button>
       </span>
     </div>
+  );
+}
+
+function SignOutButton() {
+  const { logout } = useAuth();
+  const navigate = useNavigate();
+  return (
+    <button className="btn btn-sm" onClick={() => { logout(); navigate('/tenants'); }}>
+      Sign out
+    </button>
   );
 }
 
@@ -377,11 +396,11 @@ function CreateWorkspaceModal({ onClose }: { onClose: () => void }) {
 
   const canSubmit = !!slug && slug.length >= 2 && !error;
 
-  const submit = (e: FormEvent) => {
+  const submit = async (e: FormEvent) => {
     e.preventDefault();
     if (!canSubmit) return;
     const palette = pickProjectColor(slug);
-    const created = addWorkspace({
+    const created = await addWorkspace({
       slug,
       name: name.trim(),
       letter: (name.trim()[0] ?? slug[0] ?? '?').toUpperCase(),

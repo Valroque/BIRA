@@ -12,6 +12,9 @@ import {
   type WorkspaceMemberView, type WorkspaceMemberProvenance, type WorkspaceRole,
 } from '../fixtures';
 import { useProjects } from '../state/projects';
+import { useWorkspaces } from '../state/workspaces';
+import { useAuth } from '../state/auth';
+import { updateProfile, changePassword } from '../api/auth';
 
 // --- Outer layout (header + secondary tab strip + outlet) ---
 
@@ -73,9 +76,27 @@ export function SettingsLayout() {
 // --- General (workspace) ---
 
 export function GeneralSettings() {
-  const [name, setName] = useState('Acme Robotics');
-  const [slug, setSlug] = useState('acme');
-  const [description, setDescription] = useState('Internal issue tracker for the robotics team.');
+  const { workspace: workspaceSlug } = useTenantContext();
+  const { getWorkspace, updateWorkspace } = useWorkspaces();
+  const currentWorkspace = getWorkspace(workspaceSlug);
+
+  const [name, setName] = useState(currentWorkspace?.name ?? '');
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+
+  const slug = currentWorkspace?.slug ?? workspaceSlug;
+
+  const handleSave = async () => {
+    setSaveError(null);
+    setSaving(true);
+    try {
+      await updateWorkspace(slug, { name });
+    } catch (err) {
+      setSaveError(err instanceof Error ? err.message : 'Failed to save');
+    } finally {
+      setSaving(false);
+    }
+  };
 
   return (
     <>
@@ -87,20 +108,21 @@ export function GeneralSettings() {
           <input
             className="input mono"
             value={slug}
-            onChange={(e) => setSlug(e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, ''))}
+            disabled
           />
-          <Hint>Changing the slug will redirect existing URLs.</Hint>
+          <Hint>Workspace slugs cannot be changed.</Hint>
         </Field>
-        <Field label="Description">
-          <textarea
-            className="input"
-            rows={3}
-            value={description}
-            onChange={(e) => setDescription(e.target.value)}
-            style={{ height: 'auto', padding: '8px 10px', fontFamily: 'var(--font-sans)', resize: 'vertical' }}
-          />
-        </Field>
-        <SaveBar />
+        {saveError && (
+          <div style={{
+            padding: '7px 10px', borderRadius: 6, fontSize: 12,
+            background: 'color-mix(in srgb, var(--blocked) 10%, var(--bg))',
+            border: '1px solid color-mix(in srgb, var(--blocked) 30%, transparent)',
+            color: 'var(--blocked)',
+          }}>
+            {saveError}
+          </div>
+        )}
+        <SaveBar onSave={handleSave} saving={saving} />
       </Section>
 
       <Section title="Logo" card>
@@ -356,46 +378,146 @@ function InviteModal({ email, role, onEmail, onRole, onSend, onClose }: InviteMo
 
 export function ProfileSettings() {
   const navigate = useNavigate();
-  const [name, setName] = useState('Jordan Lee');
-  const [email, setEmail] = useState('jordan@acme.com');
+  const { user, updateUser, logout } = useAuth();
+
+  const [firstName, setFirstName] = useState(user?.firstName ?? '');
+  const [lastName, setLastName] = useState(user?.lastName ?? '');
+  const [email, setEmail] = useState(user?.email ?? '');
+  const [profileSaving, setProfileSaving] = useState(false);
+  const [profileError, setProfileError] = useState<string | null>(null);
+
+  const [currentPw, setCurrentPw] = useState('');
+  const [newPw, setNewPw] = useState('');
+  const [confirmPw, setConfirmPw] = useState('');
+  const [pwSaving, setPwSaving] = useState(false);
+  const [pwError, setPwError] = useState<string | null>(null);
+  const [pwSuccess, setPwSuccess] = useState(false);
+
+  const displayName = `${firstName} ${lastName}`.trim() || (user?.displayName ?? 'Account');
+
+  const handleProfileSave = async () => {
+    setProfileError(null);
+    setProfileSaving(true);
+    try {
+      const updated = await updateProfile({ firstName, lastName, email });
+      updateUser(updated);
+    } catch (err) {
+      setProfileError(err instanceof Error ? err.message : 'Failed to save');
+    } finally {
+      setProfileSaving(false);
+    }
+  };
+
+  const handlePasswordUpdate = async () => {
+    setPwError(null);
+    setPwSuccess(false);
+    if (newPw !== confirmPw) { setPwError('Passwords do not match.'); return; }
+    if (newPw.length < 8) { setPwError('New password must be at least 8 characters.'); return; }
+    setPwSaving(true);
+    try {
+      await changePassword(currentPw, newPw);
+      setCurrentPw(''); setNewPw(''); setConfirmPw('');
+      setPwSuccess(true);
+    } catch (err) {
+      setPwError(err instanceof Error ? err.message : 'Failed to update password');
+    } finally {
+      setPwSaving(false);
+    }
+  };
+
+  const handleSignOut = () => {
+    logout();
+    navigate('/tenants');
+  };
 
   return (
     <>
       <Section title="Account" subtitle="Information about you, visible to other members of this workspace." card>
         <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginBottom: 16 }}>
-          <Avatar name={name} size={56} />
+          <Avatar name={displayName} size={56} />
           <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
             <button className="btn btn-sm"><Icon name="upload" size={13} />Upload avatar</button>
             <span style={{ fontSize: 11, color: 'var(--fg-faint)' }}>JPG/PNG up to 1 MB. Initials are used by default.</span>
           </div>
         </div>
-        <Field label="Name">
-          <input className="input" value={name} onChange={(e) => setName(e.target.value)} />
+        <Field label="First name">
+          <input className="input" value={firstName} onChange={(e) => setFirstName(e.target.value)} />
+        </Field>
+        <Field label="Last name">
+          <input className="input" value={lastName} onChange={(e) => setLastName(e.target.value)} />
         </Field>
         <Field label="Email">
           <input type="email" className="input" value={email} onChange={(e) => setEmail(e.target.value)} />
           <Hint>Changing your email requires re-verification.</Hint>
         </Field>
-        <SaveBar />
+        {profileError && (
+          <div style={{
+            padding: '7px 10px', borderRadius: 6, fontSize: 12,
+            background: 'color-mix(in srgb, var(--blocked) 10%, var(--bg))',
+            border: '1px solid color-mix(in srgb, var(--blocked) 30%, transparent)',
+            color: 'var(--blocked)',
+          }}>
+            {profileError}
+          </div>
+        )}
+        <SaveBar onSave={handleProfileSave} saving={profileSaving} />
       </Section>
 
       <Section title="Password" card>
         <Field label="Current password">
-          <input type="password" className="input" autoComplete="current-password" />
+          <input
+            type="password" className="input"
+            autoComplete="current-password"
+            value={currentPw} onChange={(e) => setCurrentPw(e.target.value)}
+          />
         </Field>
         <Field label="New password">
-          <input type="password" className="input" autoComplete="new-password" minLength={8} />
+          <input
+            type="password" className="input"
+            autoComplete="new-password" minLength={8}
+            value={newPw} onChange={(e) => setNewPw(e.target.value)}
+          />
         </Field>
         <Field label="Confirm new password">
-          <input type="password" className="input" autoComplete="new-password" />
+          <input
+            type="password" className="input"
+            autoComplete="new-password"
+            value={confirmPw} onChange={(e) => setConfirmPw(e.target.value)}
+          />
         </Field>
+        {pwError && (
+          <div style={{
+            padding: '7px 10px', borderRadius: 6, fontSize: 12,
+            background: 'color-mix(in srgb, var(--blocked) 10%, var(--bg))',
+            border: '1px solid color-mix(in srgb, var(--blocked) 30%, transparent)',
+            color: 'var(--blocked)',
+          }}>
+            {pwError}
+          </div>
+        )}
+        {pwSuccess && (
+          <div style={{
+            padding: '7px 10px', borderRadius: 6, fontSize: 12,
+            background: 'color-mix(in srgb, var(--done) 10%, var(--bg))',
+            border: '1px solid color-mix(in srgb, var(--done) 30%, transparent)',
+            color: 'var(--done)',
+          }}>
+            Password updated successfully.
+          </div>
+        )}
         <div style={{ marginTop: 12 }}>
-          <button className="btn btn-primary btn-sm">Update password</button>
+          <button
+            className="btn btn-primary btn-sm"
+            disabled={pwSaving || !currentPw || !newPw || !confirmPw}
+            onClick={handlePasswordUpdate}
+          >
+            {pwSaving ? 'Updating…' : 'Update password'}
+          </button>
         </div>
       </Section>
 
       <Section title="Sign out" subtitle="Sign out of this device. You can sign back in any time." card>
-        <button onClick={() => navigate('/tenants')} className="btn">
+        <button onClick={handleSignOut} className="btn">
           <Icon name="power" size={13} />Sign out
         </button>
       </Section>
@@ -405,11 +527,12 @@ export function ProfileSettings() {
 
 // --- Helpers ---
 
-function SaveBar() {
+function SaveBar({ onSave, saving }: { onSave?: () => void; saving?: boolean }) {
   return (
     <div style={{ marginTop: 12, display: 'flex', gap: 8 }}>
-      <button className="btn btn-primary btn-sm">Save changes</button>
-      <button className="btn btn-sm">Discard</button>
+      <button className="btn btn-primary btn-sm" disabled={saving} onClick={onSave}>
+        {saving ? 'Saving…' : 'Save changes'}
+      </button>
     </div>
   );
 }

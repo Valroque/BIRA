@@ -2,18 +2,13 @@ import type { Knex } from 'knex';
 import { hashPassword } from '../../src/lib/passwordUtils.js';
 
 /**
- * Seed: a single demo tenant (Acme Corp) with four demo users
- * (Jordan = admin, Sam = admin, Morgan = write, Riley = write/locked),
- * three workspaces (Acme Robotics, Nimbus Labs, Polar Tooling), and
- * three projects in the Acme Robotics workspace (Comet, Orbit, Atlas).
+ * Seed:
+ *   1. DreamStreet — primary tenant, with one admin (admin@dreamstreet.io).
+ *      Tenants are seed-only in v1, so this is how DreamStreet exists at all.
+ *   2. Acme Corp — long-standing demo tenant kept for the existing fixture
+ *      surface (workspaces, projects, multi-user role mix).
  *
- * Mirrors what `web/src/fixtures.ts` exposes today so the FE has a
- * recognisable shape if/when it gets pointed at the API. Riley exists
- * pre-locked (`mustResetPassword: true`) so the FE / manual QA can
- * exercise the must-reset gate without first running the admin-reset
- * endpoint.
- *
- * Idempotent: deletes by slug/email before inserting.
+ * Idempotent: wipes by table before inserting.
  */
 export async function seed(knex: Knex): Promise<void> {
   // Wipe in dependency order. Project / membership cascades handle the rest.
@@ -34,6 +29,15 @@ export async function seed(knex: Knex): Promise<void> {
 
   const userRows = (await knex('users')
     .insert([
+      {
+        email: 'admin@dreamstreet.io',
+        passwordHash: standardPasswordHash,
+        firstName: 'Dream',
+        lastName: 'Admin',
+        phone: null,
+        isActive: true,
+        mustResetPassword: false,
+      },
       {
         email: 'jordan@acme.com',
         passwordHash: standardPasswordHash,
@@ -80,28 +84,42 @@ export async function seed(knex: Knex): Promise<void> {
     return id;
   };
 
-  // ── Tenant ───────────────────────────────────────────────────────────
-  const [acmeCorp] = (await knex('tenants')
-    .insert({
-      slug: 'acme-corp',
-      name: 'Acme Corp',
-      letter: 'A',
-      color: '#4f46e5',
-      bg: '#e0e7ff',
-      plan: 'free',
-      status: 'active',
-    })
+  // ── Tenants ──────────────────────────────────────────────────────────
+  const tenantRows = (await knex('tenants')
+    .insert([
+      {
+        slug: 'dreamstreet',
+        name: 'DreamStreet',
+        letter: 'D',
+        color: '#4f46e5',
+        bg: '#e0e7ff',
+        plan: 'free',
+        status: 'active',
+      },
+      {
+        slug: 'acme-corp',
+        name: 'Acme Corp',
+        letter: 'A',
+        color: '#0891b2',
+        bg: '#cffafe',
+        plan: 'free',
+        status: 'active',
+      },
+    ])
     .returning(['id', 'slug'])) as Array<{ id: string; slug: string }>;
 
+  const tenantBySlug = new Map(tenantRows.map((t) => [t.slug, t.id]));
+  const dreamStreetId = tenantBySlug.get('dreamstreet')!;
+  const acmeCorpId = tenantBySlug.get('acme-corp')!;
+
   // ── Tenant memberships ───────────────────────────────────────────────
-  // Jordan + Sam are admins (Sam exists so admin-vs-admin flows like
-  // self-target rejection have a second admin to act as). Morgan is
-  // `write`. Riley is `write` and pre-locked.
+  // DreamStreet has one admin. Acme has the multi-role demo cast.
   await knex('tenant_memberships').insert([
-    { userId: idFor('jordan@acme.com'), tenantId: acmeCorp.id, role: 'admin', status: 'active' },
-    { userId: idFor('sam@acme.com'), tenantId: acmeCorp.id, role: 'admin', status: 'active' },
-    { userId: idFor('morgan@acme.com'), tenantId: acmeCorp.id, role: 'write', status: 'active' },
-    { userId: idFor('riley@acme.com'), tenantId: acmeCorp.id, role: 'write', status: 'active' },
+    { userId: idFor('admin@dreamstreet.io'), tenantId: dreamStreetId, role: 'admin', status: 'active' },
+    { userId: idFor('jordan@acme.com'), tenantId: acmeCorpId, role: 'admin', status: 'active' },
+    { userId: idFor('sam@acme.com'), tenantId: acmeCorpId, role: 'admin', status: 'active' },
+    { userId: idFor('morgan@acme.com'), tenantId: acmeCorpId, role: 'write', status: 'active' },
+    { userId: idFor('riley@acme.com'), tenantId: acmeCorpId, role: 'write', status: 'active' },
   ]);
 
   // ── Workspaces ───────────────────────────────────────────────────────
@@ -111,7 +129,7 @@ export async function seed(knex: Knex): Promise<void> {
     { slug: 'polar', name: 'Polar Tooling', letter: 'P', color: '#9333ea', bg: '#f3e8ff' },
   ];
   const workspaces = (await knex('workspaces')
-    .insert(workspacesSeed.map((w) => ({ ...w, tenantId: acmeCorp.id })))
+    .insert(workspacesSeed.map((w) => ({ ...w, tenantId: acmeCorpId })))
     .returning(['id', 'slug'])) as Array<{ id: string; slug: string }>;
 
   const acmeWorkspace = workspaces.find((w) => w.slug === 'acme');
@@ -163,11 +181,12 @@ export async function seed(knex: Knex): Promise<void> {
   // eslint-disable-next-line no-console
   console.log(
     [
-      'Seeded: 1 tenant (acme-corp), 3 workspaces, 3 projects, and 4 users:',
-      '  jordan@acme.com  / password123        (admin)',
-      '  sam@acme.com     / password123        (admin)',
-      '  morgan@acme.com  / password123        (write)',
-      '  riley@acme.com   / temp-riley-1234    (write, mustResetPassword=true)',
+      'Seeded: 2 tenants (dreamstreet, acme-corp), 3 workspaces, 3 projects, and 5 users:',
+      '  admin@dreamstreet.io / password123        (dreamstreet admin)',
+      '  jordan@acme.com      / password123        (acme admin)',
+      '  sam@acme.com         / password123        (acme admin)',
+      '  morgan@acme.com      / password123        (acme write)',
+      '  riley@acme.com       / temp-riley-1234    (acme write, mustResetPassword=true)',
     ].join('\n')
   );
 }

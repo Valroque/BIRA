@@ -540,15 +540,27 @@ export interface Tenant {
   memberCount: number;
   /** Effective tenant role of the current user. */
   role: TenantRole;
+  /** Active/deactivated lifecycle state. Optional — absent on fixture seeds. */
+  status?: 'active' | 'deactivated';
 }
 
 export const TENANTS: Tenant[] = [
   {
+    slug: 'dreamstreet',
+    name: 'DreamStreet',
+    letter: 'D',
+    color: '#4f46e5',
+    bg: '#e0e7ff',
+    workspaceCount: 0,
+    memberCount: 1,
+    role: 'admin',
+  },
+  {
     slug: 'acme-corp',
     name: 'Acme Corp',
     letter: 'A',
-    color: '#4f46e5',
-    bg: '#e0e7ff',
+    color: '#0891b2',
+    bg: '#cffafe',
     workspaceCount: 3,
     memberCount: 6,
     role: 'admin',
@@ -639,6 +651,9 @@ export interface TenantMember {
 
 /** Tenant-keyed roster. Single source of truth for who exists in a tenant. */
 export const TENANT_MEMBERS: Record<string, TenantMember[]> = {
+  'dreamstreet': [
+    { email: 'admin@dreamstreet.io', name: 'Dream Admin', tenantRole: 'admin', lastSeen: 'just now', status: 'active' },
+  ],
   'acme-corp': [
     { email: 'jordan@acme.com', name: 'Jordan Lee',  tenantRole: 'admin', lastSeen: 'just now',    status: 'active' },
     { email: 'maya@acme.com',   name: 'Maya Chen',   tenantRole: 'write', lastSeen: '12 min ago',  status: 'active' },

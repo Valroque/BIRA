@@ -1,20 +1,9 @@
 // Workspace projects — runtime state, scoped per (tenant, workspace).
 //
-// Holds the full projects list (seeds + user-added) in component state and
-// persists it to localStorage. Seed projects are auto-backfilled on load if
-// the persisted list is missing them — so the demo workspace stays usable
-// across schema changes, but any user edit to a seed (rename, archive,
-// workflow re-assignment, etc.) sticks.
-//
-// Every consumer that used to read PROJECT_INFO / PROJECT_WORKFLOWS /
-// PROJECT_MEMBERS now goes through `useProjects()` so newly-created or
-// edited projects appear everywhere (sidebar, board, list, filters, …)
-// without each surface knowing about it.
-//
-// The provider is mounted inside `WorkspaceLayout` (App.tsx) with
-// `key={`${tenant}/${workspace}`}`, so navigating between workspaces (or
-// tenants) remounts it with the new pair's storage key + seed. The old
-// `bira:projects:<workspace>` key is abandoned (no migration in Phase 0).
+// Fetches from the API on mount. Falls back to SEED_PROJECTS for the demo
+// `acme-corp/acme` workspace when the API returns an empty list (keeps the
+// prototype usable against a fresh DB). Mounted inside `WorkspaceLayout`
+// (App.tsx) with `key={`${tenant}/${workspace}`}`.
 
 import {
   createContext, useCallback, useContext, useEffect, useState,
@@ -24,46 +13,12 @@ import {
   SEED_PROJECTS,
   type IssueTypeLetter, type Project,
 } from '../fixtures';
+import {
+  listProjects as apiListProjects,
+  createProject as apiCreateProject,
+} from '../api/projects';
 
-/** localStorage key for the full project list in a given (tenant, workspace). */
-const storageKey = (tenant: string, workspace: string) =>
-  `bira:projects:${tenant}:${workspace}`;
-
-/**
- * Demo `acme-corp/acme` workspace ships with seed projects so the prototype
- * isn't empty on first load. Other workspaces start with no projects until
- * the user creates one — matching the behavior of a fresh tenant.
- */
-const seedFor = (tenant: string, workspace: string): Project[] =>
-  tenant === 'acme-corp' && workspace === 'acme' ? SEED_PROJECTS : [];
-
-function isValidProject(p: unknown): p is Project {
-  return !!p && typeof (p as Project).slug === 'string'
-    && typeof (p as Project).name === 'string'
-    && typeof (p as Project).key === 'string';
-}
-
-/** Load + backfill missing seeds. Returns the persisted list, with any seed
- *  slugs not present in storage prepended so the workspace is never missing
- *  its expected starting projects. */
-function loadProjects(tenant: string, workspace: string): Project[] {
-  const seeds = seedFor(tenant, workspace);
-  let stored: Project[] = [];
-  try {
-    const raw = localStorage.getItem(storageKey(tenant, workspace));
-    if (raw) {
-      const parsed = JSON.parse(raw);
-      if (Array.isArray(parsed)) stored = parsed.filter(isValidProject);
-    }
-  } catch {
-    // ignore — fall through to seeds-only.
-  }
-  const presentSlugs = new Set(stored.map((p) => p.slug));
-  const missingSeeds = seeds.filter((s) => !presentSlugs.has(s.slug));
-  return [...missingSeeds, ...stored];
-}
-
-/** Fields the create-project form supplies. The provider fills the rest. */
+/** Fields the create-project form supplies. */
 export interface AddProjectInput {
   slug: string;
   name: string;
@@ -79,14 +34,15 @@ export interface AddProjectInput {
 }
 
 export interface ProjectsCtxValue {
-  /** Seeded projects + user-added projects (in that order). */
+  /** Projects returned by the API (or seeded for the demo workspace). */
   projects: Project[];
+  loading: boolean;
+  error: string | null;
   /** Lookup by slug. Returns undefined for unknown slugs. */
   getProject: (slug: string) => Project | undefined;
-  /** Append a new project. Returns the newly-created `Project`. */
-  addProject: (input: AddProjectInput) => Project;
-  /** Patch any field on an existing project (seed or user-added). No-op if
-   *  the slug isn't found. */
+  /** Create a new project via the API. Returns the newly-created Project. */
+  addProject: (input: AddProjectInput) => Promise<Project>;
+  /** Patch any field on an existing project (local state only — no API call). */
   updateProject: (slug: string, patch: Partial<Project>) => void;
   /** Projects where `teamSlug` has been added. */
   projectsForTeam: (teamSlug: string) => Project[];
@@ -98,31 +54,66 @@ const ProjectsContext = createContext<ProjectsCtxValue | undefined>(undefined);
 
 const ALL_TYPES: IssueTypeLetter[] = ['T', 'B', 'S', 'E'];
 
-export function ProjectsProvider({ tenant, workspace, children }: { tenant: string; workspace: string; children: ReactNode }) {
-  const [projects, setProjects] = useState<Project[]>(() => loadProjects(tenant, workspace));
+export function ProjectsProvider({
+  tenant, workspace, children,
+}: {
+  tenant: string; workspace: string; children: ReactNode;
+}) {
+  const [projects, setProjects] = useState<Project[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    try {
-      localStorage.setItem(storageKey(tenant, workspace), JSON.stringify(projects));
-    } catch {
-      // Quota / privacy mode — best-effort, ignore.
-    }
-  }, [tenant, workspace, projects]);
+    if (!tenant || !workspace) { setLoading(false); return; }
+    setLoading(true);
+    apiListProjects(tenant, workspace)
+      .then((ps) => {
+        // Fall back to seed projects for the demo workspace when the DB is empty.
+        if (ps.length === 0 && tenant === 'acme-corp' && workspace === 'acme') {
+          setProjects(SEED_PROJECTS);
+        } else {
+          setProjects(ps);
+        }
+        setError(null);
+      })
+      .catch((err) => {
+        setError(err instanceof Error ? err.message : 'Failed to load projects');
+        // Still fall back to seeds for the demo workspace so the prototype stays usable.
+        if (tenant === 'acme-corp' && workspace === 'acme') {
+          setProjects(SEED_PROJECTS);
+        }
+      })
+      .finally(() => setLoading(false));
+  }, [tenant, workspace]);
 
   const getProject = useCallback(
     (slug: string) => projects.find((p) => p.slug === slug),
     [projects],
   );
 
-  const addProject = useCallback((input: AddProjectInput): Project => {
-    const next: Project = {
-      ...input,
-      status: 'active',
-      createdAt: new Date().toISOString(),
+  const addProject = useCallback(async (input: AddProjectInput): Promise<Project> => {
+    // Strip FE-only fields before sending to the API.
+    const apiInput = {
+      slug: input.slug,
+      key: input.key,
+      name: input.name,
+      letter: input.letter,
+      color: input.color,
+      bg: input.bg,
+      description: input.description,
     };
-    setProjects((prev) => [...prev, next]);
-    return next;
-  }, []);
+    const created = await apiCreateProject(tenant, workspace, apiInput);
+    // Override with the richer input values the form supplied (workflows, teamSlugs, etc.)
+    const enriched: Project = {
+      ...created,
+      workflows: input.workflows,
+      teamSlugs: input.teamSlugs,
+      userEmails: input.userEmails,
+      createdByEmail: input.createdByEmail,
+    };
+    setProjects((prev) => [...prev, enriched]);
+    return enriched;
+  }, [tenant, workspace]);
 
   const updateProject = useCallback((slug: string, patch: Partial<Project>) => {
     setProjects((prev) => prev.map((p) => (p.slug === slug ? { ...p, ...patch } : p)));
@@ -147,7 +138,8 @@ export function ProjectsProvider({ tenant, workspace, children }: { tenant: stri
   );
 
   const value: ProjectsCtxValue = {
-    projects, getProject, addProject, updateProject, projectsForTeam, projectsUsingWorkflow,
+    projects, loading, error, getProject, addProject, updateProject,
+    projectsForTeam, projectsUsingWorkflow,
   };
 
   return <ProjectsContext.Provider value={value}>{children}</ProjectsContext.Provider>;

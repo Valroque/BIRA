@@ -195,11 +195,11 @@ function CreateProjectModal({ onClose }: { onClose: () => void }) {
 
   const canSubmit = !!slug && slug.length >= 2 && !error && key.length >= 2;
 
-  const submit = (e: FormEvent) => {
+  const submit = async (e: FormEvent) => {
     e.preventDefault();
     if (!canSubmit) return;
     const palette = pickProjectColor(slug);
-    const created = addProject({
+    const created = await addProject({
       slug,
       name: name.trim(),
       key,
