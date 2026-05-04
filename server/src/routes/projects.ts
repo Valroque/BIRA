@@ -11,6 +11,7 @@ import { listProjects } from '../usecases/projects/listProjects.js';
 import { createProject } from '../usecases/projects/createProject.js';
 import * as projectService from '../services/projectService.js';
 import { PROJECT_STATUSES } from '../lib/constants.js';
+import projectIssuesRouter from './projectIssues.js';
 
 const router: Router = Router({ mergeParams: true });
 
@@ -74,5 +75,10 @@ router.get(
     res.json({ success: true, data: project });
   })
 );
+
+// /api/tenants/:t/workspaces/:w/projects/:projectSlug/issues — issue routes
+// (workspace scope is already resolved by the parent router; project lookup
+// happens inside the issues router).
+router.use('/:projectSlug/issues', projectIssuesRouter);
 
 export default router;

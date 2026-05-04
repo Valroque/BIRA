@@ -179,6 +179,55 @@ unarchived.
 Slug is intentionally immutable — it's load-bearing in URLs and FE
 localStorage keys; renaming is a separate migration story.
 
+### Issues (slice 1 — basic CRUD)
+
+Issues live under a project. The human-readable `key` (e.g. `CMT-241`)
+is allocated atomically per project via `projects.next_issue_number`
+inside the same transaction as the insert, so concurrent creates
+within a project never collide. Keys are unique within a workspace.
+
+This slice intentionally covers basic CRUD only. **Hierarchy
+(parent/children), schedules (start/end/estimate), themes, and
+issue links land in later slices.** **Status transitions are NOT
+validated against any workflow yet** — `status` is freely settable
+on create and update; the workflow guard arrives in slice 5.
+
+| Method | Path                                                                    | Auth                          |
+|--------|-------------------------------------------------------------------------|-------------------------------|
+| GET    | `/api/tenants/:t/workspaces/:w/issues`                                  | workspace member              |
+| GET    | `/api/tenants/:t/workspaces/:w/projects/:p/issues`                      | workspace member              |
+| POST   | `/api/tenants/:t/workspaces/:w/projects/:p/issues`                      | workspace `write`             |
+| GET    | `/api/tenants/:t/workspaces/:w/projects/:p/issues/:key`                 | workspace member              |
+| PATCH  | `/api/tenants/:t/workspaces/:w/projects/:p/issues/:key`                 | workspace `write`             |
+
+Both list endpoints accept query params: `status`, `type`,
+`assigneeUserId`, `label`, `priority`. The workspace-scoped list
+additionally accepts `projectId`.
+
+`POST` body: `{ type, title, description?, status?, priority?,
+assigneeUserId?, labels? }`. `type` is required; defaults are
+`status='backlog'`, `priority='none'`, `labels=[]`,
+`description=null`, `assigneeUserId=null`. The reporter is the
+calling user.
+
+`PATCH` body: any subset of `{ title, description, status,
+priority, assigneeUserId, labels }`; at least one field is
+required.
+
+Response shape (slice 1):
+```ts
+{
+  id, key, workspaceId, projectId,
+  type, status, priority, title,
+  description: string | null,
+  labels: string[],
+  assigneeUserId: string | null,
+  reporterUserId: string | null,
+  seq: number,
+  createdAt, updatedAt
+}
+```
+
 ## Quickstart
 
 ```bash
@@ -215,17 +264,18 @@ Postgres test database (`bira_test`). Isolation comes from `truncateAll()`
 in `beforeEach`; vitest runs a single forked worker so there's no
 cross-file interference.
 
-**Coverage** (27 files, 179 tests):
+**Coverage** (33 files, 234 tests):
 
 | Area | Files |
 |---|---|
-| Unit | `tests/unit/` — passwordUtils, errorHandler, roleAtLeast, User entity |
+| Unit | `tests/unit/` — passwordUtils, errorHandler, roleAtLeast, User entity, Issue entity |
 | Auth | `tests/auth/` — register, login, refresh-token, profile, updateProfile, changePassword |
 | Middleware | `tests/middleware/` — passwordResetGate (423 gate) |
 | Tenants | `tests/tenants/` — list, create, get, deactivate, reactivate, deactivated gate |
 | Tenant members | `tests/admin/` — admin password reset |
 | Workspaces | `tests/workspaces/` — list, create, get, update, archive, unarchive |
 | Projects | `tests/projects/` — list, create, get |
+| Issues | `tests/issues/` — create, get, list (project + workspace), update, key allocation (concurrency) |
 
 ```bash
 # one-time: copy the test env file and set up bira_test DB
@@ -250,8 +300,10 @@ invariants.
 
 ## What's NOT here yet
 
-Issues, themes, workflows, comments, teams, project memberships,
-invites, audit log, rate limiting. Each is a future phase.
+Issue hierarchy (parent/children), issue schedules + estimate,
+issue links (`relates`, `depends on`), themes, workflows + the
+status-transition guard, comments, teams, project memberships,
+invites, audit log, rate limiting. Each is a future slice.
 
 The frontend under `web/` is **not** wired to this API yet — it
 still reads from `web/src/fixtures.ts`. Wiring is a separate phase
