@@ -179,18 +179,18 @@ unarchived.
 Slug is intentionally immutable — it's load-bearing in URLs and FE
 localStorage keys; renaming is a separate migration story.
 
-### Issues (slice 1 — basic CRUD)
+### Issues (slice 1 — basic CRUD; slice 2 — hierarchy)
 
 Issues live under a project. The human-readable `key` (e.g. `CMT-241`)
 is allocated atomically per project via `projects.next_issue_number`
 inside the same transaction as the insert, so concurrent creates
 within a project never collide. Keys are unique within a workspace.
 
-This slice intentionally covers basic CRUD only. **Hierarchy
-(parent/children), schedules (start/end/estimate), themes, and
-issue links land in later slices.** **Status transitions are NOT
-validated against any workflow yet** — `status` is freely settable
-on create and update; the workflow guard arrives in slice 5.
+Slice 2 adds parent/child hierarchy. **Schedules
+(start/end/estimate), themes, and issue links land in later
+slices.** **Status transitions are NOT validated against any
+workflow yet** — `status` is freely settable on create and update;
+the workflow guard arrives in slice 5.
 
 | Method | Path                                                                    | Auth                          |
 |--------|-------------------------------------------------------------------------|-------------------------------|
@@ -199,22 +199,38 @@ on create and update; the workflow guard arrives in slice 5.
 | POST   | `/api/tenants/:t/workspaces/:w/projects/:p/issues`                      | workspace `write`             |
 | GET    | `/api/tenants/:t/workspaces/:w/projects/:p/issues/:key`                 | workspace member              |
 | PATCH  | `/api/tenants/:t/workspaces/:w/projects/:p/issues/:key`                 | workspace `write`             |
+| PATCH  | `/api/tenants/:t/workspaces/:w/projects/:p/issues/:key/parent`          | workspace `write`             |
 
 Both list endpoints accept query params: `status`, `type`,
 `assigneeUserId`, `label`, `priority`. The workspace-scoped list
 additionally accepts `projectId`.
 
 `POST` body: `{ type, title, description?, status?, priority?,
-assigneeUserId?, labels? }`. `type` is required; defaults are
+assigneeUserId?, labels?, parent? }`. `type` is required; defaults are
 `status='backlog'`, `priority='none'`, `labels=[]`,
 `description=null`, `assigneeUserId=null`. The reporter is the
-calling user.
+calling user. `parent` is an issue key (e.g. `'CMT-7'`); see
+hierarchy rules below.
 
 `PATCH` body: any subset of `{ title, description, status,
 priority, assigneeUserId, labels }`; at least one field is
-required.
+required. Note: `parent` is **not** accepted here — hierarchy
+mutations go through the dedicated `PATCH /:key/parent` endpoint
+to keep the type / scope / cycle validation in one place.
 
-Response shape (slice 1):
+`PATCH /:key/parent` body: `{ parent: string | null }` where
+`parent` is an issue key or `null` to clear. Hierarchy rules:
+
+- **Epic** is top-level — cannot have a parent.
+- **Story** must have an Epic parent — cannot be cleared, cannot be
+  created without one.
+- **Task** / **Bug** can be parented under an Epic or Story, or be
+  orphan leaves; clearing is allowed.
+- Tasks and Bugs are always leaves — they cannot be parents.
+- Parent must live in the same workspace AND the same project.
+- Self-parent and cycles are rejected.
+
+Response shape (slice 2):
 ```ts
 {
   id, key, workspaceId, projectId,
@@ -223,6 +239,9 @@ Response shape (slice 1):
   labels: string[],
   assigneeUserId: string | null,
   reporterUserId: string | null,
+  parentIssueId: string | null,    // internal uuid (kept for round-trip)
+  parent: string | null,           // parent issue KEY, e.g. 'CMT-7'
+  children: string[],              // child issue KEYS, ordered by seq asc
   seq: number,
   createdAt, updatedAt
 }
@@ -264,7 +283,7 @@ Postgres test database (`bira_test`). Isolation comes from `truncateAll()`
 in `beforeEach`; vitest runs a single forked worker so there's no
 cross-file interference.
 
-**Coverage** (33 files, 234 tests):
+**Coverage** (34 files, 268 tests):
 
 | Area | Files |
 |---|---|
@@ -275,7 +294,7 @@ cross-file interference.
 | Tenant members | `tests/admin/` — admin password reset |
 | Workspaces | `tests/workspaces/` — list, create, get, update, archive, unarchive |
 | Projects | `tests/projects/` — list, create, get |
-| Issues | `tests/issues/` — create, get, list (project + workspace), update, key allocation (concurrency) |
+| Issues | `tests/issues/` — create, get, list (project + workspace), update, key allocation (concurrency), set parent (hierarchy) |
 
 ```bash
 # one-time: copy the test env file and set up bira_test DB
@@ -300,10 +319,10 @@ invariants.
 
 ## What's NOT here yet
 
-Issue hierarchy (parent/children), issue schedules + estimate,
-issue links (`relates`, `depends on`), themes, workflows + the
-status-transition guard, comments, teams, project memberships,
-invites, audit log, rate limiting. Each is a future slice.
+Issue schedules + estimate, issue links (`relates`,
+`depends on`), themes, workflows + the status-transition guard,
+comments, teams, project memberships, invites, audit log, rate
+limiting. Each is a future slice.
 
 The frontend under `web/` is **not** wired to this API yet — it
 still reads from `web/src/fixtures.ts`. Wiring is a separate phase

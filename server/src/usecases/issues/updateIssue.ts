@@ -21,6 +21,11 @@ export interface UpdateIssuePatch {
  * Update an issue by id. Status transitions are NOT validated against any
  * workflow yet — slice 5 will introduce the workflow guard. For now any
  * value within the closed STATUSES enum is accepted.
+ *
+ * `parentIssueId` is intentionally NOT in the patch shape — hierarchy
+ * mutations go through `setIssueParent` so the type-pair / scope /
+ * cycle validation lives in one place. The route schema also rejects
+ * `parent` here.
  */
 export async function updateIssue(
   workspaceId: string,

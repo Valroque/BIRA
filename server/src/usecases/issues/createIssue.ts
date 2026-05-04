@@ -10,6 +10,7 @@ import {
   type StatusId,
   type Priority,
 } from '../../lib/constants.js';
+import { parentIsRequired, validateParentAssignment } from './hierarchyRules.js';
 
 export interface CreateIssueInput {
   workspaceId: string;
@@ -22,6 +23,7 @@ export interface CreateIssueInput {
   labels?: string[];
   assigneeUserId?: string | null;
   reporterUserId?: string | null;
+  parentIssueId?: string | null;
 }
 
 interface ProjectRowMin {
@@ -57,6 +59,15 @@ export async function createIssue(input: CreateIssueInput): Promise<Issue> {
     throw new AppError('title must be 500 characters or fewer', 400);
   }
 
+  // Stories require an Epic parent at creation. Other types accept an
+  // optional parent (validated below inside the trx so it sees the
+  // same projects/issues snapshot as the insert).
+  if (input.parentIssueId === undefined || input.parentIssueId === null) {
+    if (parentIsRequired(input.type)) {
+      throw new AppError('Stories must be created under an Epic parent', 400);
+    }
+  }
+
   return db.transaction(async (trx) => {
     // Lock the project row + verify it belongs to the requested workspace.
     // FOR UPDATE serialises concurrent createIssue calls within a single
@@ -74,6 +85,20 @@ export async function createIssue(input: CreateIssueInput): Promise<Issue> {
       // Treat cross-workspace project access as not-found, matching the
       // behaviour of the projects router (no information leak).
       throw new AppError(`Project '${input.projectId}' not found in this workspace`, 404);
+    }
+
+    // Validate parent if one is provided. Run inside the trx so the
+    // parent existence + project-scope checks are atomic with the
+    // insert (no race where a parent disappears between the two).
+    if (input.parentIssueId) {
+      await validateParentAssignment({
+        childIssueId: null,
+        childType: input.type,
+        parentIssueId: input.parentIssueId,
+        workspaceId: input.workspaceId,
+        projectId: input.projectId,
+        trx,
+      });
     }
 
     const seq = project.nextIssueNumber;
@@ -97,6 +122,7 @@ export async function createIssue(input: CreateIssueInput): Promise<Issue> {
         labels: input.labels ?? [],
         assigneeUserId: input.assigneeUserId ?? null,
         reporterUserId: input.reporterUserId ?? null,
+        parentIssueId: input.parentIssueId ?? null,
       },
       trx
     );

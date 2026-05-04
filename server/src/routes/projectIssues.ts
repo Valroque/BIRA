@@ -12,7 +12,11 @@ import { createIssue } from '../usecases/issues/createIssue.js';
 import { getIssue } from '../usecases/issues/getIssue.js';
 import { listIssuesByProject } from '../usecases/issues/listIssues.js';
 import { updateIssue } from '../usecases/issues/updateIssue.js';
+import { setIssueParent } from '../usecases/issues/setIssueParent.js';
+import * as issueService from '../services/issueService.js';
 import { ISSUE_TYPES, STATUSES, PRIORITIES } from '../lib/constants.js';
+
+const ISSUE_KEY_RE = /^[A-Z0-9]+-\d+$/;
 
 // mergeParams: parent (tenants.ts → workspaces/:w/projects/:projectSlug)
 // holds :tenantSlug, :workspaceSlug, :projectSlug — all needed here.
@@ -26,6 +30,13 @@ const CreateIssueSchema = z.object({
   priority: z.enum(PRIORITIES).optional(),
   labels: z.array(z.string().min(1).max(64)).max(64).optional(),
   assigneeUserId: z.string().uuid().nullable().optional(),
+  // External callers reference issues by key (e.g. 'CMT-7'); the route
+  // resolves this to a uuid before handing off to the usecase.
+  parent: z.string().regex(ISSUE_KEY_RE).nullable().optional(),
+});
+
+const SetParentSchema = z.object({
+  parent: z.string().regex(ISSUE_KEY_RE).nullable(),
 });
 
 const UpdateIssueSchema = z
@@ -81,13 +92,34 @@ router.post(
     }
     const project = await resolveProject(req);
     const input = CreateIssueSchema.parse(req.body);
+    // Resolve `parent` (issue key) → uuid. We do this in the route so
+    // the usecase signature stays uuid-typed and the FE-friendly key
+    // form lives in one place.
+    let parentIssueId: string | null | undefined = undefined;
+    if (input.parent !== undefined) {
+      if (input.parent === null) {
+        parentIssueId = null;
+      } else {
+        const parent = await issueService.findByKey(req.scope.workspaceId, input.parent);
+        if (!parent) {
+          throw new AppError(`Parent issue '${input.parent}' not found`, 400);
+        }
+        parentIssueId = parent.id;
+      }
+    }
+    const { parent: _ignored, ...rest } = input;
+    void _ignored;
     const issue = await createIssue({
-      ...input,
+      ...rest,
       workspaceId: req.scope.workspaceId,
       projectId: project.id,
       reporterUserId: req.user.id,
+      parentIssueId,
     });
-    res.status(201).json({ success: true, data: issue });
+    // createIssue returns the entity; wrap it in the IssueView shape
+    // so create + get + list responses are uniform.
+    const view = await getIssue(req.scope.workspaceId, issue.key);
+    res.status(201).json({ success: true, data: view ?? issue });
   })
 );
 
@@ -117,7 +149,46 @@ router.patch(
     await resolveProject(req);
     const patch = UpdateIssueSchema.parse(req.body);
     const issue = await updateIssue(req.scope.workspaceId, req.params.key, patch);
-    res.json({ success: true, data: issue });
+    // Wrap as IssueView so the response shape matches GET / list.
+    const view = await getIssue(req.scope.workspaceId, issue.key);
+    res.json({ success: true, data: view ?? issue });
+  })
+);
+
+// PATCH /api/tenants/:t/workspaces/:w/projects/:projectSlug/issues/:key/parent
+//
+// Hierarchy mutations live here, NOT on the general PATCH /:key, so the
+// type-pair / scope / cycle validation is concentrated in setIssueParent.
+router.patch(
+  '/:key/parent',
+  authorize('write'),
+  requireActiveTenant,
+  requireActiveWorkspace,
+  asyncHandler(async (req, res) => {
+    if (!req.scope?.workspaceId) throw new AppError('Workspace scope missing', 500);
+    await resolveProject(req);
+    const body = SetParentSchema.parse(req.body);
+
+    const child = await issueService.findByKey(req.scope.workspaceId, req.params.key);
+    if (!child) throw new AppError(`Issue '${req.params.key}' not found`, 404);
+
+    let parentIssueId: string | null = null;
+    if (body.parent !== null) {
+      const parent = await issueService.findByKey(req.scope.workspaceId, body.parent);
+      if (!parent) {
+        throw new AppError(`Parent issue '${body.parent}' not found`, 400);
+      }
+      parentIssueId = parent.id;
+    }
+
+    await setIssueParent({
+      workspaceId: req.scope.workspaceId,
+      issueId: child.id,
+      parentIssueId,
+    });
+
+    const view = await getIssue(req.scope.workspaceId, child.key);
+    res.json({ success: true, data: view });
   })
 );
 
