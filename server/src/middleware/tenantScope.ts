@@ -34,12 +34,40 @@ export const resolveTenantScope: RequestHandler = async (req, _res, next) => {
       tenantId: tenant.id,
       tenantSlug: tenant.slug,
       tenantRole: tm.role,
+      tenantStatus: tenant.status,
       role: tm.role,
     };
     next();
   } catch (err) {
     next(err);
   }
+};
+
+/**
+ * requireActiveTenant — gate write paths on tenant status. Mount on any
+ * handler that mutates tenant-scoped data (workspace create / update /
+ * archive / unarchive, project create, member admin actions, etc.);
+ * deactivated tenants are frozen and return 409 here. Must run after
+ * `resolveTenantScope`.
+ *
+ * Intentionally NOT mounted on `POST /api/tenants/:t/reactivate` — that's
+ * the only escape hatch out of the deactivated state.
+ */
+export const requireActiveTenant: RequestHandler = (req, _res, next) => {
+  if (!req.scope) {
+    next(new AppError('Tenant scope must be resolved first', 500));
+    return;
+  }
+  if (req.scope.tenantStatus !== 'active') {
+    next(
+      new AppError(
+        `Tenant '${req.scope.tenantSlug}' is deactivated — reactivate it before making changes`,
+        409
+      )
+    );
+    return;
+  }
+  next();
 };
 
 /**

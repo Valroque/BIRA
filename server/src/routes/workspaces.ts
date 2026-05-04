@@ -1,7 +1,11 @@
 import { Router } from 'express';
 import { z } from 'zod';
 import { asyncHandler } from '../middleware/errorHandler.js';
-import { authorize, resolveWorkspaceScope } from '../middleware/tenantScope.js';
+import {
+  authorize,
+  requireActiveTenant,
+  resolveWorkspaceScope,
+} from '../middleware/tenantScope.js';
 import { AppError } from '../lib/errors.js';
 import { roleAtLeast } from '../lib/constants.js';
 import * as workspaceService from '../services/workspaceService.js';
@@ -59,6 +63,7 @@ router.get(
 router.post(
   '/',
   authorize('admin'),
+  requireActiveTenant,
   asyncHandler(async (req, res) => {
     if (!req.scope) throw new AppError('Scope missing', 500);
     const input = CreateWorkspaceSchema.parse(req.body);
@@ -103,6 +108,7 @@ router.patch(
   '/:workspaceSlug',
   resolveWorkspaceScope,
   authorize('admin'),
+  requireActiveTenant,
   asyncHandler(async (req, res) => {
     if (!req.scope?.workspaceId) throw new AppError('Scope missing', 500);
     const patch = UpdateWorkspaceSchema.parse(req.body);
@@ -122,6 +128,7 @@ router.patch(
 router.post(
   '/:workspaceSlug/archive',
   resolveWorkspaceScope,
+  requireActiveTenant,
   asyncHandler(async (req, res) => {
     if (!req.scope?.workspaceId) throw new AppError('Scope missing', 500);
     if (!roleAtLeast(req.scope.tenantRole, 'admin')) {
@@ -137,6 +144,7 @@ router.post(
 router.post(
   '/:workspaceSlug/unarchive',
   resolveWorkspaceScope,
+  requireActiveTenant,
   asyncHandler(async (req, res) => {
     if (!req.scope?.workspaceId) throw new AppError('Scope missing', 500);
     if (!roleAtLeast(req.scope.tenantRole, 'admin')) {
