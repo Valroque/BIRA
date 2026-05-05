@@ -29,6 +29,14 @@ const ISSUE_KEY_RE = /^[A-Z0-9]+-\d+$/;
 // holds :tenantSlug, :workspaceSlug, :projectSlug — all needed here.
 const router: Router = Router({ mergeParams: true });
 
+// Slice C — `attachment:<uuid>` ref schema, shared by description-attachment
+// fields on create + update. Keep in sync with the same regex on comments.ts.
+const DescriptionAttachmentRefSchema = z
+  .string()
+  .regex(/^attachment:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i, {
+    message: 'Must be an attachment:<uuid> ref',
+  });
+
 const CreateIssueSchema = z.object({
   type: z.enum(ISSUE_TYPES),
   title: z.string().min(1).max(500),
@@ -51,6 +59,9 @@ const CreateIssueSchema = z.object({
     .nullable()
     .optional(),
   estimate: z.number().int().nonnegative().nullable().optional(),
+  // Slice C — descriptions can carry up to 20 attachment refs. The
+  // workspace-scoped existence check happens in the usecase.
+  descriptionAttachmentIds: z.array(DescriptionAttachmentRefSchema).max(20).optional(),
 });
 
 const SetParentSchema = z.object({
@@ -70,6 +81,8 @@ const UpdateIssueSchema = z
     startDate: z.string().regex(ISO_DATE).nullable().optional(),
     endDate: z.string().regex(ISO_DATE).nullable().optional(),
     estimate: z.number().int().nonnegative().nullable().optional(),
+    // Slice C — replaces the stored array verbatim. `[]` clears it.
+    descriptionAttachmentIds: z.array(DescriptionAttachmentRefSchema).max(20).optional(),
   })
   .refine((p) => Object.values(p).some((v) => v !== undefined), {
     message: 'At least one field must be provided',
@@ -90,6 +103,25 @@ async function resolveProject(req: { scope?: { workspaceId?: string }; params: {
   const project = await projectService.findBySlug(req.scope.workspaceId, slug);
   if (!project) throw new AppError(`Project '${slug}' not found`, 404);
   return project;
+}
+
+/**
+ * Pulls the slug context off `req.scope` for `getIssue` (slice C — needed
+ * to build attachment readUrls). Throws if scope is missing — callers
+ * inside this router are always mounted under the workspace-scope chain
+ * so this is a 500-shaped invariant, not a 4xx.
+ */
+function issueViewCtx(req: { scope?: { tenantSlug?: string; workspaceSlug?: string } }): {
+  tenantSlug: string;
+  workspaceSlug: string;
+} {
+  if (!req.scope?.tenantSlug || !req.scope?.workspaceSlug) {
+    throw new AppError('Tenant/workspace slug missing on scope', 500);
+  }
+  return {
+    tenantSlug: req.scope.tenantSlug,
+    workspaceSlug: req.scope.workspaceSlug,
+  };
 }
 
 // GET /api/tenants/:t/workspaces/:w/projects/:projectSlug/issues
@@ -141,7 +173,7 @@ router.post(
     });
     // createIssue returns the entity; wrap it in the IssueView shape
     // so create + get + list responses are uniform.
-    const view = await getIssue(req.scope.workspaceId, issue.key);
+    const view = await getIssue(req.scope.workspaceId, issue.key, issueViewCtx(req));
     res.status(201).json({ success: true, data: view ?? issue });
   })
 );
@@ -155,7 +187,7 @@ router.get(
     // bogus :projectSlug 404s the way callers expect, even if the key
     // lookup itself is workspace-scoped.
     await resolveProject(req);
-    const issue = await getIssue(req.scope.workspaceId, req.params.key);
+    const issue = await getIssue(req.scope.workspaceId, req.params.key, issueViewCtx(req));
     if (!issue) throw new AppError(`Issue '${req.params.key}' not found`, 404);
     res.json({ success: true, data: issue });
   })
@@ -176,7 +208,7 @@ router.patch(
       actingUserRole: req.scope.role,
     });
     // Wrap as IssueView so the response shape matches GET / list.
-    const view = await getIssue(req.scope.workspaceId, issue.key);
+    const view = await getIssue(req.scope.workspaceId, issue.key, issueViewCtx(req));
     res.json({ success: true, data: view ?? issue });
   })
 );
@@ -213,7 +245,7 @@ router.patch(
       parentIssueId,
     });
 
-    const view = await getIssue(req.scope.workspaceId, child.key);
+    const view = await getIssue(req.scope.workspaceId, child.key, issueViewCtx(req));
     res.json({ success: true, data: view });
   })
 );
@@ -238,7 +270,7 @@ router.post(
       aKey: req.params.key,
       bKey: body.relatedKey,
     });
-    const view = await getIssue(req.scope.workspaceId, req.params.key);
+    const view = await getIssue(req.scope.workspaceId, req.params.key, issueViewCtx(req));
     res.status(200).json({ success: true, data: view });
   })
 );
@@ -260,7 +292,7 @@ router.delete(
       aKey: req.params.key,
       bKey: req.params.relatedKey,
     });
-    const view = await getIssue(req.scope.workspaceId, req.params.key);
+    const view = await getIssue(req.scope.workspaceId, req.params.key, issueViewCtx(req));
     res.status(200).json({ success: true, data: view });
   })
 );
@@ -280,7 +312,7 @@ router.post(
       blockerKey: body.blockerKey,
       dependentKey: req.params.key,
     });
-    const view = await getIssue(req.scope.workspaceId, req.params.key);
+    const view = await getIssue(req.scope.workspaceId, req.params.key, issueViewCtx(req));
     res.status(200).json({ success: true, data: view });
   })
 );
@@ -302,7 +334,7 @@ router.delete(
       blockerKey: req.params.blockerKey,
       dependentKey: req.params.key,
     });
-    const view = await getIssue(req.scope.workspaceId, req.params.key);
+    const view = await getIssue(req.scope.workspaceId, req.params.key, issueViewCtx(req));
     res.status(200).json({ success: true, data: view });
   })
 );

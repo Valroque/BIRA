@@ -11,6 +11,7 @@ import {
   type Priority,
 } from '../../lib/constants.js';
 import { parentIsRequired, validateParentAssignment } from './hierarchyRules.js';
+import { validateAttachmentRefs } from '../../lib/validateAttachmentRefs.js';
 
 export interface CreateIssueInput {
   workspaceId: string;
@@ -27,9 +28,14 @@ export interface CreateIssueInput {
   startDate?: string | null;
   endDate?: string | null;
   estimate?: number | null;
+  // Slice C — `attachment:<uuid>` refs to files in the same workspace.
+  descriptionAttachmentIds?: string[];
 }
 
 const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+// Descriptions tend to carry more inline images than comments — bumped
+// from the 10 used for comment attachments.
+const MAX_DESCRIPTION_ATTACHMENTS = 20;
 
 interface ProjectRowMin {
   id: string;
@@ -92,6 +98,25 @@ export async function createIssue(input: CreateIssueInput): Promise<Issue> {
   if (input.estimate !== undefined && input.estimate !== null) {
     if (!Number.isInteger(input.estimate) || input.estimate < 0) {
       throw new AppError('estimate must be a non-negative integer', 400);
+    }
+  }
+
+  // Slice C — description attachment refs. Allowed on every issue type
+  // (descriptions exist on T/B/S/E alike). Format + workspace-scoped
+  // existence is checked here so the failure points at the bad ref
+  // before we open the trx.
+  if (input.descriptionAttachmentIds !== undefined) {
+    if (!Array.isArray(input.descriptionAttachmentIds)) {
+      throw new AppError('descriptionAttachmentIds must be an array', 400);
+    }
+    if (input.descriptionAttachmentIds.length > MAX_DESCRIPTION_ATTACHMENTS) {
+      throw new AppError(
+        `at most ${MAX_DESCRIPTION_ATTACHMENTS} description attachments are allowed`,
+        400
+      );
+    }
+    if (input.descriptionAttachmentIds.length > 0) {
+      await validateAttachmentRefs(input.workspaceId, input.descriptionAttachmentIds);
     }
   }
 
@@ -162,6 +187,7 @@ export async function createIssue(input: CreateIssueInput): Promise<Issue> {
         startDate: input.startDate ?? null,
         endDate: input.endDate ?? null,
         estimate: input.estimate ?? null,
+        descriptionAttachmentIds: input.descriptionAttachmentIds ?? [],
       },
       trx
     );
