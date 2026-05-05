@@ -187,8 +187,8 @@ inside the same transaction as the insert, so concurrent creates
 within a project never collide. Keys are unique within a workspace.
 
 Slice 2 adds parent/child hierarchy. **Schedules
-(start/end/estimate), themes, and issue links land in later
-slices.** **Status transitions are NOT validated against any
+(start/end/estimate) and issue links land in later slices.**
+**Status transitions are NOT validated against any
 workflow yet** — `status` is freely settable on create and update;
 the workflow guard arrives in slice 5.
 
@@ -283,11 +283,11 @@ Postgres test database (`bira_test`). Isolation comes from `truncateAll()`
 in `beforeEach`; vitest runs a single forked worker so there's no
 cross-file interference.
 
-**Coverage** (34 files, 268 tests):
+**Coverage** (38 files, 299 tests):
 
 | Area | Files |
 |---|---|
-| Unit | `tests/unit/` — passwordUtils, errorHandler, roleAtLeast, User entity, Issue entity |
+| Unit | `tests/unit/` — passwordUtils, errorHandler, roleAtLeast, User entity, Issue entity, File entity |
 | Auth | `tests/auth/` — register, login, refresh-token, profile, updateProfile, changePassword |
 | Middleware | `tests/middleware/` — passwordResetGate (423 gate) |
 | Tenants | `tests/tenants/` — list, create, get, deactivate, reactivate, deactivated gate |
@@ -295,6 +295,7 @@ cross-file interference.
 | Workspaces | `tests/workspaces/` — list, create, get, update, archive, unarchive |
 | Projects | `tests/projects/` — list, create, get |
 | Issues | `tests/issues/` — create, get, list (project + workspace), update, key allocation (concurrency), set parent (hierarchy) |
+| Files | `tests/files/` — upload, download, delete |
 
 ```bash
 # one-time: copy the test env file and set up bira_test DB
@@ -317,12 +318,41 @@ the demo seed from a test — the seed is for manual QA. Factories go
 through real services / usecases so the tests stay honest about
 invariants.
 
+### Files (slice A — filestore abstraction + PG driver)
+
+Files are stored per workspace and streamed back on download.
+
+| Method | Path                                                            | Auth                |
+|--------|-----------------------------------------------------------------|---------------------|
+| POST   | `/api/tenants/:t/workspaces/:w/files`                          | workspace `write`   |
+| GET    | `/api/tenants/:t/workspaces/:w/files/:id`                      | workspace `read`    |
+| DELETE | `/api/tenants/:t/workspaces/:w/files/:id`                      | workspace `write`   |
+
+**`POST`** — multipart/form-data, field name `file`. Max 10 MB per file
+(enforced by multer and a `CHECK` constraint on `files.size`). Returns a
+`FileView` with `{ id, filename, mime, size, sha256, uploaderUserId,
+createdAt, readUrl }`.
+
+**`GET`** — streams raw bytes back with `Content-Type` and
+`Content-Disposition: inline` headers. Does NOT require an active
+workspace (reads from archived workspaces are allowed).
+
+**`DELETE`** — hard delete only. The uploader OR any workspace `admin`
+may delete. Returns `204 No Content`.
+
+**Driver selection** — set `FILESTORE_DRIVER` env var:
+- `pg` (default) — stores bytes in the `file_blobs` Postgres table.
+  No extra infrastructure needed; suitable for dev and small installs.
+- `s3` — stub that throws HTTP 501. Full S3 implementation is deferred
+  pending explicit approval to add the AWS SDK dep.
+
 ## What's NOT here yet
 
 Issue schedules + estimate, issue links (`relates`,
-`depends on`), themes, workflows + the status-transition guard,
-comments, teams, project memberships, invites, audit log, rate
-limiting. Each is a future slice.
+`depends on`), workflows + the status-transition guard, comments,
+teams, project memberships, invites, audit log, rate limiting. Each
+is a future slice. The S3 file-storage driver is stubbed (slice A
+ships PG only).
 
 The frontend under `web/` is **not** wired to this API yet — it
 still reads from `web/src/fixtures.ts`. Wiring is a separate phase

@@ -17,6 +17,9 @@ const { db } = await import('../src/db/knex.js');
 // before parents) just so the TRUNCATE error messages are readable; the
 // CASCADE makes the order strictly unnecessary.
 const TABLES = [
+  'comments',
+  'file_blobs',
+  'files',
   'issues',
   'projects',
   'workspace_memberships',

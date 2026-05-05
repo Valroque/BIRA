@@ -106,23 +106,24 @@ For the product narrative + entity model in plain language, read
     candidates). Only valid when both ends have `type === 'T'`.
   - `duplicates` / `causes` are still deferred. `blocks` is subsumed
     by `depends on` (the inverse view) — there's no separate type.
-- **Themes** are an orthogonal grouping entity:
-  - Flat — no parent theme, no child theme, no theme-to-theme relation.
-  - Connect to issues many-to-many; both sides store the relation
-    (`Theme.issues[]` and `Issue.themes[]`).
-  - No workflow, no end date — themes are long-running.
-- **Symmetric relation storage**: parent/children, relatedTo, and
-  theme membership are all denormalised — the relation lives on both
-  records. Writes (when they exist) must update both sides.
+- **Symmetric relation storage**: parent/children and relatedTo are
+  all denormalised — the relation lives on both records. Writes (when
+  they exist) must update both sides.
 
 ## Out of scope for v1 (do not add without approval)
 
 - Sprints / backlog / burndown
 - Sub-tasks below Task/Bug (the leaf level)
+- **Themes** — there is no "theme" concept in BIRA. Don't reintroduce
+  it (entity, FE chip, BE table, or otherwise).
 - Issue link types other than `relates` and `depends on` (`duplicates`, `causes`, …)
 - Granular roles beyond admin/write/read (no per-feature permissions, no
   resource-level ACLs, no custom role definitions)
-- Notifications, @mentions, watchers, email digests
+- Notifications, watchers, email digests. (Mentions in comments are
+  **in scope** — typed `@user` / `@team` chips, see
+  [`docs/specs/mentions.md`](../../docs/specs/mentions.md). The
+  notification fan-out from `Comment.mentions` is deferred until the
+  notifications phase.)
 - Custom fields and the editor for them
 - Reports, dashboards, charts
 - JQL or any query language
@@ -135,13 +136,18 @@ For the product narrative + entity model in plain language, read
 - **Backend phase started (2026-05-04).** Backend code lives under
   `server/` (Node + TS + Express + Knex + Postgres). Layering is
   ported from ABHA — see `server/README.md`. First slice: tenants,
-  workspaces, users, login. Issues / themes / workflows / boards /
-  comments stay fixture-driven on the FE until their respective
+  workspaces, users, login. Issues / workflows / boards / comments
+  stay fixture-driven on the FE until their respective
   backend phases land. **The FE is not yet wired to the API** —
   don't add `fetch` / `axios` calls from `web/` until the phase
   explicitly says so.
 - **No Docker for the Node app.** Backend runs on the host (`npm run dev`
   in `server/`); Postgres is the only piece in a container locally /
   managed in cloud.
+- **DB foreign keys are UUIDs, not slugs.** PK + FK columns use
+  `uuid` (e.g. `workspaces.tenant_id`, `projects.workspace_id`).
+  Slugs are unique-within-scope strings used only for URLs and
+  human-readable refs in API payloads. Don't add `*_slug` FK columns.
+  Rationale in `docs/decisions.md` (2026-05-04).
 - **No new dependencies** without explicit approval. Keep the dep list tight.
 - **No emojis** in source unless asked.

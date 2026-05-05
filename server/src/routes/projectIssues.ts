@@ -19,6 +19,9 @@ import { addDependency } from '../usecases/issueLinks/addDependency.js';
 import { removeDependency } from '../usecases/issueLinks/removeDependency.js';
 import * as issueService from '../services/issueService.js';
 import { ISSUE_TYPES, STATUSES, PRIORITIES } from '../lib/constants.js';
+import { listComments } from '../usecases/comments/listComments.js';
+import { createComment } from '../usecases/comments/createComment.js';
+import { expandCommentView } from '../usecases/comments/commentView.js';
 
 const ISSUE_KEY_RE = /^[A-Z0-9]+-\d+$/;
 
@@ -301,6 +304,69 @@ router.delete(
     });
     const view = await getIssue(req.scope.workspaceId, req.params.key);
     res.status(200).json({ success: true, data: view });
+  })
+);
+
+// ── Comments (slice B) ────────────────────────────────────────────────────
+
+// `attachment:<uuid>` format check (same pattern as in comments.ts router).
+const AttachmentRefSchema = z
+  .string()
+  .regex(/^attachment:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i, {
+    message: 'Must be an attachment:<uuid> ref',
+  });
+
+const CreateCommentSchema = z.object({
+  body: z.string().min(1).max(50_000),
+  attachmentIds: z.array(AttachmentRefSchema).max(10).optional(),
+});
+
+// GET /…/projects/:projectSlug/issues/:key/comments  (workspace member)
+router.get(
+  '/:key/comments',
+  asyncHandler(async (req, res) => {
+    if (!req.scope?.workspaceId) throw new AppError('Workspace scope missing', 500);
+    await resolveProject(req);
+    const issue = await issueService.findByKey(req.scope.workspaceId, req.params.key);
+    if (!issue) throw new AppError(`Issue '${req.params.key}' not found`, 404);
+
+    const views = await listComments(issue.id, req.scope.workspaceId, {
+      tenantSlug: req.scope.tenantSlug,
+      workspaceSlug: req.scope.workspaceSlug!,
+    });
+    res.json({ success: true, data: views });
+  })
+);
+
+// POST /…/projects/:projectSlug/issues/:key/comments  (write + requireActiveWorkspace)
+router.post(
+  '/:key/comments',
+  authorize('write'),
+  requireActiveTenant,
+  requireActiveWorkspace,
+  asyncHandler(async (req, res) => {
+    if (!req.user || !req.scope?.workspaceId) {
+      throw new AppError('Workspace scope missing', 500);
+    }
+    await resolveProject(req);
+    const issue = await issueService.findByKey(req.scope.workspaceId, req.params.key);
+    if (!issue) throw new AppError(`Issue '${req.params.key}' not found`, 404);
+
+    const input = CreateCommentSchema.parse(req.body);
+    const comment = await createComment({
+      workspaceId: req.scope.workspaceId,
+      tenantId: req.scope.tenantId,
+      issueId: issue.id,
+      authorUserId: req.user.id,
+      body: input.body,
+      attachmentIds: input.attachmentIds,
+    });
+
+    const view = await expandCommentView(comment, req.scope.workspaceId, {
+      tenantSlug: req.scope.tenantSlug,
+      workspaceSlug: req.scope.workspaceSlug!,
+    });
+    res.status(201).json({ success: true, data: view });
   })
 );
 

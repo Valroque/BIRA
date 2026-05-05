@@ -25,9 +25,8 @@ several JIRA features are out of scope.
 
 ## Core entities
 
-There are five things to understand. Three are containers
-(Workspace → Project → Issue). One is the rules engine (Workflow). One
-is an orthogonal grouping (Theme).
+There are four things to understand. Three are containers
+(Workspace → Project → Issue). One is the rules engine (Workflow).
 
 ### Workspace
 
@@ -160,28 +159,6 @@ enum of five (no scripting language):
 3. `reporter_only` — acting user is the issue's reporter
 4. `required_fields` — listed fields must be set on the issue
 5. `not_self` — acting user is NOT the reporter
-
-### Theme
-
-An orthogonal grouping for long-running concerns that don't fit the
-issue lifecycle. Themes are **logical containers** — flat, no
-workflow, no end date — that connect to issues across types.
-
-Examples (the intent, not concrete fixtures): "Performance",
-"Onboarding revamp", "Customer trust". A theme persists across
-quarters; the issues attached to it come and go.
-
-Rules:
-
-- Themes have **no hierarchy** — no parent theme, no child theme.
-- Themes link to **Epics, Stories, Tasks, Bugs** via a many-to-many
-  membership: `Issue.themes: string[]` of theme ids on the issue side,
-  `Theme.issues: string[]` of issue ids on the theme side. Both sides
-  store the relation.
-- Themes do **not** relate to other themes.
-
-A theme has just `{ id, name, description, color }` for v1 — no status,
-no owner. New fields can be added later without a refactor.
 
 ---
 

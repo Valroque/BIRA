@@ -6,11 +6,15 @@ import * as projectService from '../../src/services/projectService.js';
 import * as membershipService from '../../src/services/membershipService.js';
 import { login as loginUseCase } from '../../src/usecases/auth/login.js';
 import { createIssue as createIssueUseCase } from '../../src/usecases/issues/createIssue.js';
+import { uploadFile as uploadFileUseCase } from '../../src/usecases/files/uploadFile.js';
+import { createComment as createCommentUseCase } from '../../src/usecases/comments/createComment.js';
 import type { User } from '../../src/entities/User.js';
 import type { Tenant } from '../../src/entities/Tenant.js';
 import type { Workspace } from '../../src/entities/Workspace.js';
 import type { Project } from '../../src/entities/Project.js';
 import type { Issue } from '../../src/entities/Issue.js';
+import type { File } from '../../src/entities/File.js';
+import type { Comment } from '../../src/entities/Comment.js';
 import type {
   Role,
   WorkspaceStatus,
@@ -218,5 +222,57 @@ export async function createIssue(opts: CreateIssueOpts): Promise<Issue> {
     labels: opts.labels,
     assigneeUserId: opts.assigneeUserId,
     parentIssueId: opts.parentIssueId,
+  });
+}
+
+// ── File factories ────────────────────────────────────────────────────────
+
+export interface CreateFileOpts {
+  tenantId: string;
+  workspaceId: string;
+  uploaderUserId: string;
+  mime?: string;
+  filename?: string;
+  bytes?: Buffer;
+}
+
+/**
+ * Creates a file by calling the real uploadFile usecase.
+ * Defaults to a minimal PNG-like buffer so tests don't need to supply bytes.
+ */
+export async function createFile(opts: CreateFileOpts): Promise<File> {
+  return uploadFileUseCase({
+    tenantId: opts.tenantId,
+    workspaceId: opts.workspaceId,
+    uploaderUserId: opts.uploaderUserId,
+    mime: opts.mime ?? 'image/png',
+    filename: opts.filename ?? 'test.png',
+    bytes: opts.bytes ?? Buffer.from('fakepng'),
+  });
+}
+
+// ── Comment factories ─────────────────────────────────────────────────────
+
+export interface CreateCommentFactoryOpts {
+  workspaceId: string;
+  tenantId: string;
+  issueId: string;
+  authorUserId: string;
+  body?: string;
+  attachmentIds?: string[];
+}
+
+/**
+ * Creates a comment by calling the real createComment usecase.
+ */
+export async function createCommentFactory(opts: CreateCommentFactoryOpts): Promise<Comment> {
+  const tag = uniq();
+  return createCommentUseCase({
+    workspaceId: opts.workspaceId,
+    tenantId: opts.tenantId,
+    issueId: opts.issueId,
+    authorUserId: opts.authorUserId,
+    body: opts.body ?? `Comment ${tag}`,
+    attachmentIds: opts.attachmentIds,
   });
 }

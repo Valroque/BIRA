@@ -11,6 +11,71 @@ in the log unedited — the log is a history, not the current state.
 
 ---
 
+## 2026-05-05 — `@mentions` promoted into v1 (notifications still deferred)
+
+The earlier "no @mentions" rule was bundled with notifications,
+watchers, and email digests as a single out-of-scope line. Splitting
+them: **mentions in comments are now in v1**; notifications stay
+out of scope.
+
+What changes:
+
+- `@user` and `@team` chips in comment bodies, with a workspace-scoped
+  picker (`GET .../mentionables/search`).
+- Issue references (`COMET-42`) auto-link at render time, no special
+  trigger.
+- Storage uses typed tokens — `@[user:<uuid>]`, `@[team:<uuid>]` —
+  forward-compatible for future entity types without a schema change.
+  A denormalised `Comment.mentions` jsonb array (derived from the body
+  on write) is the read index.
+
+What stays deferred:
+
+- **Notification fan-out.** Mentions render as chips; nobody gets
+  pinged. When the notifications phase lands, `Comment.mentions` is
+  the fan-out source — no body re-parse needed.
+- Mentions in issue title/description, `@everyone` / `@here`, escape
+  syntax, visibility-aware picker.
+
+Why now: mentions are useful as a navigation / context affordance even
+without notifications — clicking the chip jumps to the user/team page,
+the comment thread reads better than `john@acme.com cc maria@acme.com`.
+Promoting the storage shape now means the comments backend doesn't get
+retrofitted later for typed tokens.
+
+Why typed tokens (`@[user:uuid]` instead of bare `@uuid`): UUIDs are
+shared across users, teams, attachments, projects. A bare uuid is
+ambiguous to the renderer and to future fan-out logic. The type
+prefix is cheap insurance.
+
+Full spec: [`docs/specs/mentions.md`](./specs/mentions.md). Phasing
+gated on the comments backend (not yet started).
+
+## 2026-05-04 — DB FKs stay on UUIDs; slugs are URL-only
+
+Considered switching foreign keys to slugs (e.g. `projects.workspace_slug`
+instead of `projects.workspace_id`) on the grounds that slugs are
+more user-friendly. Rejected.
+
+Reasons:
+
+1. **Slugs are mutable; UUIDs aren't.** A slug rename would either
+   cascade through every child row or require freezing slugs at
+   creation. Both options are worse than the status quo.
+2. **Slugs aren't globally unique.** Workspace slugs are unique only
+   within a tenant, project slugs only within a workspace. Using
+   slugs as FKs forces composite keys (`tenant_slug`, `workspace_slug`,
+   `project_slug`) on every child row, or denormalised parent slugs
+   everywhere — both are heavier than a single UUID column.
+3. **The user-friendliness lives at the URL/API layer already.** Routes
+   are `/:tenant/:workspace/:project/...`; the boundary resolves slugs
+   to UUIDs. Internal identity stays stable, URLs stay readable. This
+   matches the pattern in JIRA / Linear / GitHub.
+
+Rule for the backend phase: PK + FK columns are UUIDs. Slugs are
+unique-within-scope strings used for routing and human-readable refs
+in API payloads. Don't introduce `*_slug` foreign-key columns.
+
 ## 2026-04-29 — Per-assignee daily load on the Gantt (grouped-by-assignee)
 
 The single-Task `computeTaskLoad` check catches a bar that's been
@@ -257,30 +322,36 @@ filtered view to an issue and back. Caching is purely local (no server
 involved), and a reset escape hatch covers the case where saved state
 becomes confusing.
 
-## 2026-04-27 — Themes added; hierarchy clarified
+## 2026-04-27 — Issue hierarchy clarified
 
-**Decision.** Introduced **Themes** as an orthogonal grouping entity.
-Themes are flat (no parent/child themes), have no workflow, and connect
-many-to-many to issues across all types. Stored symmetrically on both
-sides (`Issue.themes` and `Theme.issues`).
-
-Clarified the issue hierarchy:
+**Decision.** Clarified the issue hierarchy:
 
 - Epic → Story → Task/Bug
 - Epic → Task/Bug (Tasks and Bugs can sit directly under an Epic)
 - Story → Task/Bug only (no nested stories, no epic-of-epic)
 - Task/Bug are always leaves
 
-**Why.** Some long-running cross-cutting concerns ("performance",
-"onboarding") don't fit the issue lifecycle — they outlive epics and
-span multiple of them. Forcing them into the issue tree as fake epics
-muddies what an Epic means. A separate orthogonal entity keeps the
-hierarchy honest and gives long-running concerns a home.
+---
 
-**Tradeoff.** Themes add a new top-level concept the user has to learn.
-Mitigated by keeping themes very small in v1 — name, description,
-color, and a list of linked issues. No status, no owner, no theme
-hierarchy.
+## 2026-05-05 — Themes removed entirely
+
+**Decision.** Themes (the orthogonal grouping entity introduced on
+2026-04-27) are removed from BIRA. No `Theme` entity, no
+`Issue.themes` field, no themes table, no themes API, no theme chip
+in the issue inspector. The concept does not exist in v1.
+
+**Why.** The cross-cutting "long-running concerns" use case it was
+designed for did not survive review — labels, epics, and saved
+filters cover it for the small/mid teams BIRA targets, and a separate
+top-level entity is more cognitive load than the value justifies.
+Better to ship a smaller surface and add grouping later if real users
+ask for it.
+
+**Tradeoff.** Anything previously expressed as a theme in fixtures is
+gone — issues that carried `themes: ['THM-...']` no longer carry
+anything in that slot. If grouping comes back, it will be designed
+fresh against actual usage rather than restored from this aborted
+shape.
 
 ---
 

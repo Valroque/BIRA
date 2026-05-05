@@ -19,8 +19,8 @@ themselves live at [`.claude/rules/v1-constraints.md`](.claude/rules/v1-constrai
 > **Backend phase started (2026-05-04):** Design-first gate has been
 > lifted. Backend code lives in `server/` (Node + TS + Express + Knex
 > + Postgres); FE moved to `web/`; root is an npm workspace. Initial
-> scope: tenants, workspaces, users, login. Issues / themes /
-> workflows still fixture-only — wiring those up is a later phase.
+> scope: tenants, workspaces, users, login. Issues / workflows still
+> fixture-only — wiring those up is a later phase.
 > The FE has **not** been rewired to call the API yet; that's a
 > separate phase once endpoints stabilise. See `memory/project_backend_phase.md`.
 
@@ -52,10 +52,9 @@ themselves live at [`.claude/rules/v1-constraints.md`](.claude/rules/v1-constrai
    cannot have a parent.** **Stories require an Epic parent** — the
    inspector forbids clearing it and the picker only offers Epics.
    Schedules (start/end dates) live on Tasks/Bugs only; Stories and
-   Epics derive their Gantt span from descendant leaves. **Themes** are
-   a separate orthogonal entity — flat, no hierarchy, many-to-many with
-   issues. Issue link types in v1: `relates` (symmetric, untyped,
-   every issue, stored on both ends as `relatedTo[]`) and `depends on`
+   Epics derive their Gantt span from descendant leaves. Issue link
+   types in v1: `relates` (symmetric, untyped, every issue, stored on
+   both ends as `relatedTo[]`) and `depends on`
    (directed, **Task-only**, A can't start until B ends, stored on
    both ends as `dependsOn[]` / `dependedOnBy[]`, must stay a DAG —
    cycles are rejected at edit time via `dependsOnWouldCycle`). See
@@ -124,8 +123,8 @@ engine and rule-gated transitions.
 
 **Frontend** is feature-complete enough that we've started building the
 backend. FE lives under `web/`; data is still in-memory fixtures
-(`web/src/fixtures.ts`) plus a few `localStorage` keys. Issues/workflows/
-themes will *stay* fixture-driven until their backend phases land.
+(`web/src/fixtures.ts`) plus a few `localStorage` keys. Issues and
+workflows will *stay* fixture-driven until their backend phases land.
 
 **Backend** lives under `server/` and is being built incrementally —
 the layering is ported from the ABHA project (Node + Express + Knex +
@@ -308,16 +307,9 @@ practices. Don't propose changes to these without explicit user sign-off.
   - `duplicates` / `causes` are still deferred. No transition rule like
     "blocked by linked issue" yet — the depends-on graph drives Gantt
     semantics, not transition guards.
-- **Themes** are a separate, orthogonal entity:
-  - Flat — no parent theme, no child theme, no theme↔theme relation.
-  - Many-to-many with issues. Stored on both ends —
-    `Theme.issues[]` and `Issue.themes[]`.
-  - No status, no workflow, no end date — themes are long-running.
-  - Just `{ id, name, description, color }` for v1.
-- **Symmetric storage rule**: parent/children, relatedTo, depends-on
-  (`dependsOn` ↔ `dependedOnBy`), and theme membership are all
-  denormalised. Touching one side means touching the other; there's no
-  auto-mirroring.
+- **Symmetric storage rule**: parent/children, relatedTo, and depends-on
+  (`dependsOn` ↔ `dependedOnBy`) are all denormalised. Touching one side
+  means touching the other; there's no auto-mirroring.
 - **Three roles**: `admin`, `write`, `read`. Ordered ladder
   (`read < write < admin`; write implies read, admin implies write). Roles
   can be assigned to **teams** (defaults) or **individual users** (overrides).
@@ -437,11 +429,7 @@ Top-level routes (defined in `src/App.tsx`):
   `type`, `title`, `status`, `priority`, `assignee`, `labels`, `updated`,
   `estimate`, `project` (slug), `startDate?`, `endDate?`. Relations
   (all denormalised, both ends stored): `parent?`, `children?`,
-  `relatedTo?`, `themes?`. See `docs/product.md` for the hierarchy
-  rules.
-- `THEMES` — orthogonal grouping. Flat (no parent/child theme).
-  Many-to-many with issues; each `Theme.issues[]` mirrors the
-  corresponding `Issue.themes[]`. Helper: `themeById`.
+  `relatedTo?`. See `docs/product.md` for the hierarchy rules.
 - `PROJECT_INFO` — the three projects with name, key, letter, color, bg.
 - `MEMBERS` — workspace member roster (used by Settings → Members and
   every member-picker).
@@ -457,7 +445,7 @@ Top-level routes (defined in `src/App.tsx`):
   `epic-coarse`, Atlas uses `epic-detailed`).
 - `CURRENT_USER` — mocked Jordan Lee.
 
-Helpers: `issueById`, `themeById`, `memberByEmail`, `teamBySlug`,
+Helpers: `issueById`, `memberByEmail`, `teamBySlug`,
 `projectEffectiveMembers`, `projectsForTeam`, `projectsUsingWorkflow`.
 
 When a screen needs to vary by project or workspace, read from these

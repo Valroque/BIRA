@@ -5,7 +5,10 @@ import { TopBar, TypeChip, IssueId, StatusDot, Priority, Avatar, STATUSES, useTe
 import { AttachmentRow, renderRichText, useComposer, type Attachment } from '../components/composer';
 import { IssuePickerModal } from '../components/issue-picker';
 import { useDismiss } from '../components/use-dismiss';
-import { CURRENT_USER, IDEAL_POINTS_PER_DAY, ISSUES, computeTaskLoad, dependsOnWouldCycle, issueById, themeById, type Issue } from '../fixtures';
+import { CURRENT_USER, IDEAL_POINTS_PER_DAY, ISSUES, computeTaskLoad, dependsOnWouldCycle, issueById, type Issue } from '../fixtures';
+import { listComments, createComment, type CommentView } from '../api/comments';
+import { MentionPicker } from '../components/mention-picker';
+import type { MentionableHit } from '../api/mentionables';
 import { useProjects } from '../state/projects';
 import { useIssues } from '../state/issues';
 
@@ -150,8 +153,8 @@ function IssueDetail({ issue = ISSUES[0] }: { issue?: Issue }) {
   // Depends-on (predecessors). Editable in-session — both add and remove —
   // because the cycle check needs a single coherent view of "this Task's
   // current dependencies", not "fixture + additions" as a layered overlay.
-  // Persistence for relation edits is deferred (depends-on / parent / themes
-  // / related need symmetric writes on both ends).
+  // Persistence for relation edits is deferred (depends-on / parent /
+  // related need symmetric writes on both ends).
   const [dependsOn, setDependsOn] = useState<string[]>(issue.dependsOn ?? []);
   // Effort estimate. Mandatory on Tasks (the unit of scheduled work).
   const [estimate, setEstimateLocal] = useState<number | undefined>(issue.estimate);
@@ -580,15 +583,6 @@ function IssueDetail({ issue = ISSUES[0] }: { issue?: Issue }) {
               context the user wants while reading the issue. The inspector
               keeps the singular Parent reference so structural placement
               stays one click away. */}
-          <Meta label="Themes">
-            {issue.themes && issue.themes.length > 0 ? (
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
-                {issue.themes.map((id) => <ThemeChip key={id} id={id} />)}
-              </div>
-            ) : (
-              <NotSet />
-            )}
-          </Meta>
           </div>
         </aside>
       </div>
@@ -1734,22 +1728,6 @@ function ChildMenuItem({ icon, onClick, children }: { icon: string; onClick: () 
   );
 }
 
-function ThemeChip({ id }: { id: string }) {
-  const t = themeById(id);
-  if (!t) {
-    return <span className="pill" style={{ background: 'var(--bg-muted)', color: 'var(--fg-muted)' }}>{id}</span>;
-  }
-  return (
-    <span
-      className="pill"
-      data-tip={t.description}
-      style={{ background: t.bg, color: t.color, fontWeight: 600 }}
-    >
-      {t.name}
-    </span>
-  );
-}
-
 // --- Activity feed with All / Comments tab filter (JIRA-style) ---
 
 type FeedItem =
@@ -1824,13 +1802,42 @@ const FEED_ITEMS: FeedItem[] = [
 
 type FeedTab = 'all' | 'comments';
 
-function ActivityFeed() {
+function ActivityFeed({ onNewComment }: { onNewComment?: (c: CommentView) => void }) {
+  const { tenant, workspace, project } = useTenantContext();
+  const { key } = useParams<{ key: string }>();
   const [tab, setTab] = useState<FeedTab>('comments');
+  const [apiComments, setApiComments] = useState<CommentView[]>([]);
+
+  useEffect(() => {
+    if (!key) return;
+    listComments(tenant, workspace, project, key)
+      .then(setApiComments)
+      .catch(() => {}); // silent fallback — fixture events still visible
+  }, [tenant, workspace, project, key]);
+
+  // Fixture events only — strip the hardcoded comment items
+  const FIXTURE_EVENTS = FEED_ITEMS.filter((i) => i.kind === 'event');
+
+  const commentItems: FeedItem[] = apiComments.map((c) => ({
+    kind: 'comment' as const,
+    who: c.authorUserId ?? 'Unknown',
+    when: new Date(c.createdAt).toLocaleDateString(),
+    edited: c.updatedAt !== null,
+    editedWhen: c.updatedAt ? new Date(c.updatedAt).toLocaleDateString() : undefined,
+    body: (
+      <div style={{ fontSize: 13, color: 'var(--fg)', lineHeight: 1.55 }}>
+        {c.body}
+      </div>
+    ),
+  }));
+
+  const feedItems: FeedItem[] = [...commentItems, ...FIXTURE_EVENTS];
+
   const counts = {
-    all: FEED_ITEMS.length,
-    comments: FEED_ITEMS.filter((i) => i.kind === 'comment').length,
+    all: feedItems.length,
+    comments: commentItems.length,
   };
-  const filtered = tab === 'comments' ? FEED_ITEMS.filter((i) => i.kind === 'comment') : FEED_ITEMS;
+  const filtered = tab === 'comments' ? commentItems : feedItems;
 
   return (
     <div style={{ marginTop: 32, paddingTop: 16, borderTop: '1px solid var(--border-muted)' }}>
@@ -1888,62 +1895,113 @@ function ActivityFeed() {
         )
       )}
 
-      <CommentComposer />
+      <CommentComposer onSubmit={(c) => { setApiComments((prev) => [...prev, c]); onNewComment?.(c); }} />
     </div>
   );
 }
 
-function CommentComposer() {
+function CommentComposer({ onSubmit }: { onSubmit: (c: CommentView) => void }) {
   const c = useComposer();
+  const { tenant, workspace, project } = useTenantContext();
+  const { key } = useParams<{ key: string }>();
+  const [submitting, setSubmitting] = useState(false);
+  const [mentionQuery, setMentionQuery] = useState<string | null>(null);
+
+  const handleSubmit = async () => {
+    if (!c.value.trim() || submitting || !key) return;
+    setSubmitting(true);
+    try {
+      const comment = await createComment(tenant, workspace, project, key, { body: c.value });
+      onSubmit(comment);
+      c.setValue('');
+      setMentionQuery(null);
+    } catch {
+      // silent — toast system is a later slice
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
   return (
-    <div
-      onDragOver={c.handleDragOver}
-      onDragLeave={c.handleDragLeave}
-      onDrop={c.handleDrop}
-      style={{
-        marginTop: 16,
-        border: `1px solid ${c.dragOver ? 'var(--accent)' : 'var(--border)'}`,
-        borderRadius: 8,
-        background: 'var(--bg)',
-        boxShadow: c.dragOver ? '0 0 0 3px var(--accent-muted)' : 'none',
-        transition: 'border-color .12s, box-shadow .12s',
-      }}
-    >
-      <textarea
-        ref={c.textareaRef}
-        value={c.value}
-        onChange={(e) => c.setValue(e.target.value)}
-        onPaste={c.handlePaste}
-        placeholder="Leave a comment… paste or drop an image, or use the code button to add a snippet"
-        rows={3}
+    <div style={{ position: 'relative', marginTop: 16 }}>
+      {mentionQuery !== null && (
+        <div style={{ position: 'absolute', bottom: '100%', left: 0, zIndex: 100 }}>
+          <MentionPicker
+            query={mentionQuery}
+            onSelect={(hit: MentionableHit) => {
+              const cursor = c.textareaRef.current?.selectionStart ?? c.value.length;
+              const before = c.value.slice(0, cursor);
+              const after = c.value.slice(cursor);
+              const replaced = before.replace(/@([^\s@]*)$/, `@[${hit.type}:${hit.id}]`);
+              c.setValue(replaced + after);
+              setMentionQuery(null);
+              c.textareaRef.current?.focus();
+            }}
+            onDismiss={() => setMentionQuery(null)}
+          />
+        </div>
+      )}
+      <div
+        onDragOver={c.handleDragOver}
+        onDragLeave={c.handleDragLeave}
+        onDrop={c.handleDrop}
         style={{
-          width: '100%', display: 'block',
-          border: 'none', outline: 'none', resize: 'vertical',
-          padding: '10px 12px', minHeight: 60,
-          fontSize: 13, color: 'var(--fg)', background: 'transparent',
-          fontFamily: 'var(--font-sans)', lineHeight: 1.55,
-          boxSizing: 'border-box',
+          border: `1px solid ${c.dragOver ? 'var(--accent)' : 'var(--border)'}`,
+          borderRadius: 8,
+          background: 'var(--bg)',
+          boxShadow: c.dragOver ? '0 0 0 3px var(--accent-muted)' : 'none',
+          transition: 'border-color .12s, box-shadow .12s',
         }}
-      />
-      <AttachmentRow attachments={c.attachments} onRemove={c.removeAttachment} />
-      <div style={{
-        padding: '6px 8px', borderTop: '1px solid var(--border-muted)',
-        display: 'flex', alignItems: 'center', gap: 2,
-      }}>
-        <button type="button" className="btn btn-ghost btn-sm" style={{ width: 26, padding: 0 }} data-tip="Bold"><Icon name="bold" size={13} /></button>
-        <button type="button" className="btn btn-ghost btn-sm" style={{ width: 26, padding: 0 }} data-tip="Italic"><Icon name="italic" size={13} /></button>
-        <button type="button" onClick={c.insertCodeBlock} className="btn btn-ghost btn-sm" style={{ width: 26, padding: 0 }} data-tip="Code block"><Icon name="code" size={13} /></button>
-        <button type="button" onClick={c.openFilePicker} className="btn btn-ghost btn-sm" style={{ width: 26, padding: 0 }} data-tip="Attach image"><Icon name="paperclip" size={13} /></button>
-        <input
-          ref={c.fileInputRef}
-          type="file"
-          accept="image/*"
-          multiple
-          hidden
-          onChange={c.handleFileChange}
+      >
+        <textarea
+          ref={c.textareaRef}
+          value={c.value}
+          onChange={(e) => {
+            c.setValue(e.target.value);
+            const cursor = e.target.selectionStart ?? e.target.value.length;
+            const before = e.target.value.slice(0, cursor);
+            const m = before.match(/@([^\s@]*)$/);
+            setMentionQuery(m ? m[1] : null);
+          }}
+          onPaste={c.handlePaste}
+          placeholder="Leave a comment… paste or drop an image, or use the code button to add a snippet"
+          rows={3}
+          style={{
+            width: '100%', display: 'block',
+            border: 'none', outline: 'none', resize: 'vertical',
+            padding: '10px 12px', minHeight: 60,
+            fontSize: 13, color: 'var(--fg)', background: 'transparent',
+            fontFamily: 'var(--font-sans)', lineHeight: 1.55,
+            boxSizing: 'border-box',
+          }}
         />
-        <div style={{ flex: 1 }} />
-        <button type="button" className="btn btn-sm">Comment</button>
+        <AttachmentRow attachments={c.attachments} onRemove={c.removeAttachment} />
+        <div style={{
+          padding: '6px 8px', borderTop: '1px solid var(--border-muted)',
+          display: 'flex', alignItems: 'center', gap: 2,
+        }}>
+          <button type="button" className="btn btn-ghost btn-sm" style={{ width: 26, padding: 0 }} data-tip="Bold"><Icon name="bold" size={13} /></button>
+          <button type="button" className="btn btn-ghost btn-sm" style={{ width: 26, padding: 0 }} data-tip="Italic"><Icon name="italic" size={13} /></button>
+          <button type="button" onClick={c.insertCodeBlock} className="btn btn-ghost btn-sm" style={{ width: 26, padding: 0 }} data-tip="Code block"><Icon name="code" size={13} /></button>
+          <button type="button" onClick={c.openFilePicker} className="btn btn-ghost btn-sm" style={{ width: 26, padding: 0 }} data-tip="Attach image"><Icon name="paperclip" size={13} /></button>
+          <input
+            ref={c.fileInputRef}
+            type="file"
+            accept="image/*"
+            multiple
+            hidden
+            onChange={c.handleFileChange}
+          />
+          <div style={{ flex: 1 }} />
+          <button
+            type="button"
+            className="btn btn-sm"
+            onClick={handleSubmit}
+            disabled={submitting || !c.value.trim()}
+          >
+            {submitting ? 'Posting…' : 'Comment'}
+          </button>
+        </div>
       </div>
     </div>
   );
