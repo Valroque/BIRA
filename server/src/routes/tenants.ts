@@ -12,7 +12,9 @@ import projectsRouter from './projects.js';
 import tenantMembersRouter from './tenantMembers.js';
 import issuesRouter from './issues.js';
 import workflowsRouter from './workflows.js';
-import themesRouter from './themes.js';
+import filesRouter from './files.js';
+import mentionablesRouter from './mentionables.js';
+import commentsRouter from './comments.js';
 
 const slugSchema = z
   .string()
@@ -137,12 +139,31 @@ router.use(
   workflowsRouter
 );
 
-// /api/tenants/:tenantSlug/workspaces/:workspaceSlug/themes — workspace-scoped
-// theme CRUD + issue attach/detach (slice 7).
+// /api/tenants/:tenantSlug/workspaces/:workspaceSlug/files — file upload,
+// download, and delete. resolveWorkspaceScope is applied here (same pattern
+// as the issues and workflows routers above).
 router.use(
-  '/:tenantSlug/workspaces/:workspaceSlug/themes',
+  '/:tenantSlug/workspaces/:workspaceSlug/files',
   resolveWorkspaceScope,
-  themesRouter
+  filesRouter
+);
+
+// /api/tenants/:tenantSlug/workspaces/:workspaceSlug/mentionables — user/team
+// search for @-mention pickers.
+router.use(
+  '/:tenantSlug/workspaces/:workspaceSlug/mentionables',
+  resolveWorkspaceScope,
+  mentionablesRouter
+);
+
+// /api/tenants/:tenantSlug/workspaces/:workspaceSlug/comments — PATCH and
+// DELETE for individual comments. (GET/POST live in projectIssues.ts under
+// /:key/comments.) Comment uuids are workspace-unique so we don't need the
+// project slug here.
+router.use(
+  '/:tenantSlug/workspaces/:workspaceSlug/comments',
+  resolveWorkspaceScope,
+  commentsRouter
 );
 
 // /api/tenants/:tenantSlug/members — tenant member admin actions (e.g. admin

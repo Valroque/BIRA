@@ -5,8 +5,8 @@ A Model Context Protocol server that wraps the BIRA backend so AI clients
 workspaces, and projects through tool calls.
 
 This is a scaffold — only the endpoints that exist on the BE today are
-exposed. As issues / themes / workflows land in `server/`, add matching
-tools here.
+exposed. As issues and workflows land in `server/`, add matching tools
+here.
 
 ## Tools
 

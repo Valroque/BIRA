@@ -1,5 +1,4 @@
 import * as issueService from '../../services/issueService.js';
-import * as themeService from '../../services/themeService.js';
 import * as issueLinksService from '../../services/issueLinksService.js';
 import type { Issue } from '../../entities/Issue.js';
 
@@ -8,16 +7,13 @@ import type { Issue } from '../../entities/Issue.js';
  *   slice 1 → core fields on Issue
  *   slice 2 → parent / children
  *   slice 6 → startDate / endDate / estimate (already on Issue)
- *   slice 7 → themes (theme ids)
  *   slice 8 → relatedTo / dependsOn / dependedOnBy (issue keys)
  *
- * `parent` and `children` are issue KEYS (e.g. 'CMT-7'); `themes` are
- * theme UUIDs (themes have no slug in v1).
+ * `parent` and `children` are issue KEYS (e.g. 'CMT-7').
  */
 export interface IssueView extends Issue {
   parent: string | null;
   children: string[];
-  themes: string[];
   relatedTo: string[];
   dependsOn: string[];
   dependedOnBy: string[];
@@ -27,7 +23,6 @@ function toView(
   issue: Issue,
   parentKey: string | null,
   childKeys: string[],
-  themeIds: string[],
   relatedKeys: string[],
   dependsOnKeys: string[],
   dependedOnByKeys: string[]
@@ -35,7 +30,6 @@ function toView(
   return Object.assign(Object.create(Object.getPrototypeOf(issue)), issue, {
     parent: parentKey,
     children: childKeys,
-    themes: themeIds,
     relatedTo: relatedKeys,
     dependsOn: dependsOnKeys,
     dependedOnBy: dependedOnByKeys,
@@ -49,7 +43,6 @@ export async function getIssue(workspaceId: string, key: string): Promise<IssueV
   const [
     childIds,
     parentKeyOrNull,
-    themesByIssue,
     relatedIds,
     dependsOnIds,
     dependedOnByIds,
@@ -58,7 +51,6 @@ export async function getIssue(workspaceId: string, key: string): Promise<IssueV
     issue.parentIssueId
       ? issueService.findKeysByIds([issue.parentIssueId]).then((m) => m.get(issue.parentIssueId!) ?? null)
       : Promise.resolve<string | null>(null),
-    themeService.findThemeIdsForIssues([issue.id]),
     issueLinksService.findRelatedIdsByIssue(issue.id),
     issueLinksService.findDependsOn(issue.id),
     issueLinksService.findDependedOnBy(issue.id),
@@ -84,13 +76,10 @@ export async function getIssue(workspaceId: string, key: string): Promise<IssueV
     .filter((k): k is string => Boolean(k))
     .sort();
 
-  const themes = themesByIssue.get(issue.id) ?? [];
-
   return toView(
     issue,
     parentKeyOrNull,
     childKeys,
-    themes,
     relatedKeys,
     dependsOnKeys,
     dependedOnByKeys

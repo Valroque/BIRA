@@ -10,9 +10,9 @@ import { hashPassword } from '../../src/lib/passwordUtils.js';
  *   2. Acme Corp — long-standing demo tenant kept for the existing fixture
  *      surface (workspaces, projects, multi-user role mix). Acme additionally
  *      gets the full FE-fixture data: workflows + transitions + transition
- *      rules, project_workflow assignments, themes, issues, parent/child
- *      hierarchy, relates / depends-on links, and theme membership. This is
- *      the path that exercises the status-guard logic end-to-end.
+ *      rules, project_workflow assignments, issues, parent/child
+ *      hierarchy, and relates / depends-on links. This is the path that
+ *      exercises the status-guard logic end-to-end.
  *
  * Idempotent: wipes by table before inserting (in dependency order).
  */
@@ -22,9 +22,7 @@ export async function seed(knex: Knex): Promise<void> {
   // explicit deletes keep the seed readable + order-independent.
   await knex('issue_dependencies').del();
   await knex('issue_relates').del();
-  await knex('issue_themes').del();
   await knex('issues').del();
-  await knex('themes').del();
   await knex('workflow_transition_rules').del();
   await knex('workflow_transitions').del();
   await knex('project_workflows').del();
@@ -473,56 +471,12 @@ export async function seed(knex: Knex): Promise<void> {
   }
   await knex('project_workflows').insert(projectWorkflowInserts);
 
-  // ── Themes ──────────────────────────────────────────────────────────
-  // Mirrors `THEMES` in web/src/fixtures.ts. The FE uses `THM-1`/`THM-2`/etc;
-  // the BE assigns uuids — track FE id -> BE id so issue_themes can reference.
-  const themesSeed = [
-    {
-      feId: 'THM-1',
-      name: 'Performance',
-      description:
-        'Make every surface feel instant — fewer layout shifts, faster first paint, no spinning forever.',
-      color: '#0d9488',
-    },
-    {
-      feId: 'THM-2',
-      name: 'Workflow polish',
-      description:
-        'Round off rough edges in the workflow editor: cycles, filters, persistence quirks.',
-      color: '#4f46e5',
-    },
-    {
-      feId: 'THM-3',
-      name: 'Mobile-first',
-      description: 'Tighten core flows for tablet and phone form factors before the v1 launch.',
-      color: '#ea580c',
-    },
-  ];
-
-  const themeRows = (await knex('themes')
-    .insert(
-      themesSeed.map((t) => ({
-        workspaceId: acmeWorkspaceId,
-        name: t.name,
-        description: t.description,
-        color: t.color,
-      }))
-    )
-    .returning(['id', 'name'])) as Array<{ id: string; name: string }>;
-
-  const themeIdByFeId = new Map<string, string>();
-  themesSeed.forEach((t, i) => {
-    const row = themeRows[i];
-    if (!row) throw new Error(`Seed: theme insert mismatch for ${t.feId}`);
-    themeIdByFeId.set(t.feId, row.id);
-  });
-
   // ── Issues ──────────────────────────────────────────────────────────
   // Mirrors `ISSUES` in web/src/fixtures.ts. Two-pass insert:
   //   1. Insert all issues without parent (so any FE parent reference can
   //      be resolved against the just-built key->id map).
   //   2. Update parent_issue_id on the rows that have one.
-  // After issues exist we can insert relates / dependencies / theme links.
+  // After issues exist we can insert relates / dependencies.
 
   type IssueSeed = {
     feKey: string; // e.g. 'CMT-241'
@@ -539,7 +493,6 @@ export async function seed(knex: Knex): Promise<void> {
     parentFeKey: string | null;
     relatedToFeKeys: string[];
     dependsOnFeKeys: string[];
-    themeFeIds: string[];
     description: string | null;
   };
 
@@ -556,7 +509,7 @@ export async function seed(knex: Knex): Promise<void> {
       labels: ['regression', 'workflow'], estimate: 3,
       startDate: '2026-04-22', endDate: '2026-04-29',
       parentFeKey: null, relatedToFeKeys: ['CMT-229'],
-      dependsOnFeKeys: [], themeFeIds: ['THM-2'],
+      dependsOnFeKeys: [],
       description: `Saving the workflow editor's view state (filter chips, expanded sections) writes through a debounced effect. When a state node is reordered while a filter is active, the persisted slot order is computed from the visible subset and reapplied to the full set on reload — silently dropping nodes that were filtered out.
 
 Repro:
@@ -583,7 +536,7 @@ const persist = debounce((view) => {
       labels: ['workflow', 'admin'], estimate: null,
       startDate: null, endDate: null,
       parentFeKey: 'CMT-232', relatedToFeKeys: [],
-      dependsOnFeKeys: [], themeFeIds: [], description: null,
+      dependsOnFeKeys: [], description: null,
     },
     {
       feKey: 'CMT-237', projectSlug: 'comet', type: 'T',
@@ -592,7 +545,7 @@ const persist = debounce((view) => {
       labels: ['docs'], estimate: 2,
       startDate: null, endDate: '2026-05-04',
       parentFeKey: 'CMT-232', relatedToFeKeys: [],
-      dependsOnFeKeys: ['CMT-234'], themeFeIds: ['THM-2'], description: null,
+      dependsOnFeKeys: ['CMT-234'], description: null,
     },
     {
       feKey: 'CMT-235', projectSlug: 'comet', type: 'B',
@@ -601,7 +554,7 @@ const persist = debounce((view) => {
       labels: ['workflow'], estimate: 1,
       startDate: null, endDate: null,
       parentFeKey: null, relatedToFeKeys: [],
-      dependsOnFeKeys: [], themeFeIds: ['THM-2'], description: null,
+      dependsOnFeKeys: [], description: null,
     },
     {
       feKey: 'CMT-234', projectSlug: 'comet', type: 'T',
@@ -610,7 +563,7 @@ const persist = debounce((view) => {
       labels: ['board'], estimate: 5,
       startDate: '2026-04-20', endDate: '2026-05-01',
       parentFeKey: null, relatedToFeKeys: [],
-      dependsOnFeKeys: [], themeFeIds: [], description: null,
+      dependsOnFeKeys: [], description: null,
     },
     // CMT-232 is an Epic; FE sets estimate=21 — Epics don't store estimate
     // on the BE per slice 6 rules. Children are derived (parent_issue_id),
@@ -622,7 +575,7 @@ const persist = debounce((view) => {
       labels: ['fields', 'q3'], estimate: null,
       startDate: null, endDate: null,
       parentFeKey: null, relatedToFeKeys: [],
-      dependsOnFeKeys: [], themeFeIds: [], description: null,
+      dependsOnFeKeys: [], description: null,
     },
     // CMT-230 Story; estimate=3 in FE dropped (Story).
     {
@@ -632,7 +585,7 @@ const persist = debounce((view) => {
       labels: ['retention'], estimate: null,
       startDate: null, endDate: null,
       parentFeKey: 'CMT-232', relatedToFeKeys: [],
-      dependsOnFeKeys: [], themeFeIds: [], description: null,
+      dependsOnFeKeys: [], description: null,
     },
     {
       feKey: 'CMT-229', projectSlug: 'comet', type: 'B',
@@ -641,7 +594,7 @@ const persist = debounce((view) => {
       labels: ['workflow'], estimate: 5,
       startDate: '2026-04-24', endDate: '2026-04-28',
       parentFeKey: null, relatedToFeKeys: ['CMT-241'],
-      dependsOnFeKeys: [], themeFeIds: ['THM-2'], description: null,
+      dependsOnFeKeys: [], description: null,
     },
     {
       feKey: 'CMT-227', projectSlug: 'comet', type: 'T',
@@ -650,7 +603,7 @@ const persist = debounce((view) => {
       labels: ['onboarding'], estimate: 2,
       startDate: '2026-04-21', endDate: '2026-04-25',
       parentFeKey: null, relatedToFeKeys: [],
-      dependsOnFeKeys: [], themeFeIds: [], description: null,
+      dependsOnFeKeys: [], description: null,
     },
     {
       feKey: 'CMT-225', projectSlug: 'comet', type: 'B',
@@ -659,7 +612,7 @@ const persist = debounce((view) => {
       labels: ['frontend'], estimate: 2,
       startDate: null, endDate: null,
       parentFeKey: null, relatedToFeKeys: [],
-      dependsOnFeKeys: [], themeFeIds: ['THM-1'], description: null,
+      dependsOnFeKeys: [], description: null,
     },
     // CMT-223 Story; estimate=8 in FE dropped (Story).
     {
@@ -669,7 +622,7 @@ const persist = debounce((view) => {
       labels: ['comments'], estimate: null,
       startDate: null, endDate: null,
       parentFeKey: 'CMT-232', relatedToFeKeys: [],
-      dependsOnFeKeys: [], themeFeIds: [], description: null,
+      dependsOnFeKeys: [], description: null,
     },
     {
       feKey: 'CMT-220', projectSlug: 'comet', type: 'T',
@@ -678,7 +631,7 @@ const persist = debounce((view) => {
       labels: ['workflow'], estimate: 3,
       startDate: null, endDate: null,
       parentFeKey: 'CMT-232', relatedToFeKeys: [],
-      dependsOnFeKeys: [], themeFeIds: [], description: null,
+      dependsOnFeKeys: [], description: null,
     },
 
     // --- Orbit ---
@@ -690,7 +643,7 @@ const persist = debounce((view) => {
       labels: ['analytics'], estimate: null,
       startDate: null, endDate: null,
       parentFeKey: 'ORB-40', relatedToFeKeys: ['ORB-55'],
-      dependsOnFeKeys: [], themeFeIds: [], description: null,
+      dependsOnFeKeys: [], description: null,
     },
     {
       feKey: 'ORB-55', projectSlug: 'orbit', type: 'B',
@@ -699,7 +652,7 @@ const persist = debounce((view) => {
       labels: ['regression', 'analytics'], estimate: 2,
       startDate: '2026-04-25', endDate: '2026-04-28',
       parentFeKey: null, relatedToFeKeys: ['ORB-58'],
-      dependsOnFeKeys: [], themeFeIds: [], description: null,
+      dependsOnFeKeys: [], description: null,
     },
     {
       feKey: 'ORB-52', projectSlug: 'orbit', type: 'T',
@@ -708,7 +661,7 @@ const persist = debounce((view) => {
       labels: ['exports'], estimate: 3,
       startDate: null, endDate: '2026-05-10',
       parentFeKey: 'ORB-58', relatedToFeKeys: [],
-      dependsOnFeKeys: ['ORB-32'], themeFeIds: [], description: null,
+      dependsOnFeKeys: ['ORB-32'], description: null,
     },
     {
       feKey: 'ORB-49', projectSlug: 'orbit', type: 'B',
@@ -717,7 +670,7 @@ const persist = debounce((view) => {
       labels: ['frontend'], estimate: 1,
       startDate: null, endDate: null,
       parentFeKey: null, relatedToFeKeys: [],
-      dependsOnFeKeys: [], themeFeIds: ['THM-1'], description: null,
+      dependsOnFeKeys: [], description: null,
     },
     // ORB-44 Story; estimate=8 in FE dropped (Story).
     {
@@ -727,7 +680,7 @@ const persist = debounce((view) => {
       labels: ['analytics', 'retention'], estimate: null,
       startDate: null, endDate: null,
       parentFeKey: 'ORB-40', relatedToFeKeys: [],
-      dependsOnFeKeys: [], themeFeIds: [], description: null,
+      dependsOnFeKeys: [], description: null,
     },
     // ORB-40 Epic; estimate=21 in FE dropped (Epic).
     {
@@ -737,7 +690,7 @@ const persist = debounce((view) => {
       labels: ['q3', 'analytics'], estimate: null,
       startDate: null, endDate: null,
       parentFeKey: null, relatedToFeKeys: [],
-      dependsOnFeKeys: [], themeFeIds: [], description: null,
+      dependsOnFeKeys: [], description: null,
     },
     {
       feKey: 'ORB-32', projectSlug: 'orbit', type: 'T',
@@ -746,7 +699,7 @@ const persist = debounce((view) => {
       labels: ['refactor'], estimate: 2,
       startDate: '2026-04-17', endDate: '2026-04-24',
       parentFeKey: 'ORB-40', relatedToFeKeys: [],
-      dependsOnFeKeys: [], themeFeIds: [], description: null,
+      dependsOnFeKeys: [], description: null,
     },
 
     // --- Atlas ---
@@ -757,7 +710,7 @@ const persist = debounce((view) => {
       labels: ['qa', 'offline'], estimate: 4,
       startDate: '2026-05-15', endDate: '2026-05-18',
       parentFeKey: 'ATL-130', relatedToFeKeys: [],
-      dependsOnFeKeys: ['ATL-135'], themeFeIds: [], description: null,
+      dependsOnFeKeys: ['ATL-135'], description: null,
     },
     {
       feKey: 'ATL-135', projectSlug: 'atlas', type: 'T',
@@ -766,7 +719,7 @@ const persist = debounce((view) => {
       labels: ['observability'], estimate: 6,
       startDate: '2026-05-12', endDate: '2026-05-14',
       parentFeKey: 'ATL-130', relatedToFeKeys: [],
-      dependsOnFeKeys: ['ATL-133', 'ATL-134'], themeFeIds: [], description: null,
+      dependsOnFeKeys: ['ATL-133', 'ATL-134'], description: null,
     },
     {
       feKey: 'ATL-134', projectSlug: 'atlas', type: 'T',
@@ -775,7 +728,7 @@ const persist = debounce((view) => {
       labels: ['offline', 'reader'], estimate: 8,
       startDate: '2026-05-07', endDate: '2026-05-11',
       parentFeKey: 'ATL-130', relatedToFeKeys: [],
-      dependsOnFeKeys: ['ATL-132'], themeFeIds: [], description: null,
+      dependsOnFeKeys: ['ATL-132'], description: null,
     },
     {
       feKey: 'ATL-133', projectSlug: 'atlas', type: 'T',
@@ -784,7 +737,7 @@ const persist = debounce((view) => {
       labels: ['offline', 'migration'], estimate: 8,
       startDate: '2026-05-07', endDate: '2026-05-11',
       parentFeKey: 'ATL-130', relatedToFeKeys: [],
-      dependsOnFeKeys: ['ATL-132'], themeFeIds: [], description: null,
+      dependsOnFeKeys: ['ATL-132'], description: null,
     },
     {
       feKey: 'ATL-132', projectSlug: 'atlas', type: 'T',
@@ -793,7 +746,7 @@ const persist = debounce((view) => {
       labels: ['offline'], estimate: 12,
       startDate: '2026-05-04', endDate: '2026-05-06',
       parentFeKey: 'ATL-130', relatedToFeKeys: [],
-      dependsOnFeKeys: ['ATL-131'], themeFeIds: [], description: null,
+      dependsOnFeKeys: ['ATL-131'], description: null,
     },
     {
       feKey: 'ATL-131', projectSlug: 'atlas', type: 'T',
@@ -802,7 +755,7 @@ const persist = debounce((view) => {
       labels: ['offline', 'spike'], estimate: 4,
       startDate: '2026-04-29', endDate: '2026-04-30',
       parentFeKey: 'ATL-130', relatedToFeKeys: [],
-      dependsOnFeKeys: [], themeFeIds: [], description: null,
+      dependsOnFeKeys: [], description: null,
     },
     // ATL-130 Epic; estimate=42 in FE dropped (Epic).
     {
@@ -812,7 +765,7 @@ const persist = debounce((view) => {
       labels: ['offline', 'q2'], estimate: null,
       startDate: null, endDate: null,
       parentFeKey: null, relatedToFeKeys: [],
-      dependsOnFeKeys: [], themeFeIds: [], description: null,
+      dependsOnFeKeys: [], description: null,
     },
     {
       feKey: 'ATL-119', projectSlug: 'atlas', type: 'B',
@@ -821,7 +774,7 @@ const persist = debounce((view) => {
       labels: ['offline', 'regression'], estimate: 6,
       startDate: '2026-04-29', endDate: '2026-04-30',
       parentFeKey: null, relatedToFeKeys: [],
-      dependsOnFeKeys: [], themeFeIds: [], description: null,
+      dependsOnFeKeys: [], description: null,
     },
     {
       feKey: 'ATL-118', projectSlug: 'atlas', type: 'B',
@@ -830,7 +783,7 @@ const persist = debounce((view) => {
       labels: ['offline', 'map'], estimate: 5,
       startDate: '2026-04-26', endDate: '2026-04-30',
       parentFeKey: null, relatedToFeKeys: [],
-      dependsOnFeKeys: [], themeFeIds: ['THM-1', 'THM-3'], description: null,
+      dependsOnFeKeys: [], description: null,
     },
     // ATL-115 Story; estimate=3 in FE dropped (Story).
     {
@@ -840,7 +793,7 @@ const persist = debounce((view) => {
       labels: ['mobile', 'map'], estimate: null,
       startDate: null, endDate: null,
       parentFeKey: 'ATL-100', relatedToFeKeys: [],
-      dependsOnFeKeys: [], themeFeIds: ['THM-3'], description: null,
+      dependsOnFeKeys: [], description: null,
     },
     {
       feKey: 'ATL-112', projectSlug: 'atlas', type: 'T',
@@ -849,7 +802,7 @@ const persist = debounce((view) => {
       labels: ['frontend'], estimate: 2,
       startDate: null, endDate: '2026-05-15',
       parentFeKey: null, relatedToFeKeys: [],
-      dependsOnFeKeys: [], themeFeIds: [], description: null,
+      dependsOnFeKeys: [], description: null,
     },
     // ATL-110 Story; estimate=5 in FE dropped (Story).
     {
@@ -859,7 +812,7 @@ const persist = debounce((view) => {
       labels: ['map'], estimate: null,
       startDate: null, endDate: null,
       parentFeKey: 'ATL-100', relatedToFeKeys: [],
-      dependsOnFeKeys: [], themeFeIds: ['THM-3'], description: null,
+      dependsOnFeKeys: [], description: null,
     },
     {
       feKey: 'ATL-104', projectSlug: 'atlas', type: 'B',
@@ -868,7 +821,7 @@ const persist = debounce((view) => {
       labels: ['imports'], estimate: 3,
       startDate: null, endDate: null,
       parentFeKey: null, relatedToFeKeys: [],
-      dependsOnFeKeys: [], themeFeIds: [], description: null,
+      dependsOnFeKeys: [], description: null,
     },
     // ATL-100 Epic; estimate=34 in FE dropped (Epic).
     {
@@ -878,7 +831,7 @@ const persist = debounce((view) => {
       labels: ['q4', 'collaboration'], estimate: null,
       startDate: null, endDate: null,
       parentFeKey: null, relatedToFeKeys: [],
-      dependsOnFeKeys: [], themeFeIds: [], description: null,
+      dependsOnFeKeys: [], description: null,
     },
     {
       feKey: 'ATL-98', projectSlug: 'atlas', type: 'T',
@@ -887,7 +840,7 @@ const persist = debounce((view) => {
       labels: ['ops'], estimate: 2,
       startDate: '2026-04-14', endDate: '2026-04-21',
       parentFeKey: null, relatedToFeKeys: [],
-      dependsOnFeKeys: [], themeFeIds: [], description: null,
+      dependsOnFeKeys: [], description: null,
     },
   ];
 
@@ -969,20 +922,6 @@ const persist = debounce((view) => {
     });
   }
 
-  // ── Issue → theme membership ────────────────────────────────────────
-  const issueThemeInserts: Array<{ issueId: string; themeId: string }> = [];
-  for (const s of issueSeeds) {
-    const issueId = issueIdFor(s.feKey);
-    for (const feThemeId of s.themeFeIds) {
-      const themeId = themeIdByFeId.get(feThemeId);
-      if (!themeId) throw new Error(`Seed: theme ${feThemeId} not found`);
-      issueThemeInserts.push({ issueId, themeId });
-    }
-  }
-  if (issueThemeInserts.length > 0) {
-    await knex('issue_themes').insert(issueThemeInserts);
-  }
-
   // ── Issue relates (canonicalised, deduped) ──────────────────────────
   const seenRelates = new Set<string>();
   const relatesInserts: Array<{ aId: string; bId: string }> = [];
@@ -1036,9 +975,9 @@ const persist = debounce((view) => {
       '    maya@acme.com        / password123        (acme write)',
       '    priya@acme.com       / password123        (acme write)',
       '    avery@acme.com       / password123        (acme read)',
-      `  ${issueInsertRows.length} issues, ${themesSeed.length} themes,`,
+      `  ${issueInsertRows.length} issues,`,
       `  ${relatesInserts.length} relates / ${depInserts.length} depends-on links,`,
-      `  ${issueThemeInserts.length} theme memberships, ${ruleInserts.length} transition rules.`,
+      `  ${ruleInserts.length} transition rules.`,
     ].join('\n')
   );
 }

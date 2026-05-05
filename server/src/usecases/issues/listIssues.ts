@@ -1,5 +1,4 @@
 import * as issueService from '../../services/issueService.js';
-import * as themeService from '../../services/themeService.js';
 import * as issueLinksService from '../../services/issueLinksService.js';
 import type { Issue } from '../../entities/Issue.js';
 import type { IssueFilters } from '../../services/issueService.js';
@@ -11,11 +10,10 @@ import type { IssueView } from './getIssue.js';
  *
  *   1. children-of-parents map
  *   2. parent-key map
- *   3. theme-ids-by-issue map
- *   4. relates-by-issue map (one query, both directions)
- *   5. dependsOn-by-issue map
- *   6. dependedOnBy-by-issue map
- *   7. final batched key resolution for relates/depends ids
+ *   3. relates-by-issue map (one query, both directions)
+ *   4. dependsOn-by-issue map
+ *   5. dependedOnBy-by-issue map
+ *   6. final batched key resolution for relates/depends ids
  *
  * No N+1 — important because list endpoints are the hot path.
  */
@@ -29,14 +27,12 @@ async function decorate(issues: Issue[]): Promise<IssueView[]> {
   const [
     childrenMap,
     parentKeyMap,
-    themesByIssue,
     relatesByIssue,
     dependsOnByIssue,
     dependedOnByByIssue,
   ] = await Promise.all([
     issueService.findChildrenIdsByParentIds(issueIds),
     issueService.findKeysByIds(parentIds),
-    themeService.findThemeIdsForIssues(issueIds),
     issueLinksService.findRelatedIdsByIssues(issueIds),
     issueLinksService.findDependsOnByIssues(issueIds),
     issueLinksService.findDependedOnByByIssues(issueIds),
@@ -67,12 +63,10 @@ async function decorate(issues: Issue[]): Promise<IssueView[]> {
       .map((id) => linkedKeyMap.get(id))
       .filter((k): k is string => Boolean(k))
       .sort();
-    const themes = themesByIssue.get(issue.id) ?? [];
 
     return Object.assign(Object.create(Object.getPrototypeOf(issue)), issue, {
       parent,
       children: childKeys,
-      themes,
       relatedTo: relatedKeys,
       dependsOn: dependsOnKeys,
       dependedOnBy: dependedOnByKeys,
