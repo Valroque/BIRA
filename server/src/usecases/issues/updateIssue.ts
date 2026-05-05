@@ -9,6 +9,7 @@ import {
   type Role,
 } from '../../lib/constants.js';
 import { evaluateTransition } from '../workflows/evaluateTransition.js';
+import { validateAttachmentRefs } from '../../lib/validateAttachmentRefs.js';
 
 export interface UpdateIssuePatch {
   title?: string;
@@ -20,7 +21,12 @@ export interface UpdateIssuePatch {
   startDate?: string | null;
   endDate?: string | null;
   estimate?: number | null;
+  // Slice C — `attachment:<uuid>` refs to files in the same workspace.
+  // Replace-semantics: the array passed in fully replaces what's stored.
+  descriptionAttachmentIds?: string[];
 }
+
+const MAX_DESCRIPTION_ATTACHMENTS = 20;
 
 /**
  * Acting context for the workflow status guard. When provided and the
@@ -81,6 +87,23 @@ export async function updateIssue(
   if (patch.estimate !== undefined && patch.estimate !== null) {
     if (!Number.isInteger(patch.estimate) || patch.estimate < 0) {
       throw new AppError('estimate must be a non-negative integer', 400);
+    }
+  }
+
+  // Slice C — description attachment refs. Mirrors createIssue: max 20,
+  // workspace-scoped existence check, allowed on every issue type.
+  if (patch.descriptionAttachmentIds !== undefined) {
+    if (!Array.isArray(patch.descriptionAttachmentIds)) {
+      throw new AppError('descriptionAttachmentIds must be an array', 400);
+    }
+    if (patch.descriptionAttachmentIds.length > MAX_DESCRIPTION_ATTACHMENTS) {
+      throw new AppError(
+        `at most ${MAX_DESCRIPTION_ATTACHMENTS} description attachments are allowed`,
+        400
+      );
+    }
+    if (patch.descriptionAttachmentIds.length > 0) {
+      await validateAttachmentRefs(workspaceId, patch.descriptionAttachmentIds);
     }
   }
 

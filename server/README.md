@@ -179,7 +179,7 @@ unarchived.
 Slug is intentionally immutable — it's load-bearing in URLs and FE
 localStorage keys; renaming is a separate migration story.
 
-### Issues (slice 1 — basic CRUD; slice 2 — hierarchy)
+### Issues (slice 1 — basic CRUD; slice 2 — hierarchy; slice C — description attachments)
 
 Issues live under a project. The human-readable `key` (e.g. `CMT-241`)
 is allocated atomically per project via `projects.next_issue_number`
@@ -230,7 +230,7 @@ to keep the type / scope / cycle validation in one place.
 - Parent must live in the same workspace AND the same project.
 - Self-parent and cycles are rejected.
 
-Response shape (slice 2):
+Response shape (slice 2 + slice C additions):
 ```ts
 {
   id, key, workspaceId, projectId,
@@ -242,6 +242,17 @@ Response shape (slice 2):
   parentIssueId: string | null,    // internal uuid (kept for round-trip)
   parent: string | null,           // parent issue KEY, e.g. 'CMT-7'
   children: string[],              // child issue KEYS, ordered by seq asc
+  startDate: string | null,        // YYYY-MM-DD; T/B only
+  endDate: string | null,          // YYYY-MM-DD; T/B only
+  estimate: number | null,         // points; T/B only
+  // Slice C — `attachment:<uuid>` refs to files in this workspace.
+  // Allowed on every issue type; max 20 per issue. Validated for
+  // format + workspace-scoped existence on create / update; dangling
+  // refs are silently filtered from `descriptionAttachments` on read.
+  descriptionAttachmentIds: string[],
+  // GET-by-key only — list endpoints OMIT this field. Hydrated from
+  // `descriptionAttachmentIds` via a single batched file lookup.
+  descriptionAttachments?: FileView[],
   seq: number,
   createdAt, updatedAt
 }
@@ -283,7 +294,7 @@ Postgres test database (`bira_test`). Isolation comes from `truncateAll()`
 in `beforeEach`; vitest runs a single forked worker so there's no
 cross-file interference.
 
-**Coverage** (38 files, 299 tests):
+**Coverage** (45 files, 361 tests):
 
 | Area | Files |
 |---|---|
@@ -294,8 +305,9 @@ cross-file interference.
 | Tenant members | `tests/admin/` — admin password reset |
 | Workspaces | `tests/workspaces/` — list, create, get, update, archive, unarchive |
 | Projects | `tests/projects/` — list, create, get |
-| Issues | `tests/issues/` — create, get, list (project + workspace), update, key allocation (concurrency), set parent (hierarchy) |
+| Issues | `tests/issues/` — create, get, list (project + workspace), update, key allocation (concurrency), set parent (hierarchy), description attachments (slice C) |
 | Files | `tests/files/` — upload, download, delete |
+| Comments | `tests/comments/` — create, list, update, delete |
 
 ```bash
 # one-time: copy the test env file and set up bira_test DB
@@ -345,6 +357,31 @@ may delete. Returns `204 No Content`.
   No extra infrastructure needed; suitable for dev and small installs.
 - `s3` — stub that throws HTTP 501. Full S3 implementation is deferred
   pending explicit approval to add the AWS SDK dep.
+
+#### Attachment ref scheme (`attachment:<uuid>`)
+
+Comments (slice B) and issue descriptions (slice C) both reference files
+via the same `attachment:<uuid>` ref string stored in a `text[]` column —
+`comments.attachment_ids` and `issues.description_attachment_ids`
+respectively. The prefix keeps these columns self-describing and
+forward-compatible with other ref types.
+
+- Helpers live at `src/lib/attachmentRefs.ts` (`parseAttachmentRef`,
+  `buildAttachmentRef`, `extractFileIds`).
+- `src/lib/validateAttachmentRefs.ts` does the workspace-scoped
+  existence check used at every write path (create / update). It throws
+  HTTP 400 on malformed refs OR refs pointing at files outside the
+  current workspace.
+- Reads silently filter dangling refs (file deleted after the comment /
+  issue was last edited) from the *expanded* views, while the raw refs
+  array is preserved verbatim as the source of truth.
+- Limits: comments cap at **10** attachments per record;
+  issue-description attachments cap at **20** (descriptions tend to
+  carry more inline images).
+
+Files are NOT cascade-deleted when a comment or issue that references
+them is deleted — the files table is independent and a single file may
+be referenced from multiple places.
 
 ## What's NOT here yet
 

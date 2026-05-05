@@ -27,6 +27,10 @@ export interface IssueRow {
   startDate: Date | string | null;
   endDate: Date | string | null;
   estimate: number | null;
+  // Slice C: `attachment:<uuid>` refs to files referenced by this issue's
+  // description. Format / validation lives in `lib/attachmentRefs.ts` and
+  // `lib/validateAttachmentRefs.ts`; entity stores the raw array.
+  descriptionAttachmentIds: string[];
   createdAt: Date | string;
   updatedAt: Date | string | null;
 }
@@ -57,6 +61,8 @@ export class Issue {
   readonly startDate: string | null;
   readonly endDate: string | null;
   readonly estimate: number | null;
+  // Slice C — raw `attachment:<uuid>` refs (see header comment on IssueRow).
+  readonly descriptionAttachmentIds: string[];
   readonly createdAt: string;
   readonly updatedAt: string | null;
 
@@ -116,6 +122,14 @@ export class Issue {
         : typeof row.estimate === 'number'
           ? row.estimate
           : Number(row.estimate);
+    // Same defensive treatment as `labels` — pg returns text[] as JS
+    // arrays under knex-stringcase, but guard against null/undefined
+    // (older rows pre-migration would have been NULL — though the
+    // migration sets a default, this keeps fromRow tolerant for tests
+    // that build raw rows).
+    this.descriptionAttachmentIds = Array.isArray(row.descriptionAttachmentIds)
+      ? row.descriptionAttachmentIds
+      : [];
     this.createdAt = toISO(row.createdAt, ENTITY, 'createdAt');
     this.updatedAt = row.updatedAt ? toISO(row.updatedAt, ENTITY, 'updatedAt') : null;
   }

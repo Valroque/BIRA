@@ -21,6 +21,7 @@ const COLUMNS = [
   'start_date',
   'end_date',
   'estimate',
+  'description_attachment_ids',
   'created_at',
   'updated_at',
 ] as const;
@@ -105,6 +106,9 @@ export interface CreateIssueInput {
   startDate?: string | null;
   endDate?: string | null;
   estimate?: number | null;
+  // Slice C — raw `attachment:<uuid>` refs. Validation happens at the
+  // usecase layer; service stores verbatim.
+  descriptionAttachmentIds?: string[];
 }
 
 export async function create(input: CreateIssueInput, trx?: Q): Promise<Issue> {
@@ -126,6 +130,7 @@ export async function create(input: CreateIssueInput, trx?: Q): Promise<Issue> {
       startDate: input.startDate ?? null,
       endDate: input.endDate ?? null,
       estimate: input.estimate ?? null,
+      descriptionAttachmentIds: input.descriptionAttachmentIds ?? [],
     })
     .returning(COLUMNS)) as IssueRow[];
   return Issue.fromRow(row);
@@ -147,6 +152,8 @@ export interface UpdateIssueInput {
   startDate?: string | null;
   endDate?: string | null;
   estimate?: number | null;
+  // Slice C — raw `attachment:<uuid>` refs. Validation at the usecase layer.
+  descriptionAttachmentIds?: string[];
 }
 
 export async function updateById(
