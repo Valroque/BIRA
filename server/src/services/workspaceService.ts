@@ -1,6 +1,9 @@
+import type { Knex } from 'knex';
 import { db } from '../db/knex.js';
 import { Workspace, type WorkspaceRow } from '../entities/Workspace.js';
 import type { WorkspaceStatus } from '../lib/constants.js';
+
+type Q = Knex | Knex.Transaction;
 
 const COLUMNS = [
   'id',
@@ -22,8 +25,12 @@ export async function getById(id: string): Promise<Workspace | null> {
   return row ? Workspace.fromRow(row) : null;
 }
 
-export async function findBySlug(tenantId: string, slug: string): Promise<Workspace | null> {
-  const row = (await db('workspaces')
+export async function findBySlug(
+  tenantId: string,
+  slug: string,
+  trx?: Q
+): Promise<Workspace | null> {
+  const row = (await (trx ?? db)('workspaces')
     .where('tenant_id', tenantId)
     .whereRaw('LOWER(slug) = LOWER(?)', [slug])
     .select(COLUMNS)
@@ -55,8 +62,8 @@ export interface CreateWorkspaceInput {
   bg: string;
 }
 
-export async function create(input: CreateWorkspaceInput): Promise<Workspace> {
-  const [row] = (await db('workspaces')
+export async function create(input: CreateWorkspaceInput, trx?: Q): Promise<Workspace> {
+  const [row] = (await (trx ?? db)('workspaces')
     .insert({
       tenantId: input.tenantId,
       slug: input.slug,

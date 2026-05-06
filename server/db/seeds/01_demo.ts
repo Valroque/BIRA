@@ -1,5 +1,6 @@
 import type { Knex } from 'knex';
 import { hashPassword } from '../../src/lib/passwordUtils.js';
+import { seedDefaultWorkflowsForWorkspace } from '../../src/lib/defaultWorkflows.js';
 
 /**
  * Seed:
@@ -253,182 +254,14 @@ export async function seed(knex: Knex): Promise<void> {
   };
 
   // ── Workflows (Acme only) ────────────────────────────────────────────
-  // Mirrors `WORKFLOWS` in web/src/fixtures.ts. Three definitions:
-  // `default` (six-state with reopen + request-changes back-edges),
-  // `epic-coarse` (three-state), `epic-detailed` (five-state w/ review).
-  const workflowDefs = [
-    {
-      slug: 'default',
-      name: 'Default',
-      description:
-        'The standard six-state flow with reopen and request-changes back-edges. Used by Task, Bug, and Story by default.',
-      nodes: [
-        { key: 'n1', statusId: 'backlog', x: 40, y: 240, isInitial: true, isTerminal: false },
-        { key: 'n2', statusId: 'todo', x: 220, y: 240, isInitial: false, isTerminal: false },
-        { key: 'n3', statusId: 'in-progress', x: 400, y: 160, isInitial: false, isTerminal: false },
-        { key: 'n4', statusId: 'in-review', x: 580, y: 160, isInitial: false, isTerminal: false },
-        { key: 'n5', statusId: 'done', x: 760, y: 240, isInitial: false, isTerminal: true },
-        { key: 'n6', statusId: 'canceled', x: 400, y: 380, isInitial: false, isTerminal: true },
-      ],
-      edges: [
-        { fromKey: 'n1', toKey: 'n2', label: null, dashed: false },
-        { fromKey: 'n2', toKey: 'n3', label: null, dashed: false },
-        { fromKey: 'n3', toKey: 'n4', label: 'PR opened', dashed: false },
-        { fromKey: 'n4', toKey: 'n5', label: 'approve', dashed: true },
-        { fromKey: 'n4', toKey: 'n3', label: 'request changes', dashed: false },
-        { fromKey: 'n3', toKey: 'n2', label: null, dashed: false },
-        { fromKey: 'n2', toKey: 'n6', label: null, dashed: false },
-        { fromKey: 'n3', toKey: 'n6', label: null, dashed: false },
-        { fromKey: 'n5', toKey: 'n2', label: 'reopen', dashed: true },
-      ],
-    },
-    {
-      slug: 'epic-coarse',
-      name: 'Coarse',
-      description:
-        'Three-state flow for tracking epics loosely. No review phase; back-edge for reopen.',
-      nodes: [
-        { key: 'n1', statusId: 'todo', x: 100, y: 220, isInitial: true, isTerminal: false },
-        { key: 'n2', statusId: 'in-progress', x: 360, y: 220, isInitial: false, isTerminal: false },
-        { key: 'n3', statusId: 'done', x: 620, y: 220, isInitial: false, isTerminal: true },
-      ],
-      edges: [
-        { fromKey: 'n1', toKey: 'n2', label: 'start', dashed: false },
-        { fromKey: 'n2', toKey: 'n3', label: 'finish', dashed: false },
-        { fromKey: 'n3', toKey: 'n2', label: 'reopen', dashed: true },
-      ],
-    },
-    {
-      slug: 'epic-detailed',
-      name: 'Detailed (with spec & review)',
-      description:
-        'Five-state flow for epics that go through a spec phase and require review before close.',
-      nodes: [
-        { key: 'n1', statusId: 'backlog', x: 40, y: 240, isInitial: true, isTerminal: false },
-        { key: 'n2', statusId: 'todo', x: 220, y: 240, isInitial: false, isTerminal: false },
-        { key: 'n3', statusId: 'in-progress', x: 400, y: 240, isInitial: false, isTerminal: false },
-        { key: 'n4', statusId: 'in-review', x: 580, y: 240, isInitial: false, isTerminal: false },
-        { key: 'n5', statusId: 'done', x: 760, y: 240, isInitial: false, isTerminal: true },
-      ],
-      edges: [
-        { fromKey: 'n1', toKey: 'n2', label: 'spec', dashed: false },
-        { fromKey: 'n2', toKey: 'n3', label: 'start', dashed: false },
-        { fromKey: 'n3', toKey: 'n4', label: 'submit for review', dashed: false },
-        { fromKey: 'n4', toKey: 'n3', label: 'request changes', dashed: false },
-        { fromKey: 'n4', toKey: 'n5', label: 'approve', dashed: true },
-        { fromKey: 'n5', toKey: 'n3', label: 'reopen', dashed: true },
-      ],
-    },
-  ];
-
-  const workflowRows = (await knex('workflows')
-    .insert(
-      workflowDefs.map((w) => ({
-        workspaceId: acmeWorkspaceId,
-        slug: w.slug,
-        name: w.name,
-        description: w.description,
-      }))
-    )
-    .returning(['id', 'slug'])) as Array<{ id: string; slug: string }>;
-
-  const workflowIdBySlug = new Map(workflowRows.map((w) => [w.slug, w.id]));
-
-  // Insert nodes per workflow and remember the (workflowSlug, nodeKey) -> id
-  // mapping so we can wire up transitions next.
-  const nodeIdByWorkflowAndKey = new Map<string, string>();
-  for (const def of workflowDefs) {
-    const workflowId = workflowIdBySlug.get(def.slug)!;
-    const nodeRows = (await knex('workflow_nodes')
-      .insert(
-        def.nodes.map((n) => ({
-          workflowId,
-          statusId: n.statusId,
-          x: n.x,
-          y: n.y,
-          isInitial: n.isInitial,
-          isTerminal: n.isTerminal,
-        }))
-      )
-      .returning(['id', 'statusId'])) as Array<{ id: string; statusId: string }>;
-
-    // Map back to the fixture's `nKEY` ids by reading nodes in insert order.
-    def.nodes.forEach((n, i) => {
-      const inserted = nodeRows[i];
-      if (!inserted) throw new Error(`Seed: workflow_node insert mismatch for ${def.slug}/${n.key}`);
-      nodeIdByWorkflowAndKey.set(`${def.slug}:${n.key}`, inserted.id);
-    });
-  }
-
-  // Insert transitions; track ids so we can attach rules.
-  const transitionId = new Map<string, string>(); // `${workflowSlug}:${fromKey}->${toKey}` -> id
-  for (const def of workflowDefs) {
-    const workflowId = workflowIdBySlug.get(def.slug)!;
-    const transitionInserts = def.edges.map((e) => ({
-      workflowId,
-      fromNodeId: nodeIdByWorkflowAndKey.get(`${def.slug}:${e.fromKey}`)!,
-      toNodeId: nodeIdByWorkflowAndKey.get(`${def.slug}:${e.toKey}`)!,
-      label: e.label,
-      dashed: e.dashed,
-    }));
-    const inserted = (await knex('workflow_transitions')
-      .insert(transitionInserts)
-      .returning(['id', 'fromNodeId', 'toNodeId'])) as Array<{
-      id: string;
-      fromNodeId: string;
-      toNodeId: string;
-    }>;
-    def.edges.forEach((e, i) => {
-      const row = inserted[i];
-      if (!row) throw new Error(`Seed: workflow_transition insert mismatch for ${def.slug}`);
-      transitionId.set(`${def.slug}:${e.fromKey}->${e.toKey}`, row.id);
-    });
-  }
-
-  // ── Transition rules ────────────────────────────────────────────────
-  // The FE fixtures store node-level rule *counts* only (UI hint), so we
-  // hand-pick a small set that demonstrates each of the five rule types.
-  // These are the rules listed in the seed-expansion task spec.
-  const ruleInserts: Array<{
-    transitionId: string;
-    type: string;
-    params: object | null;
-  }> = [];
-
-  const addRule = (
-    workflowSlug: string,
-    fromKey: string,
-    toKey: string,
-    type: string,
-    params: object | null
-  ) => {
-    const tid = transitionId.get(`${workflowSlug}:${fromKey}->${toKey}`);
-    if (!tid) {
-      throw new Error(`Seed: transition ${workflowSlug}:${fromKey}->${toKey} not found for rule`);
-    }
-    ruleInserts.push({ transitionId: tid, type, params });
-  };
-
-  // default: todo -> in-progress requires the issue to be assigned.
-  addRule('default', 'n2', 'n3', 'assignee_only', null);
-  // default: in-progress -> in-review requires estimate + assignee set.
-  addRule('default', 'n3', 'n4', 'required_fields', { fields: ['estimate', 'assignee'] });
-  // default: in-review -> done requires write+ AND not the reporter.
-  addRule('default', 'n4', 'n5', 'role', { role: 'write' });
-  addRule('default', 'n4', 'n5', 'not_self', null);
-  // epic-detailed: in-review -> done requires admin.
-  addRule('epic-detailed', 'n4', 'n5', 'role', { role: 'admin' });
-
-  // jsonb columns need stringification with knex when inserting via plain JS
-  // objects. knex-stringcase doesn't touch the column value itself; pg accepts
-  // JSON either way but stringifying makes the intent explicit.
-  await knex('workflow_transition_rules').insert(
-    ruleInserts.map((r) => ({
-      transitionId: r.transitionId,
-      type: r.type,
-      params: r.params === null ? null : JSON.stringify(r.params),
-    }))
-  );
+  // Source of truth is `src/lib/defaultWorkflows.ts` — both this seed and
+  // `createWorkspace` route through `seedDefaultWorkflowsForWorkspace`,
+  // so every freshly-created workspace ships with the same three
+  // templates Acme is seeded with.
+  let workflowIdBySlug = new Map<string, string>();
+  await knex.transaction(async (trx) => {
+    workflowIdBySlug = await seedDefaultWorkflowsForWorkspace(trx, acmeWorkspaceId);
+  });
 
   // ── Project ↔ workflow assignments ──────────────────────────────────
   // From SEED_PROJECTS[].workflows in web/src/fixtures.ts:
@@ -961,6 +794,9 @@ const persist = debounce((view) => {
     await knex('issue_dependencies').insert(depInserts);
   }
 
+  const ruleCountRow = (await knex('workflow_transition_rules').count<{ count: string }>('id as count').first()) as { count: string } | undefined;
+  const ruleCount = Number(ruleCountRow?.count ?? 0);
+
   // eslint-disable-next-line no-console
   console.log(
     [
@@ -977,7 +813,7 @@ const persist = debounce((view) => {
       '    avery@acme.com       / password123        (acme read)',
       `  ${issueInsertRows.length} issues,`,
       `  ${relatesInserts.length} relates / ${depInserts.length} depends-on links,`,
-      `  ${ruleInserts.length} transition rules.`,
+      `  ${ruleCount} transition rules.`,
     ].join('\n')
   );
 }
