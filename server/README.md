@@ -355,7 +355,7 @@ of writing, 45 files / 345 it-blocks):
 | Auth | `tests/auth/` — register, login, refresh-token, profile, updateProfile, changePassword |
 | Middleware | `tests/middleware/` — passwordResetGate (423 gate) |
 | Tenants | `tests/tenants/` — list, create, get, deactivate, reactivate, deactivated gate |
-| Tenant members | `tests/admin/` — admin password reset |
+| Tenant members | `tests/tenantMembers/` — list directory; `tests/admin/` — admin password reset |
 | Workspaces | `tests/workspaces/` — list, create, get, update, archive, unarchive |
 | Projects | `tests/projects/` — list, create, get |
 | Issues | `tests/issues/` — create, get, list (project + workspace), update, key allocation (concurrency), set parent (hierarchy), description attachments (slice C) |
@@ -526,6 +526,27 @@ jsonb array — see `docs/specs/mentions.md`.
 Both `types=user` and `types=team` are supported (Domain B). Team hits
 return `{ id, type:'team', label, sublabel, slug, color }`. The default
 when `types` is omitted now combines users and teams.
+
+### Tenant members
+
+| Method | Path                                              | Auth          |
+|--------|---------------------------------------------------|---------------|
+| GET    | `/api/tenants/:t/members`                         | tenant member |
+| GET    | `/api/tenants/:t/members/:userId`                 | tenant member |
+
+`GET /api/tenants/:t/members` returns every row in `tenant_memberships`
+for the tenant, hydrated with user details (id, email, displayName,
+firstName, lastName, avatar, isActive). Sorted alphabetically by
+display name. Open to any tenant member (read+) — name and email
+are not sensitive within a tenant.
+
+Service is two independent queries (`tenant_memberships` + `users`)
+combined in JS, no SQL JOIN — see
+`feedback_no_db_joins_without_approval` rule.
+
+Per-user mutations (reset password, deactivate, reactivate) live on
+the `:userId` sub-routes — see "Password reset gate" and "User
+(de)activation" above.
 
 ### Workspace members
 

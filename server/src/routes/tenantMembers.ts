@@ -7,12 +7,26 @@ import { logger } from '../middleware/logger.js';
 import { adminResetPassword } from '../usecases/users/adminResetPassword.js';
 import { setUserActive } from '../usecases/users/setUserActive.js';
 import { getTenantUserById } from '../usecases/users/getTenantUserById.js';
+import { listTenantMembers } from '../usecases/tenantMembers/listMembers.js';
 
 // mergeParams: parent router (tenants.ts) holds :tenantSlug — and the
 // tenant scope is already resolved by the time we mount this router.
 const router: Router = Router({ mergeParams: true });
 
 const UserIdSchema = z.string().uuid();
+
+// GET /api/tenants/:tenantSlug/members — tenant directory.
+// Open to any tenant member (read+) so the FE can render the list without
+// elevation; reaching this handler already requires `resolveTenantScope`,
+// which gates non-members. Mutations live on per-user sub-routes below.
+router.get(
+  '/',
+  asyncHandler(async (req, res) => {
+    if (!req.scope) throw new AppError('Tenant scope missing', 500);
+    const items = await listTenantMembers({ tenantId: req.scope.tenantId });
+    res.json({ success: true, data: items });
+  })
+);
 
 // GET /api/tenants/:tenantSlug/members/:userId — single-user lookup, tenant
 // scoped. Powers the FE's UUID-fallback path for resolving display names of

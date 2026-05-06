@@ -23,7 +23,8 @@ Task: $ARGUMENTS
 
 - Read `CLAUDE.md` end-to-end. It's the load-bearing brief.
 - Re-read `.claude/rules/v1-constraints.md`. Many requests implicitly touch v1 constraints — flag them before planning a change that violates one.
-- Identify which screens, components, and fixtures are affected.
+- For any backend-touching task, also read `server/README.md` — it's the canonical endpoint catalogue, layering map, error model, and auth/scope middleware reference. The backend phase is **live** (started 2026-05-04); don't plan as if it's still design-only.
+- Identify which screens, components, fixtures, routes, usecases, services, and entities are affected. FE state of fixture → API migration is uneven — some surfaces are wired (workspace members, project access, issues), others are still fixture-backed (e.g. tenant members at the time of writing). Verify the data source before assuming.
 - Search the codebase for `Drift fix:` comments near the area you're touching — they record where the project explicitly walked away from a previous design choice.
 
 ### 2. Plan
@@ -54,16 +55,19 @@ Use the Agent tool to spawn parallel subagents for independent work items.
 - UX constraints: empty states, loading states, error states, keyboard behaviour, click-vs-drag coexistence (especially around the table header).
 - Acceptance criteria phrased as "the user can do X" and "the page handles Y empty state".
 
-**For backend work** — there is no backend yet. If a task implies one, **stop and escalate**: confirm with the user that the design-first phase is being lifted before planning backend changes. Don't sneak backend tasks into a frontend plan. (See `feedback_design_first` in user memory.)
+**For backend work** — the backend phase is live. Layering is `routes → usecases → services → entities` (see `server/README.md` for the full map). Give each backend agent:
 
-If the user has explicitly green-lit backend work, give each backend agent:
-
-- Exact file paths (`src/routes/`, `src/usecases/<domain>/`, `src/services/`, `src/entities/`).
-- Entity shape and `fromRow()` mapping.
+- Exact file paths (`server/src/routes/<domain>.ts`, `server/src/usecases/<domain>/<verbPhrase>.ts`, `server/src/services/<domain>Service.ts`, `server/src/entities/<Entity>.ts`).
+- Entity shape and `fromRow()` mapping (if a new/changed entity).
 - UseCase signature, scope → filter mapping, business rules, response shape.
 - Service method signatures with PLAIN data filters (never `req.scope`).
-- Tenant scoping requirements.
+- Tenant scoping requirements + which auth/scope middleware to mount in which order.
+- Hard rules to honour: no SQL JOINs without explicit approval (memory: `feedback_no_db_joins_without_approval`), UUID FKs only (slugs are URL/API-only), no business logic in route handlers.
+- Test coverage expected — each new route gets 401 / 403 / happy-path / interesting-failure tests under `server/tests/<domain>/<verb>.test.ts`. Vitest + supertest against the real `bira_test` Postgres DB.
+- Companion-update checklist obligation: tests (hard gate), docs (`server/README.md` etc.), MCP (`mcp/` — `mcp__bira__*` tool wrappers).
 - Acceptance criteria.
+
+FE wiring is usually a **separate slice** — don't bundle it into a BE-shape change unless the user explicitly asks. If a sibling FE surface is still on a fixture and obviously needs migration, the BE agent files a tracking issue rather than wiring inline (memory: `feedback_file_github_issues_for_gaps`).
 
 ### 4. Verify
 
@@ -79,15 +83,21 @@ After agents complete, verify each agent's output before moving on.
 - Are inline styles using `var(--token)` or did raw hex sneak in?
 - Tooltips: are they CSS pseudo-elements that will be clipped by an `overflow:hidden` parent? If so, either remove the parent's clipping or escalate to switch to a portal-based tooltip.
 
-**Architecture review (backend, when applicable):**
+**Architecture review (backend):**
 
-- Business logic in route handlers?
-- UseCases importing `db` directly?
-- Services receiving `req.scope` instead of plain filters?
-- Cross-entity state derivation?
-- Entity constructors missing validation?
+- Business logic in route handlers? (Should be zero — parse, authorize, call usecase, format response.)
+- UseCases importing `db` directly? (They go through services.)
+- Services receiving `req.scope` (or any HTTP-layer object) instead of plain filters?
 - UseCase files named as nouns instead of verb phrases?
-- Tenant scope present on every query?
+- Cross-entity state derivation in the wrong layer?
+- Entity constructors missing `fromRow()` validation?
+- Tenant scope present on every business-table query?
+- New SQL JOINs without explicit user approval? (Default: multiple queries + JS combine.)
+- Slugs used as foreign keys? (UUIDs only.)
+- Auth/scope middleware mounted in the right order on the new route?
+- Test coverage matches the new behaviour — at minimum 401 / 403 / happy-path / interesting-failure?
+
+**Build gate (backend):** `cd server && npm test` — Vitest + supertest against a real Postgres `bira_test` database. The full suite is ~4 min; iterate against single test → containing suite → full cycle (memory: `feedback_test_iteration_three_tier`), don't run the full suite on every change.
 
 **Contract check:**
 
@@ -195,5 +205,4 @@ For each item: file path, line, what's wrong, what to do instead.
 - You do NOT write implementation code directly — you delegate.
 - If a task is small enough to do in 3 edits, say so and switch to direct implementation. Trying to delegate trivial work creates noise.
 - Every agent spec must include file paths, data shapes, and acceptance criteria.
-- Never delegate backend work without explicit user approval that the frontend-first phase is over.
-- Escalate to the user: scope changes, new dependencies, anything irreversible (data shape changes, routing rewrites, design-system additions), or any tension with `.claude/rules/v1-constraints.md`.
+- Escalate to the user: scope changes, new dependencies, anything irreversible (DB migrations on shared envs, schema changes that break existing data, routing rewrites, design-system additions), introducing SQL JOINs, slug-as-FK refactors, or any tension with `.claude/rules/v1-constraints.md`.

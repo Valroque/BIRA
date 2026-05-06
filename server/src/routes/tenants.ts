@@ -2,10 +2,11 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { asyncHandler } from '../middleware/errorHandler.js';
 import { authenticate, requirePasswordResetCleared } from '../middleware/auth.js';
-import { authorize, resolveTenantScope, resolveWorkspaceScope } from '../middleware/tenantScope.js';
+import { authorize, requireActiveTenant, resolveTenantScope, resolveWorkspaceScope } from '../middleware/tenantScope.js';
 import { AppError } from '../lib/errors.js';
 import { listTenants } from '../usecases/tenants/listTenants.js';
 import { createTenant } from '../usecases/tenants/createTenant.js';
+import { updateTenant } from '../usecases/tenants/updateTenant.js';
 import { setTenantStatus } from '../usecases/tenants/setTenantStatus.js';
 import workspacesRouter from './workspaces.js';
 import projectsRouter from './projects.js';
@@ -32,6 +33,19 @@ const CreateTenantSchema = z.object({
   bg: z.string().min(1).max(16),
   plan: z.string().min(1).max(32).optional(),
 });
+
+// Slug + plan are intentionally NOT updatable here — slug is load-bearing in
+// URLs and tenant-keyed localStorage; plan changes belong to a billing flow.
+const UpdateTenantSchema = z
+  .object({
+    name: z.string().min(1).max(255).optional(),
+    letter: z.string().min(1).max(4).optional(),
+    color: z.string().min(1).max(16).optional(),
+    bg: z.string().min(1).max(16).optional(),
+  })
+  .refine((p) => Object.values(p).some((v) => v !== undefined), {
+    message: 'At least one field must be provided',
+  });
 
 const router: Router = Router();
 
@@ -85,6 +99,21 @@ router.get(
         role: req.scope.role,
       },
     });
+  })
+);
+
+// PATCH /api/tenants/:tenantSlug — tenant admin only. Updates display fields
+// (name, letter, color, bg). Slug is immutable. Frozen tenants reject writes
+// via requireActiveTenant.
+router.patch(
+  '/:tenantSlug',
+  authorize('admin'),
+  requireActiveTenant,
+  asyncHandler(async (req, res) => {
+    if (!req.scope) throw new AppError('Scope missing', 500);
+    const patch = UpdateTenantSchema.parse(req.body);
+    const tenant = await updateTenant({ tenantId: req.scope.tenantId, patch });
+    res.json({ success: true, data: tenant });
   })
 );
 

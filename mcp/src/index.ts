@@ -373,6 +373,21 @@ tool(
 );
 
 tool(
+  'list_tenant_members',
+  'List members of a tenant with hydrated user details (id, email, displayName, firstName, lastName, avatar, isActive, role, status, lastSeenAt). Sorted alphabetically by display name. Open to any tenant member (read+).',
+  z.object({
+    tenantSlug: z.string().min(1),
+  }),
+  async ({ tenantSlug }) =>
+    ok(
+      await client.request(
+        'GET',
+        `/api/tenants/${tenantSlug}/members`
+      )
+    )
+);
+
+tool(
   'admin_reset_password',
   'Tenant admin generates a temporary password for another member. The plaintext is returned exactly once — share it OOB. The target user must call change_password before they can interact with tenant data.',
   z.object({

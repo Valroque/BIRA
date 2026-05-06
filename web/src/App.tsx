@@ -7,6 +7,7 @@ import { IssuesProvider } from './state/issues';
 import { UsersProvider } from './state/users';
 import { WorkflowsProvider } from './state/workflows';
 import { WorkspaceMembersProvider } from './state/workspace-members';
+import { TenantMembersProvider } from './state/tenant-members';
 import { TeamsProvider } from './state/teams';
 import { useAuth } from './state/auth';
 import { LoginPage } from './screens/login';
@@ -41,12 +42,14 @@ function RequireAuth() {
 
 function TenantLayout() {
   const { tenant = '' } = useParams<{ tenant: string }>();
-  // WorkspacesProvider is mounted per tenant. The `key` prop forces a fresh
-  // instance whenever the user navigates between tenants, so the new
-  // tenant's localStorage key + seed are loaded cleanly.
+  // WorkspacesProvider + TenantMembersProvider are mounted per tenant. The
+  // `key` prop forces a fresh instance whenever the user navigates between
+  // tenants, so each tenant's directory + localStorage state load cleanly.
   return (
     <WorkspacesProvider tenant={tenant} key={tenant}>
-      <Outlet />
+      <TenantMembersProvider tenant={tenant}>
+        <Outlet />
+      </TenantMembersProvider>
     </WorkspacesProvider>
   );
 }
