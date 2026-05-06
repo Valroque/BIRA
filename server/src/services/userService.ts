@@ -133,3 +133,19 @@ export async function setPassword(
     updatedAt: db.fn.now(),
   });
 }
+
+/**
+ * Flip a user's `isActive` flag. Deactivated users can't log in (login
+ * usecase rejects with 401) and existing sessions fail on the next
+ * request (auth middleware also checks the flag). Refresh-token paths
+ * are blocked too. The user row is preserved — every FK that points
+ * here uses SET NULL or stays valid, so historical assignees /
+ * reporters / authors keep their attribution.
+ */
+export async function setActive(id: string, isActive: boolean): Promise<User | null> {
+  const [row] = (await db('users')
+    .where('id', id)
+    .update({ isActive, updatedAt: db.fn.now() })
+    .returning(PUBLIC_COLUMNS)) as UserRow[];
+  return row ? User.fromRow(row) : null;
+}

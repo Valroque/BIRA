@@ -13,7 +13,7 @@ import { Icon } from '../components/icons';
 import { Field, Hint } from '../components/forms';
 import { TopBar } from '../components/shell';
 import {
-  CURRENT_USER, RESERVED_WORKSPACE_SLUGS, pickProjectColor,
+  RESERVED_WORKSPACE_SLUGS, pickProjectColor,
   type Workspace, type WorkspaceRole,
 } from '../fixtures';
 import { useWorkspaces } from '../state/workspaces';
@@ -341,7 +341,7 @@ function EmptyState({ onCreate }: { onCreate: () => void }) {
 function Footer() {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
-  const signedInAs = user?.email ?? CURRENT_USER.email;
+  const signedInAs = user?.email ?? '';
   const signOut = () => { logout(); navigate('/tenants'); };
   return (
     <div style={{

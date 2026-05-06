@@ -1,11 +1,17 @@
 // Inline @ mention picker — appears just above the caret when the user
 // types `@` in a composer. Renders a small floating list of candidates;
 // Escape or an outside click dismisses without inserting.
+//
+// Search is delegated to `useMentionSearch` (debounced, abort-on-change,
+// surfaces loading + error so the picker can give the user feedback rather
+// than silently flickering). The 5-arg API call lives in
+// `src/api/mentionables.ts`.
 
 import { useRef } from 'react';
 import { useDismiss } from './use-dismiss';
-import { searchMentionables, type MentionableHit } from '../api/mentionables';
-import { useTenantContext } from './shell';
+import { Avatar } from './shell';
+import { useMentionSearch } from '../hooks/useMentionSearch';
+import type { MentionableHit } from '../api/mentionables';
 
 interface MentionPickerProps {
   query: string;
@@ -14,15 +20,17 @@ interface MentionPickerProps {
 }
 
 export function MentionPicker({ query, onSelect, onDismiss }: MentionPickerProps) {
-  const { tenant } = useTenantContext();
   const ref = useRef<HTMLDivElement>(null);
 
   // Escape closes the picker; outside click closes it too.
   useDismiss(ref, onDismiss, true);
 
-  const hits = searchMentionables(tenant, query);
+  const { hits, loading, error } = useMentionSearch(query, { types: ['user', 'team'] });
 
-  if (hits.length === 0) return null;
+  // Hide entirely when there's nothing to show and we're idle — keeps the
+  // composer surface uncluttered until there's a real signal. Loading + error
+  // states render so the user sees feedback while typing.
+  if (!loading && !error && hits.length === 0) return null;
 
   return (
     <div
@@ -37,6 +45,28 @@ export function MentionPicker({ query, onSelect, onDismiss }: MentionPickerProps
         overflow: 'hidden',
       }}
     >
+      {error && (
+        <div
+          style={{
+            padding: '8px 12px',
+            fontSize: 12,
+            color: 'var(--canceled)',
+          }}
+        >
+          Couldn't load suggestions
+        </div>
+      )}
+      {!error && loading && hits.length === 0 && (
+        <div
+          style={{
+            padding: '8px 12px',
+            fontSize: 12,
+            color: 'var(--fg-muted)',
+          }}
+        >
+          Searching…
+        </div>
+      )}
       {hits.map((hit) => (
         <button
           key={`${hit.type}:${hit.id}`}
@@ -66,23 +96,7 @@ export function MentionPicker({ query, onSelect, onDismiss }: MentionPickerProps
             (e.currentTarget as HTMLButtonElement).style.background = 'none';
           }}
         >
-          <span
-            style={{
-              width: 28,
-              height: 28,
-              borderRadius: '50%',
-              background: 'var(--accent-muted)',
-              color: 'var(--accent)',
-              display: 'inline-flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              fontSize: 11,
-              fontWeight: 600,
-              flexShrink: 0,
-            }}
-          >
-            {hit.label.slice(0, 2).toUpperCase()}
-          </span>
+          <Avatar name={hit.label} size={28} color={hit.color ?? undefined} />
           <span style={{ minWidth: 0 }}>
             <div style={{ fontSize: 13, color: 'var(--fg)', fontWeight: 500, lineHeight: 1.3 }}>
               {hit.label}

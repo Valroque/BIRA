@@ -3,7 +3,9 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Icon } from '../components/icons';
 import { TypeChip, StatusDot, Priority, Avatar, KBD, useTenantContext } from '../components/shell';
 import { AttachmentRow, useComposer } from '../components/composer';
-import { issueById, type Issue } from '../fixtures';
+import { type Issue } from '../fixtures';
+import { useIssues } from '../state/issues';
+import { useProjects } from '../state/projects';
 
 const TYPES = [
   { t: 'T', name: 'Task', color: 'var(--type-task)', bg: 'var(--type-task-bg)' },
@@ -31,46 +33,85 @@ export function CreateIssuePage() {
   const navigate = useNavigate();
   const { tenant, workspace, project } = useTenantContext();
   const [searchParams] = useSearchParams();
+  const { getIssue, createIssueLive } = useIssues();
+  const { getProject } = useProjects();
   const close = () => navigate(-1);
-  const desc = useComposer();
+  const desc = useComposer({ tenantSlug: tenant, workspaceSlug: workspace });
 
-  // Optional `?parent=ISSUE-ID` URL param. When set + valid, the form shows
+  // Optional `?parent=ISSUE-KEY` URL param. When set + valid, the form shows
   // the parent as a read-only chip and restricts type choices to the valid
-  // child types for that parent. Invalid / unknown ids are ignored — the
+  // child types for that parent. Invalid / unknown keys are ignored — the
   // user gets the unconstrained form rather than an error wall.
   const parent = useMemo<Issue | null>(() => {
     const raw = searchParams.get('parent');
     if (!raw) return null;
-    const target = issueById(raw);
+    const target = getIssue(raw);
     if (!target) return null;
     if (target.type !== 'E' && target.type !== 'S') return null; // leaves can't be parents
     return target;
-  }, [searchParams]);
+  }, [searchParams, getIssue]);
 
   const allowedTypes = useMemo(() => allowedTypesFor(parent), [parent]);
   const [type, setType] = useState<TypeChar>(() => allowedTypes[0] ?? 'B');
+  const [title, setTitle] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
   // If the parent changes (e.g. user opens the form from a different issue),
   // ensure the currently-selected type is still allowed.
   useEffect(() => {
     if (!allowedTypes.includes(type)) setType(allowedTypes[0] ?? 'B');
   }, [allowedTypes, type]);
 
-  // Submit lands on a real issue's detail page (the closest thing the prototype
-  // can do without persistence).
-  const submit = (e?: FormEvent) => {
+  // Submit hits POST /projects/:p/issues. On success the new issue is
+  // inserted into `useIssues()` cache and we navigate to its detail page
+  // using the BE-allocated key. On failure we keep the modal open and
+  // surface the message inline.
+  const submit = async (e?: FormEvent) => {
     e?.preventDefault();
-    navigate(`/${tenant}/${workspace}/${project}/issue/CMT-241`, { replace: true });
+    if (submitting) return;
+    setSubmitError(null);
+    if (!title.trim()) {
+      setSubmitError('Title is required');
+      return;
+    }
+    if (desc.hasInflight) {
+      setSubmitError('Wait for attachments to finish uploading');
+      return;
+    }
+    const projectInfo = getProject(project);
+    if (!projectInfo) {
+      setSubmitError(`Project '${project}' not found`);
+      return;
+    }
+    setSubmitting(true);
+    const result = await createIssueLive({
+      projectSlug: projectInfo.slug,
+      type,
+      title: title.trim(),
+      description: desc.value.trim() ? desc.value : undefined,
+      parent: parent?.key,
+      descriptionAttachmentIds: desc.attachmentIds.length ? desc.attachmentIds : undefined,
+    });
+    setSubmitting(false);
+    if (!result.ok) {
+      setSubmitError(result.message);
+      return;
+    }
+    navigate(`/${tenant}/${workspace}/${projectInfo.slug}/issue/${result.issue.key}`, { replace: true });
   };
 
   // Esc closes the modal.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') close();
-      if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') submit();
+      if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') void submit();
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [submitting, title, type, parent, project]);
+
+  const projectInfo = getProject(project);
 
   return (
     <div className="bira" style={{
@@ -91,7 +132,7 @@ export function CreateIssuePage() {
           display: 'flex', alignItems: 'center', gap: 10,
         }}>
           <Icon name="folder" size={14} color="var(--fg-muted)" />
-          <span style={{ fontSize: 13, color: 'var(--fg-muted)' }}>Comet</span>
+          <span style={{ fontSize: 13, color: 'var(--fg-muted)' }}>{projectInfo?.name ?? project}</span>
           <Icon name="chevronRight" size={12} color="var(--fg-faint)" />
           <span style={{ fontSize: 13, fontWeight: 600 }}>New issue</span>
           <div style={{ flex: 1 }} />
@@ -118,7 +159,7 @@ export function CreateIssuePage() {
               <Icon name="link" size={12} />
               <span>Parent</span>
               <TypeChip type={parent.type} />
-              <span className="mono" style={{ color: 'var(--fg-muted)' }}>{parent.id}</span>
+              <span className="mono" style={{ color: 'var(--fg-muted)' }}>{parent.key}</span>
               <span style={{
                 color: 'var(--fg)', overflow: 'hidden',
                 textOverflow: 'ellipsis', whiteSpace: 'nowrap',
@@ -162,10 +203,14 @@ export function CreateIssuePage() {
             type="text"
             placeholder="Issue title"
             autoFocus
+            value={title}
+            onChange={(e) => setTitle(e.target.value)}
+            disabled={submitting}
             style={{
               width: '100%', border: 'none', outline: 'none',
               fontSize: 18, fontWeight: 600, padding: '4px 0',
               color: 'var(--fg)', fontFamily: 'var(--font-sans)',
+              background: 'transparent',
             }}
           />
           <div
@@ -193,7 +238,12 @@ export function CreateIssuePage() {
                 background: 'transparent', boxSizing: 'border-box',
               }}
             />
-            <AttachmentRow attachments={desc.attachments} onRemove={desc.removeAttachment} bordered={false} />
+            <AttachmentRow
+              attachments={desc.attachments}
+              onRemove={desc.removeAttachment}
+              onRetry={desc.retry}
+              bordered={false}
+            />
             <div style={{ display: 'flex', alignItems: 'center', gap: 2, marginTop: 2 }}>
               <button
                 type="button"
@@ -209,22 +259,32 @@ export function CreateIssuePage() {
                 onClick={desc.openFilePicker}
                 className="btn btn-ghost btn-sm"
                 style={{ width: 26, padding: 0 }}
-                data-tip="Attach image"
+                data-tip="Attach file"
               >
                 <Icon name="paperclip" size={13} />
               </button>
               <input
                 ref={desc.fileInputRef}
                 type="file"
-                accept="image/*"
                 multiple
                 hidden
                 onChange={desc.handleFileChange}
               />
+              {desc.hasInflight && (
+                <span style={{ marginLeft: 6, fontSize: 11, color: 'var(--fg-muted)' }}>
+                  Uploading…
+                </span>
+              )}
             </div>
           </div>
 
-          {/* Drift fix: removed "Sprint" and "Estimate" meta buttons (out of v1 scope). */}
+          {/*
+            Meta placeholders — priority / assignee / labels are still UI-only
+            in the create form. The detail page can edit all three through
+            patchIssue once the issue is created. Wiring them into the create
+            payload is a follow-up; the BE accepts them as optional fields.
+            Drift fix: removed "Sprint" and "Estimate" meta buttons (out of v1 scope).
+          */}
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 8 }}>
             <MetaBtn icon={<StatusDot status="backlog" size={11} />} label="Backlog" hint="Initial" />
             <MetaBtn icon={<Priority p="urgent" />} label="Urgent" />
@@ -232,6 +292,22 @@ export function CreateIssuePage() {
             <MetaBtn icon={<Icon name="tag" size={12} color="var(--fg-muted)" />} label="2 labels" />
             <MetaBtn icon={<Icon name="link" size={12} color="var(--fg-muted)" />} label="Link" placeholder />
           </div>
+
+          {submitError && (
+            <div
+              role="alert"
+              style={{
+                marginTop: 12, padding: '8px 10px', borderRadius: 6,
+                background: 'var(--bg-subtle)',
+                border: '1px solid var(--blocked)',
+                color: 'var(--blocked)', fontSize: 12,
+                display: 'flex', alignItems: 'center', gap: 6,
+              }}
+            >
+              <Icon name="alert" size={12} />
+              <span>{submitError}</span>
+            </div>
+          )}
         </div>
 
         <div style={{
@@ -248,8 +324,17 @@ export function CreateIssuePage() {
           <label style={{ fontSize: 12, color: 'var(--fg-muted)', display: 'flex', alignItems: 'center', gap: 4 }}>
             <input type="checkbox" className="cb" /> Create more
           </label>
-          <button type="button" onClick={close} className="btn btn-sm">Cancel</button>
-          <button type="button" onClick={() => submit()} className="btn btn-primary btn-sm">Create issue<KBD k="⌘↵" /></button>
+          <button type="button" onClick={close} className="btn btn-sm" disabled={submitting}>Cancel</button>
+          <button
+            type="button"
+            onClick={() => void submit()}
+            className="btn btn-primary btn-sm"
+            disabled={submitting || !title.trim() || desc.hasInflight}
+            data-tip={desc.hasInflight ? 'Wait for attachments to finish uploading' : undefined}
+          >
+            {submitting ? 'Creating…' : 'Create issue'}
+            <KBD k="⌘↵" />
+          </button>
         </div>
       </div>
     </div>

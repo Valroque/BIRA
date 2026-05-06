@@ -6,6 +6,10 @@ export interface MentionableHit {
   label: string;
   sublabel: string;
   avatarUrl?: string;
+  /** Workspace-unique slug for team hits (omitted for users). */
+  slug?: string;
+  /** Team color for team hits (omitted for users). */
+  color?: string;
 }
 
 interface UserRow {
@@ -13,6 +17,14 @@ interface UserRow {
   firstName: string;
   lastName: string;
   email: string;
+}
+
+interface TeamRow {
+  id: string;
+  name: string;
+  slug: string;
+  color: string;
+  memberCount: string | number;
 }
 
 async function searchUsers(workspaceId: string, q: string): Promise<MentionableHit[]> {
@@ -75,9 +87,59 @@ export async function searchMentionables(params: {
   }
 
   if (types.includes('team')) {
-    // TODO: implement once workspace_teams table exists.
-    buckets.push([]);
+    buckets.push(await searchTeams(workspaceId, q));
   }
 
   return buckets.flat().slice(0, limit);
+}
+
+async function searchTeams(workspaceId: string, q: string): Promise<MentionableHit[]> {
+  const prefix = q + '%';
+  const substr = '%' + q + '%';
+
+  const baseQuery = () =>
+    db('teams as t')
+      .leftJoin('team_memberships as tm', 't.id', 'tm.team_id')
+      .where('t.workspace_id', workspaceId)
+      .groupBy('t.id', 't.name', 't.slug', 't.color')
+      .select(
+        't.id as id',
+        't.name as name',
+        't.slug as slug',
+        't.color as color',
+        db.raw('count(tm.id) as memberCount')
+      );
+
+  // Pass 1: prefix match on team name OR slug.
+  const prefixRows = (await baseQuery().where(function () {
+    this.whereILike('t.name', prefix).orWhereILike('t.slug', prefix);
+  })) as TeamRow[];
+
+  const prefixIds = new Set(prefixRows.map((r) => r.id));
+
+  // Pass 2: substring match — deduplicate against prefix results.
+  const substrRows = (await baseQuery()
+    .where(function () {
+      this.whereILike('t.name', substr).orWhereILike('t.slug', substr);
+    })
+    .whereNotIn('t.id', Array.from(prefixIds))) as TeamRow[];
+
+  const toHit = (row: TeamRow): MentionableHit => {
+    const count = typeof row.memberCount === 'string' ? Number(row.memberCount) : row.memberCount;
+    return {
+      type: 'team',
+      id: row.id,
+      label: row.name,
+      sublabel: count === 1 ? '1 member' : `${count} members`,
+      slug: row.slug,
+      color: row.color,
+    };
+  };
+
+  const sortByLabel = (a: MentionableHit, b: MentionableHit) => a.label.localeCompare(b.label);
+
+  const prefixHits = prefixRows.map(toHit).sort(sortByLabel);
+  const substrHits = substrRows.map(toHit).sort(sortByLabel);
+
+  return [...prefixHits, ...substrHits];
 }

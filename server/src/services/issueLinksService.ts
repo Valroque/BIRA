@@ -143,14 +143,17 @@ export async function findDependedOnByByIssues(
 }
 
 /**
- * Would adding `blockerId → dependentId` create a cycle?
+ * Would adding the edge "dependent depends on blocker" create a cycle?
  *
- * Treat each row as an edge `dependent_id → blocker_id` (i.e. "this
- * task waits for that one"). If `blockerId` is reachable from
- * `dependentId` along this directed graph, then adding the new edge
- * would close a cycle. Walks via a recursive CTE so it terminates
- * even if the existing data is somehow already cyclic (we cap the
- * recursion at 256 hops to be safe).
+ * Each row stores `(blocker_id, dependent_id)` and represents the graph
+ * edge `dependent → blocker` ("this task waits for that one"). The new
+ * edge would be `dependentId → blockerId`. A cycle is created iff there
+ * is already a back-path `blockerId → … → dependentId` in the graph.
+ * We seed the recursive CTE at the new edge's blocker and walk forward
+ * along `dependent → blocker` until we either reach the new edge's
+ * dependent (cycle) or run out of edges. Recursion is capped at 256
+ * hops to be safe even if the persisted data is somehow already
+ * cyclic.
  */
 export async function wouldCreateCycle(
   blockerId: string,
@@ -172,7 +175,7 @@ export async function wouldCreateCycle(
     )
     SELECT 1 FROM reach WHERE target = ? LIMIT 1
     `,
-    [dependentId, blockerId]
+    [blockerId, dependentId]
   )) as { rows: unknown[] };
   return result.rows.length > 0;
 }

@@ -41,7 +41,6 @@ interface ProjectRowMin {
   id: string;
   workspaceId: string;
   key: string;
-  nextIssueNumber: number;
 }
 
 /**
@@ -49,6 +48,13 @@ interface ProjectRowMin {
  * human-readable key (`{projectKey}-{seq}`), and inserts the issue inside
  * a single transaction so concurrent calls within the same project never
  * collide on `(project_id, seq)`.
+ *
+ * Seq allocation is delegated to Postgres: a single
+ * `UPDATE ... RETURNING (next_issue_number - 1)` increments the counter
+ * and returns the freshly-claimed value in one round trip. Row-level
+ * locking is implicit — concurrent UPDATEs serialise on the same row,
+ * so two parallel creates can never read the same seq. No SELECT FOR
+ * UPDATE needed.
  *
  * Status transitions are NOT validated against any workflow here — that's
  * a later slice. `status` is freely settable on create.
@@ -130,21 +136,18 @@ export async function createIssue(input: CreateIssueInput): Promise<Issue> {
   }
 
   return db.transaction(async (trx) => {
-    // Lock the project row + verify it belongs to the requested workspace.
-    // FOR UPDATE serialises concurrent createIssue calls within a single
-    // project; rows in *other* projects are unaffected.
+    // Verify the project exists and belongs to the requested workspace
+    // before we burn a seq number. Cross-workspace access is treated as
+    // not-found (matches the projects router — no information leak).
     const project = (await trx('projects')
       .where('id', input.projectId)
-      .select(['id', 'workspace_id', 'key', 'next_issue_number'])
-      .forUpdate()
+      .select(['id', 'workspace_id', 'key'])
       .first()) as ProjectRowMin | undefined;
 
     if (!project) {
       throw new AppError(`Project '${input.projectId}' not found`, 404);
     }
     if (project.workspaceId !== input.workspaceId) {
-      // Treat cross-workspace project access as not-found, matching the
-      // behaviour of the projects router (no information leak).
       throw new AppError(`Project '${input.projectId}' not found in this workspace`, 404);
     }
 
@@ -162,10 +165,18 @@ export async function createIssue(input: CreateIssueInput): Promise<Issue> {
       });
     }
 
-    const seq = project.nextIssueNumber;
-    await trx('projects')
-      .where('id', input.projectId)
-      .update({ nextIssueNumber: seq + 1, updatedAt: trx.fn.now() });
+    // Atomic increment + read in one round trip. Postgres serialises
+    // concurrent UPDATEs to the same row, so two parallel creates can
+    // never claim the same seq. The returned value is the seq we own.
+    const [seqRow] = (await trx.raw(
+      `UPDATE projects
+         SET next_issue_number = next_issue_number + 1,
+             updated_at = NOW()
+       WHERE id = ?
+       RETURNING next_issue_number - 1 AS seq`,
+      [input.projectId]
+    )).rows as Array<{ seq: number }>;
+    const seq = seqRow.seq;
 
     const key = `${project.key}-${seq}`;
 

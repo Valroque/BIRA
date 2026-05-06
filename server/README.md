@@ -104,8 +104,8 @@ does NOT clear it.
 
 ### Password reset gate
 
-Users carry a `mustResetPassword` boolean. When set, every request to
-`/api/tenants/*` (including the top-level tenant list) is blocked with:
+Users carry a `mustResetPassword` boolean. When set, every authenticated
+request under `/api/tenants/*` is blocked with:
 
 ```
 HTTP/1.1 423 Locked
@@ -142,17 +142,22 @@ member of the target tenant → 404.
 
 Tenants carry `status` (`active` | `deactivated`, default `active`).
 Deactivation is a soft-freeze, not a delete — no rows are removed; the
-tenant just stops appearing in the default `GET /api/tenants` list. The
-owning admin can opt back in with `?includeDeactivated=true` to find
-and reactivate it.
+tenant just stops appearing in `GET /api/tenants`. A deactivated tenant
+can still be reached by slug at `GET /api/tenants/:t` (auth-gated) so
+its admins can find it and reactivate.
 
 | Method | Path                                              | Auth                       |
 |--------|---------------------------------------------------|----------------------------|
-| GET    | `/api/tenants?includeDeactivated=true`            | any authenticated user     |
+| GET    | `/api/tenants`                                    | **public** (pre-login picker) |
 | POST   | `/api/tenants`                                    | any authenticated user     |
 | GET    | `/api/tenants/:t`                                 | tenant member              |
 | POST   | `/api/tenants/:t/deactivate`                      | tenant admin               |
 | POST   | `/api/tenants/:t/reactivate`                      | tenant admin               |
+
+`GET /api/tenants` returns plain tenant rows (`{id, slug, name, letter,
+color, bg, plan, status, createdAt, updatedAt}[]`) ordered by name.
+Deactivated tenants are always excluded — there is no caller context to
+authorise an opt-in surface.
 
 `POST /api/tenants` takes `{ slug, name, letter, color, bg, plan? }`.
 The caller is granted `admin` membership on the new tenant in the same
@@ -179,12 +184,59 @@ unarchived.
 Slug is intentionally immutable — it's load-bearing in URLs and FE
 localStorage keys; renaming is a separate migration story.
 
+### Project lifecycle
+
+Projects carry `status` (`active` | `archived`, default `active`).
+Mirrors workspace archive but at the project scope — workspace admins
+can freeze a single project without involving tenant admin. Archive
+blocks all issue mutations under the project (create, update, parent,
+links, comments) with HTTP 409 via `requireActiveProject` in the
+issue routes; reads continue to work via `?includeArchived=true`. PATCH
+and archive/unarchive themselves bypass the gate so admins can manage a
+frozen project.
+
+| Method | Path                                                            | Auth                |
+|--------|-----------------------------------------------------------------|---------------------|
+| GET    | `/api/tenants/:t/workspaces/:w/projects?includeArchived=true`   | workspace member    |
+| POST   | `/api/tenants/:t/workspaces/:w/projects`                        | workspace `write`   |
+| GET    | `/api/tenants/:t/workspaces/:w/projects/:p?includeArchived=true`| workspace member    |
+| PATCH  | `/api/tenants/:t/workspaces/:w/projects/:p` (name/letter/color/bg/description) | workspace admin |
+| POST   | `/api/tenants/:t/workspaces/:w/projects/:p/archive`             | workspace admin     |
+| POST   | `/api/tenants/:t/workspaces/:w/projects/:p/unarchive`           | workspace admin     |
+
+Slug + key are intentionally immutable — both are load-bearing
+(slug in URLs, key in issue identifiers like `CMT-7`).
+
+### User (de)activation
+
+Tenant admins can flip another member's `users.is_active` flag. The
+scope of the action is global (the user can't log in to any tenant
+until reactivated), but the gate is tenant-admin because BIRA has no
+system-level admin in v1 — the implicit rule is "if you can admin a
+tenant the user belongs to, you can deactivate them." The user row
+is preserved; FKs that reference the user use SET NULL or remain
+valid, so historical attribution survives.
+
+| Method | Path                                                              | Auth         |
+|--------|-------------------------------------------------------------------|--------------|
+| POST   | `/api/tenants/:t/members/:userId/deactivate`                      | tenant admin |
+| POST   | `/api/tenants/:t/members/:userId/reactivate`                      | tenant admin |
+
+Self-target → 400. Target user must be an active member of the same
+tenant; otherwise 404. Login (and refresh, and any
+`Authorization: Bearer` request) is rejected with 401 once the user
+is deactivated — the auth middleware checks `isActive` on every
+authenticated request, so existing sessions die on the next call.
+
 ### Issues (slice 1 — basic CRUD; slice 2 — hierarchy; slice C — description attachments)
 
 Issues live under a project. The human-readable `key` (e.g. `CMT-241`)
-is allocated atomically per project via `projects.next_issue_number`
-inside the same transaction as the insert, so concurrent creates
-within a project never collide. Keys are unique within a workspace.
+is allocated atomically per project via a single Postgres
+`UPDATE projects SET next_issue_number = next_issue_number + 1
+RETURNING next_issue_number - 1`. Concurrent UPDATEs to the same row
+serialise inside Postgres, so two parallel creates can never claim
+the same seq — no app-side `SELECT FOR UPDATE` needed. Keys are
+unique within a workspace.
 
 Slice 2 adds parent/child hierarchy. **Schedules
 (start/end/estimate) and issue links land in later slices.**
@@ -294,11 +346,12 @@ Postgres test database (`bira_test`). Isolation comes from `truncateAll()`
 in `beforeEach`; vitest runs a single forked worker so there's no
 cross-file interference.
 
-**Coverage** (45 files, 361 tests):
+**Coverage** (count `tests/**/*.test.ts` for the live numbers — at the time
+of writing, 45 files / 345 it-blocks):
 
 | Area | Files |
 |---|---|
-| Unit | `tests/unit/` — passwordUtils, errorHandler, roleAtLeast, User entity, Issue entity, File entity |
+| Unit | `tests/unit/` — passwordUtils, errorHandler, roleAtLeast, attachmentRefs, User / Issue / File / Comment entities |
 | Auth | `tests/auth/` — register, login, refresh-token, profile, updateProfile, changePassword |
 | Middleware | `tests/middleware/` — passwordResetGate (423 gate) |
 | Tenants | `tests/tenants/` — list, create, get, deactivate, reactivate, deactivated gate |
@@ -308,6 +361,20 @@ cross-file interference.
 | Issues | `tests/issues/` — create, get, list (project + workspace), update, key allocation (concurrency), set parent (hierarchy), description attachments (slice C) |
 | Files | `tests/files/` — upload, download, delete |
 | Comments | `tests/comments/` — create, list, update, delete |
+| Workspace members | `tests/workspaceMembers/` — list, add, update role, remove (incl. last-admin guard, self-leave, team_memberships cascade) |
+| Teams | `tests/teams/` — CRUD + member add/remove (workspace-member precondition) |
+| Project access | `tests/projectAccess/` — team + user grants, four provenance branches, DB CHECK + Zod admin-on-team rejection |
+| Middleware | `tests/middleware/resolveEffectiveWorkspaceRole.test.ts` — all four resolver branches |
+
+**Known coverage gaps** (tracked, not yet covered):
+
+- `tests/workflows/` — workflow CRUD endpoints + the `evaluateTransition`
+  guard (all five rule types and the no-workflow permissive fallback).
+- `tests/issueLinks/` — `relates` / `depends on` happy paths and the
+  `wouldCreateCycle` rejection.
+- `tests/mentionables/` — additional ranking edge cases beyond what's in `search.test.ts`.
+- `tests/projects/` — `PUT /:slug/workflows/:issueType` (project-workflow
+  assignment).
 
 ```bash
 # one-time: copy the test env file and set up bira_test DB
@@ -383,13 +450,169 @@ Files are NOT cascade-deleted when a comment or issue that references
 them is deleted — the files table is independent and a single file may
 be referenced from multiple places.
 
+### Issue links (slice 8 — relates + depends on)
+
+| Method | Path                                                                            | Auth                |
+|--------|---------------------------------------------------------------------------------|---------------------|
+| POST   | `/api/tenants/:t/workspaces/:w/projects/:p/issues/:key/relates`                | workspace `write`   |
+| DELETE | `/api/tenants/:t/workspaces/:w/projects/:p/issues/:key/relates/:relatedKey`    | workspace `write`   |
+| POST   | `/api/tenants/:t/workspaces/:w/projects/:p/issues/:key/dependencies`           | workspace `write`   |
+| DELETE | `/api/tenants/:t/workspaces/:w/projects/:p/issues/:key/dependencies/:blockerKey` | workspace `write` |
+
+`relates` is symmetric and untyped beyond the verb (every type allowed).
+`depends on` is **Task-only** and directed: `key depends on blockerKey`
+means `key` cannot start until `blockerKey` ends. Cycles are rejected at
+the BE via `wouldCreateCycle` (recursive CTE walk over the existing
+edges).
+
+Body shape: `relates` takes `{ relatedKey }`, `dependencies` takes
+`{ blockerKey }`. Each mutation returns the depender's full IssueView
+so the FE doesn't have to refetch.
+
+### Workflows (slice 5)
+
+| Method | Path                                                                | Auth                       |
+|--------|---------------------------------------------------------------------|----------------------------|
+| GET    | `/api/tenants/:t/workspaces/:w/workflows`                           | workspace member           |
+| POST   | `/api/tenants/:t/workspaces/:w/workflows`                           | workspace `write`          |
+| GET    | `/api/tenants/:t/workspaces/:w/workflows/:slug`                     | workspace member           |
+| PATCH  | `/api/tenants/:t/workspaces/:w/workflows/:slug`                     | workspace `write`          |
+| DELETE | `/api/tenants/:t/workspaces/:w/workflows/:slug`                     | workspace `admin`          |
+
+A workflow is a directed graph of status nodes joined by transitions; each
+transition can carry zero or more rules (closed enum: `role`,
+`assignee_only`, `reporter_only`, `required_fields`, `not_self`). On
+PATCH, passing `nodes` and/or `transitions` performs a full-replace —
+existing rows are deleted then re-inserted in one transaction.
+
+The status-transition guard (`evaluateTransition`) runs from
+`updateIssue` whenever `status` changes and acting-user context is
+supplied: deny → 403 with the reason. If the project's `(project,
+issueType)` pair has no explicit workflow and no slug-default fallback
+exists, the guard returns `noWorkflow=true` and the update is allowed
+through.
+
+### Project ↔ workflow assignment
+
+| Method | Path                                                                          | Auth                |
+|--------|-------------------------------------------------------------------------------|---------------------|
+| GET    | `/api/tenants/:t/workspaces/:w/projects/:p/workflows`                         | workspace member    |
+| PUT    | `/api/tenants/:t/workspaces/:w/projects/:p/workflows/:issueType`              | workspace `write`   |
+
+GET returns a record `{ T?, B?, S?, E? }` of workflow slugs. PUT body is
+`{ workflowSlug }`; `:issueType` must be one of `T|B|S|E`.
+
+### Comments (slice B)
+
+| Method | Path                                                                  | Auth                |
+|--------|-----------------------------------------------------------------------|---------------------|
+| GET    | `/api/tenants/:t/workspaces/:w/projects/:p/issues/:key/comments`     | workspace member    |
+| POST   | `/api/tenants/:t/workspaces/:w/projects/:p/issues/:key/comments`     | workspace `write`   |
+| PATCH  | `/api/tenants/:t/workspaces/:w/comments/:commentId`                  | workspace `write`   |
+| DELETE | `/api/tenants/:t/workspaces/:w/comments/:commentId`                  | workspace `write`   |
+
+Comments are workspace-unique by `commentId`, so PATCH/DELETE do not
+require a project slug. Body cap: 50 000 chars; up to 10 attachment refs
+per comment. PATCH/DELETE are gated on author OR workspace `admin`.
+Mentions (`@[user:<uuid>]`) are extracted on every write and stored in a
+jsonb array — see `docs/specs/mentions.md`.
+
+### Mentionables
+
+| Method | Path                                                                 | Auth                |
+|--------|----------------------------------------------------------------------|---------------------|
+| GET    | `/api/tenants/:t/workspaces/:w/mentionables/search?q=&types=&limit=` | workspace `read`    |
+
+Both `types=user` and `types=team` are supported (Domain B). Team hits
+return `{ id, type:'team', label, sublabel, slug, color }`. The default
+when `types` is omitted now combines users and teams.
+
+### Workspace members
+
+| Method | Path                                                                          | Auth                          |
+|--------|-------------------------------------------------------------------------------|-------------------------------|
+| GET    | `/api/tenants/:t/workspaces/:w/members`                                       | workspace member              |
+| POST   | `/api/tenants/:t/workspaces/:w/members`                                       | workspace `admin`             |
+| PATCH  | `/api/tenants/:t/workspaces/:w/members/:membershipId`                         | workspace `admin`             |
+| DELETE | `/api/tenants/:t/workspaces/:w/members/:membershipId`                         | workspace `admin` OR self     |
+
+Direct-add only — POST refuses with 400 if the target user isn't an
+active tenant member; 409 if they're already in the workspace. The
+last-admin guard counts active tenant admins as implicit workspace
+admins, so PATCH (demotion) and DELETE refuse with 409 when removing
+the target would leave zero effective admins.
+
+`workspace_memberships` carries `status` (`active | invited |
+deactivated`, default `active`) and `last_seen_at`. v1 only writes
+`active` rows — `invited` is reserved for a future invite-flow phase.
+
+DELETE cascades inside the same transaction:
+- `team_memberships` rows for the user in this workspace's teams.
+- `project_user_access` rows for the user on this workspace's
+  projects.
+
+### Teams
+
+| Method | Path                                                                          | Auth                |
+|--------|-------------------------------------------------------------------------------|---------------------|
+| GET    | `/api/tenants/:t/workspaces/:w/teams`                                         | workspace member    |
+| POST   | `/api/tenants/:t/workspaces/:w/teams`                                         | workspace `admin`   |
+| GET    | `/api/tenants/:t/workspaces/:w/teams/:teamSlug`                               | workspace member    |
+| PATCH  | `/api/tenants/:t/workspaces/:w/teams/:teamSlug`                               | workspace `admin`   |
+| DELETE | `/api/tenants/:t/workspaces/:w/teams/:teamSlug`                               | workspace `admin`   |
+| GET    | `/api/tenants/:t/workspaces/:w/teams/:teamSlug/members`                       | workspace member    |
+| POST   | `/api/tenants/:t/workspaces/:w/teams/:teamSlug/members`                       | workspace `admin`   |
+| DELETE | `/api/tenants/:t/workspaces/:w/teams/:teamSlug/members/:userId`               | workspace `admin`   |
+
+Teams are workspace-scoped flat groups. Schema: `slug, name,
+description, color`. Slug is workspace-unique and immutable. Teams
+carry no role of their own — the role lives on the project-access
+grant. Adding a user to a team requires that user to be an active
+member of the workspace (400 otherwise).
+
+### Project access
+
+| Method | Path                                                                                                | Auth                |
+|--------|-----------------------------------------------------------------------------------------------------|---------------------|
+| GET    | `/api/tenants/:t/workspaces/:w/projects/:p/access`                                                  | workspace member    |
+| GET    | `/api/tenants/:t/workspaces/:w/projects/:p/access/effective-members`                                | workspace member    |
+| POST   | `/api/tenants/:t/workspaces/:w/projects/:p/access/teams`                                            | workspace `admin`   |
+| PATCH  | `/api/tenants/:t/workspaces/:w/projects/:p/access/teams/:teamId`                                    | workspace `admin`   |
+| DELETE | `/api/tenants/:t/workspaces/:w/projects/:p/access/teams/:teamId`                                    | workspace `admin`   |
+| POST   | `/api/tenants/:t/workspaces/:w/projects/:p/access/users`                                            | workspace `admin`   |
+| PATCH  | `/api/tenants/:t/workspaces/:w/projects/:p/access/users/:userId`                                    | workspace `admin`   |
+| DELETE | `/api/tenants/:t/workspaces/:w/projects/:p/access/users/:userId`                                    | workspace `admin`   |
+
+Two-table design. `project_team_access` carries roles `'write' | 'read'`
+only — admin is excluded both at the route (Zod) and at the DB CHECK
+constraint, mirroring the v1 rule "admin is never inherited via a
+team". `project_user_access` allows the full ladder including admin.
+
+`GET /effective-members` returns a flat per-user list with
+`provenance` (one of `explicit-user`, `tenant-admin`,
+`workspace-admin`, `team`) and, when `provenance === 'team'`, a
+`viaTeams[]` entry showing which teams contributed. Precedence:
+`explicit-user > tenant-admin > workspace-admin > team`. Team grants
+combine via union (highest of `write` / `read` wins).
+
+`resolveEffectiveWorkspaceRole` (the workspace-scope middleware) was
+extended in this slice: if a user has any active grant in
+`project_user_access` OR is a member of any team with a row in
+`project_team_access` for a project in this workspace, they get
+implicit `'read'` at workspace scope. Lets a project-only contributor
+navigate the workspace shell without being granted workspace `write`.
+
 ## What's NOT here yet
 
-Issue schedules + estimate, issue links (`relates`,
-`depends on`), workflows + the status-transition guard, comments,
-teams, project memberships, invites, audit log, rate limiting. Each
-is a future slice. The S3 file-storage driver is stubbed (slice A
-ships PG only).
+Audit log + rate limiting. The pending-invite flow (so non-tenant-
+member emails can be invited rather than rejected with 400) is a
+separate phase. The S3 file-storage driver is stubbed (slice A ships
+PG only). Sprints, backlog, custom fields, JQL, SSO, and a public
+REST API are out-of-scope per `.claude/rules/v1-constraints.md`.
+
+Issue / comment visibility filters are NOT yet narrowed by project
+access — anyone with workspace `read` still sees everything in the
+workspace. Tightening that is a follow-up once the FE is wired.
 
 The frontend under `web/` is **not** wired to this API yet — it
 still reads from `web/src/fixtures.ts`. Wiring is a separate phase

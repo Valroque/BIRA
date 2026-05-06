@@ -7,9 +7,12 @@ import { Avatar, StatusDot, STATUSES } from './shell';
 import { useDismiss } from './use-dismiss';
 import { ProjectBadge } from './project-chip';
 import {
-  CURRENT_USER, ISSUES, type Issue, type Project,
+  type Issue, type Project,
 } from '../fixtures';
 import { useProjects } from '../state/projects';
+import { useIssues } from '../state/issues';
+import { useUsers, UNKNOWN_USER_LABEL, type WorkspaceUser } from '../state/users';
+import { useAuth } from '../state/auth';
 
 export type FilterType = 'status' | 'project' | 'assignee' | 'label' | 'priority' | 'type';
 
@@ -29,8 +32,11 @@ export function matchFilter(f: Filter, issue: Issue): boolean {
   if (f.values.length === 0) return true;
   switch (f.type) {
     case 'status':   return f.values.includes(issue.status);
-    case 'project':  return f.values.includes(issue.project);
-    case 'assignee': return f.values.includes(issue.assignee);
+    // Project filter values are project UUIDs (stable across rename / slug change).
+    case 'project':  return f.values.includes(issue.projectId);
+    // Assignee filter values are user UUIDs. Empty `assigneeUserId` (unassigned)
+    // never matches — there's no synthetic 'none' bucket in the picker yet.
+    case 'assignee': return issue.assigneeUserId !== null && f.values.includes(issue.assigneeUserId);
     case 'label':    return issue.labels.some((l) => f.values.includes(l));
     case 'priority': return f.values.includes(issue.priority);
     case 'type':     return f.values.includes(issue.type);
@@ -90,29 +96,19 @@ export const FILTER_DEFS: Record<FilterType, FilterDef> = {
     renderValue: (v) => v,
   },
   assignee: {
+    // Options are computed per render by `FilterChip` from the live workspace
+    // user roster so a uuid filter value can render the right name; the empty
+    // list here is just a fallback.
     type: 'assignee', label: 'Assignee', icon: 'user',
-    options: () => Array.from(new Set(ISSUES.map((i) => i.assignee))).sort().map((a) => ({
-      value: a,
-      searchText: a,
-      label: (
-        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-          <Avatar name={a} size={18} />{a}
-        </span>
-      ),
-    })),
+    options: () => [],
     renderValue: (v) => v,
   },
   label: {
+    // Label options are computed per render by `FilterChip` from the live
+    // workspace issues so newly-added labels show up automatically. The
+    // empty list here is just a fallback.
     type: 'label', label: 'Label', icon: 'tag',
-    options: () => Array.from(new Set(ISSUES.flatMap((i) => i.labels))).sort().map((l) => ({
-      value: l, searchText: l,
-      label: (
-        <span style={{
-          display: 'inline-block', padding: '1px 6px', borderRadius: 3,
-          background: 'var(--bg-muted)', color: 'var(--fg-muted)', fontSize: 11.5,
-        }}>{l}</span>
-      ),
-    })),
+    options: () => [],
     renderValue: (v) => v,
   },
   priority: {
@@ -143,13 +139,42 @@ const ALL_FILTER_TYPES: FilterType[] = ['status', 'project', 'assignee', 'label'
 /** Build the option list for the project filter from the live projects list. */
 function projectFilterOptions(projects: Project[]): Option[] {
   return projects.map((p) => ({
-    value: p.slug,
+    // UUID-keyed values — slug renames don't break the persisted filter.
+    value: p.id,
     searchText: p.name,
     label: (
       <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
         <ProjectBadge project={p} />
         {p.name}
       </span>
+    ),
+  }));
+}
+
+/** Build the option list for the assignee filter from the live users roster. */
+function assigneeFilterOptions(users: WorkspaceUser[]): Option[] {
+  return users.map((u) => ({
+    value: u.id,
+    searchText: `${u.displayName} ${u.email}`,
+    label: (
+      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+        <Avatar name={u.displayName} size={18} />{u.displayName}
+      </span>
+    ),
+  }));
+}
+
+/** Build the option list for the label filter from the live issue cache. */
+function labelFilterOptions(issues: Issue[]): Option[] {
+  const set = new Set<string>();
+  for (const i of issues) for (const l of i.labels) set.add(l);
+  return Array.from(set).sort().map((l) => ({
+    value: l, searchText: l,
+    label: (
+      <span style={{
+        display: 'inline-block', padding: '1px 6px', borderRadius: 3,
+        background: 'var(--bg-muted)', color: 'var(--fg-muted)', fontSize: 11.5,
+      }}>{l}</span>
     ),
   }));
 }
@@ -212,10 +237,21 @@ function freshnessMinutes(updated: string): number {
 /**
  * Build a comparator for one field + direction. IMPORTANT: returns 0 when the
  * compared field is equal — the *stack* is responsible for falling through to
- * the next criterion. (An earlier version used issue id as a per-field stable
+ * the next criterion. (An earlier version used issue key as a per-field stable
  * key, which made the first comparator always decisive and broke stacking.)
+ *
+ * Sort by `assignee` / `project` accepts a `resolve` map so the comparison is
+ * over human-readable names (resolved at the consumer via `useUsers()` /
+ * `useProjects()`), not over raw uuids.
  */
-export function makeComparator(field: SortField, dir: SortDir) {
+export interface SortContext {
+  /** Map from `assigneeUserId` → display name. Missing ids fall back to ''. */
+  assigneeNameById?: Map<string, string>;
+  /** Map from `projectId` → project name. Missing ids fall back to ''. */
+  projectNameById?: Map<string, string>;
+}
+
+export function makeComparator(field: SortField, dir: SortDir, ctx: SortContext = {}) {
   const sign = dir === 'asc' ? 1 : -1;
   return (a: Issue, b: Issue): number => {
     let cmp = 0;
@@ -233,20 +269,28 @@ export function makeComparator(field: SortField, dir: SortDir) {
         cmp = a.title.localeCompare(b.title);
         break;
       case 'id': {
-        const an = parseInt(a.id.split('-')[1] ?? '0', 10);
-        const bn = parseInt(b.id.split('-')[1] ?? '0', 10);
+        // Sort by the numeric tail of the issue key (e.g. 'COM-241' → 241)
+        // so they group naturally by sequence, not lexicographically.
+        const an = parseInt(a.key.split('-')[1] ?? '0', 10);
+        const bn = parseInt(b.key.split('-')[1] ?? '0', 10);
         cmp = an - bn;
         break;
       }
-      case 'assignee':
-        cmp = a.assignee.localeCompare(b.assignee);
+      case 'assignee': {
+        const an = a.assigneeUserId ? ctx.assigneeNameById?.get(a.assigneeUserId) ?? '' : '';
+        const bn = b.assigneeUserId ? ctx.assigneeNameById?.get(b.assigneeUserId) ?? '' : '';
+        cmp = an.localeCompare(bn);
         break;
+      }
       case 'type':
         cmp = (TYPE_RANK[a.type] ?? 99) - (TYPE_RANK[b.type] ?? 99);
         break;
-      case 'project':
-        cmp = a.project.localeCompare(b.project);
+      case 'project': {
+        const an = ctx.projectNameById?.get(a.projectId) ?? '';
+        const bn = ctx.projectNameById?.get(b.projectId) ?? '';
+        cmp = an.localeCompare(bn);
         break;
+      }
     }
     return sign * cmp;
   };
@@ -271,17 +315,17 @@ export const COLUMN_SORT_FIELD: Record<string, SortField | null> = {
 /**
  * Apply a stack of sort criteria. The stack acts as primary → secondary →
  * tertiary sort: each criterion only matters when all earlier ones tie. Issue
- * id is the final tiebreaker so the order is fully deterministic. Empty stack
+ * key is the final tiebreaker so the order is fully deterministic. Empty stack
  * = no sort (preserves the input order).
  */
-export function applySortStack(issues: Issue[], stack: Sort[]): Issue[] {
+export function applySortStack(issues: Issue[], stack: Sort[], ctx: SortContext = {}): Issue[] {
   if (stack.length === 0) return issues;
   return [...issues].sort((a, b) => {
     for (const s of stack) {
-      const c = makeComparator(s.field, s.dir)(a, b);
+      const c = makeComparator(s.field, s.dir, ctx)(a, b);
       if (c !== 0) return c;
     }
-    return a.id.localeCompare(b.id);
+    return a.key.localeCompare(b.key);
   });
 }
 
@@ -313,21 +357,30 @@ interface FilterChipProps {
 export function FilterChip({ filter, onChange, onRemove }: FilterChipProps) {
   const def = FILTER_DEFS[filter.type];
   const { projects } = useProjects();
+  const { users, getUser } = useUsers();
+  const { issues } = useIssues();
+  const { user: currentUser } = useAuth();
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState('');
   const ref = useRef<HTMLDivElement>(null);
   useDismiss(ref, () => setOpen(false), open);
 
-  // Project options are derived from the live projects list; everything else
-  // uses the static def. `renderValue` for the chip preview follows the same
-  // pattern so newly-added projects render with the right name + chip.
+  // Project + assignee + label options are derived from the live providers
+  // (uuid → display resolution happens here at the boundary). `renderValue`
+  // for the chip preview follows the same pattern so the chip never shows a
+  // raw uuid.
   const options = useMemo(() => {
     if (filter.type === 'project') return projectFilterOptions(projects);
+    if (filter.type === 'assignee') return assigneeFilterOptions(users);
+    if (filter.type === 'label') return labelFilterOptions(issues);
     return def.options();
-  }, [def, filter.type, projects]);
-  const renderValue = filter.type === 'project'
-    ? (v: string) => projects.find((p) => p.slug === v)?.name ?? v
-    : def.renderValue;
+  }, [def, filter.type, projects, users, issues]);
+  const renderValue =
+    filter.type === 'project'
+      ? (v: string) => projects.find((p) => p.id === v)?.name ?? 'Unknown project'
+      : filter.type === 'assignee'
+        ? (v: string) => getUser(v)?.displayName ?? UNKNOWN_USER_LABEL
+        : def.renderValue;
   const filteredOptions = !search.trim()
     ? options
     : options.filter((o) => o.searchText.toLowerCase().includes(search.toLowerCase()));
@@ -419,25 +472,25 @@ export function FilterChip({ filter, onChange, onRemove }: FilterChipProps) {
               />
             </div>
           </div>
-          {filter.type === 'assignee' && (
+          {filter.type === 'assignee' && currentUser && (
             <div style={{
               padding: '6px 8px', borderBottom: '1px solid var(--border-muted)',
               display: 'flex', alignItems: 'center', gap: 6,
             }}>
               <button
                 type="button"
-                onClick={() => toggle(CURRENT_USER.name)}
+                onClick={() => toggle(currentUser.id)}
                 className="btn btn-sm"
-                data-tip={CURRENT_USER.name}
+                data-tip={currentUser.displayName}
                 style={{
                   height: 24, padding: '0 8px 0 4px', gap: 5,
-                  background: filter.values.includes(CURRENT_USER.name) ? 'var(--accent-subtle)' : 'var(--bg)',
-                  borderColor: filter.values.includes(CURRENT_USER.name) ? 'var(--accent)' : 'var(--border)',
-                  color: filter.values.includes(CURRENT_USER.name) ? 'var(--accent-active)' : 'var(--fg)',
-                  fontWeight: filter.values.includes(CURRENT_USER.name) ? 600 : 500,
+                  background: filter.values.includes(currentUser.id) ? 'var(--accent-subtle)' : 'var(--bg)',
+                  borderColor: filter.values.includes(currentUser.id) ? 'var(--accent)' : 'var(--border)',
+                  color: filter.values.includes(currentUser.id) ? 'var(--accent-active)' : 'var(--fg)',
+                  fontWeight: filter.values.includes(currentUser.id) ? 600 : 500,
                 }}
               >
-                <Avatar name={CURRENT_USER.name} size={16} />
+                <Avatar name={currentUser.displayName} size={16} />
                 Me
               </button>
               <span style={{ fontSize: 11, color: 'var(--fg-faint)' }}>quick pick</span>

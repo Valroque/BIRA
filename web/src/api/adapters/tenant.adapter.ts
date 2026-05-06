@@ -19,61 +19,33 @@ export interface RawTenant {
 }
 
 // ---------------------------------------------------------------------------
-// Adapters
+// Adapter
 // ---------------------------------------------------------------------------
 
 /**
- * Adapt a raw tenant + role pair (from the list endpoint) into the FE Tenant.
+ * Adapt a raw tenant row from the BE. The public list endpoint
+ * (`GET /api/tenants`) returns plain tenant rows — no per-user role.
  */
-export function adaptTenantListItem(item: { tenant: RawTenant; role: string }): Tenant {
-  const raw = item.tenant;
-  const id = raw.id ?? raw.slug;
-
+export function adaptTenant(raw: RawTenant): Tenant {
+  const id = requireField(raw.id, '', { entity: 'Tenant', field: 'id' });
   const slug = requireField(raw.slug, '', { entity: 'Tenant', field: 'slug', id });
-  const name = requireField(raw.name, '', { entity: 'Tenant', field: 'name', id: slug });
-  const letter = requireField(raw.letter, name[0] ?? '?', { entity: 'Tenant', field: 'letter', id: slug });
-  const color = requireField(raw.color, 'var(--fg-muted)', { entity: 'Tenant', field: 'color', id: slug });
-  const bg = requireField(raw.bg, 'var(--bg-muted)', { entity: 'Tenant', field: 'bg', id: slug });
+  const name = requireField(raw.name, '', { entity: 'Tenant', field: 'name', id });
+  const letter = expectField(raw.letter, name[0]?.toUpperCase() ?? '?', {
+    entity: 'Tenant', field: 'letter', id,
+  });
+  const color = expectField(raw.color, 'var(--fg-muted)', { entity: 'Tenant', field: 'color', id });
+  const bg = expectField(raw.bg, 'var(--bg-muted)', { entity: 'Tenant', field: 'bg', id });
   const status = expectField<'active' | 'deactivated'>(raw.status, 'active', {
-    entity: 'Tenant', field: 'status', id: slug,
+    entity: 'Tenant', field: 'status', id,
   });
 
   return {
+    id,
     slug,
     name,
     letter,
     color,
     bg,
-    role: (item.role as Tenant['role']) ?? 'read',
-    workspaceCount: 0,
-    memberCount: 0,
-    status,
-  };
-}
-
-/**
- * Adapt a raw tenant without a role context (e.g. create-tenant response).
- * Caller must supply the role separately.
- */
-export function adaptTenant(raw: RawTenant): Omit<Tenant, 'role'> {
-  const id = raw.id ?? raw.slug;
-  const slug = requireField(raw.slug, '', { entity: 'Tenant', field: 'slug', id });
-  const name = requireField(raw.name, '', { entity: 'Tenant', field: 'name', id: slug });
-  const letter = requireField(raw.letter, name[0] ?? '?', { entity: 'Tenant', field: 'letter', id: slug });
-  const color = requireField(raw.color, 'var(--fg-muted)', { entity: 'Tenant', field: 'color', id: slug });
-  const bg = requireField(raw.bg, 'var(--bg-muted)', { entity: 'Tenant', field: 'bg', id: slug });
-  const status = expectField<'active' | 'deactivated'>(raw.status, 'active', {
-    entity: 'Tenant', field: 'status', id: slug,
-  });
-
-  return {
-    slug,
-    name,
-    letter,
-    color,
-    bg,
-    workspaceCount: 0,
-    memberCount: 0,
     status,
   };
 }

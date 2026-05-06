@@ -93,3 +93,16 @@ export async function listForUser(
     .orderBy('t.name', 'asc')) as TenantRow[];
   return rows.map(Tenant.fromRow);
 }
+
+/**
+ * All active tenants, regardless of caller. Powers the public tenant picker
+ * (`GET /api/tenants`) which runs before login. Deactivated tenants are
+ * always excluded.
+ */
+export async function listAllActive(): Promise<Tenant[]> {
+  const rows = (await db('tenants')
+    .where('status', 'active')
+    .select(COLUMNS)
+    .orderBy('name', 'asc')) as TenantRow[];
+  return rows.map(Tenant.fromRow);
+}

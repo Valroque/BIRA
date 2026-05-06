@@ -29,7 +29,7 @@ export class BiraClient {
   }
 
   async request<T = unknown>(
-    method: 'GET' | 'POST' | 'PATCH' | 'DELETE',
+    method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE',
     path: string,
     body?: unknown,
     opts: { authed?: boolean } = { authed: true }

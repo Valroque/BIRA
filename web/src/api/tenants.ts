@@ -1,12 +1,14 @@
-// Tenant API. Tenant creation is intentionally not exposed — for v1,
-// tenants are provisioned out of band (DB seed). The BE endpoint exists
-// (POST /api/tenants) but the FE doesn't surface it.
+// Tenant API. The list endpoint is public (pre-login picker).
+// Tenant creation is intentionally not exposed in v1 — tenants are
+// provisioned out of band. The BE endpoint exists (POST /api/tenants)
+// but the FE doesn't surface it.
 
 import { apiFetch } from './client';
-import { adaptTenantListItem, type RawTenant } from './adapters/tenant.adapter';
+import { adaptTenant, type RawTenant } from './adapters/tenant.adapter';
 import type { Tenant } from '../fixtures';
 
 export async function listTenants(): Promise<Tenant[]> {
-  const items = await apiFetch<Array<{ tenant: RawTenant; role: string }>>('/api/tenants');
-  return items.map(adaptTenantListItem);
+  // Endpoint is public; apiFetch's bearer attach is harmless when present.
+  const items = await apiFetch<RawTenant[]>('/api/tenants');
+  return items.map(adaptTenant);
 }

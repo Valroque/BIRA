@@ -15,6 +15,7 @@ import { db, disconnectDB } from './db/knex.js';
 import healthRoutes from './routes/health.js';
 import authRoutes from './routes/auth.js';
 import tenantsRoutes from './routes/tenants.js';
+import publicFilesRoutes from './routes/publicFiles.js';
 
 const app = express();
 const server = http.createServer(app);
@@ -34,6 +35,10 @@ app.use(loggerMiddleware);
 // Routes
 app.use('/healthcheck', healthRoutes);
 app.use('/api/auth', authRoutes);
+// Signed-URL file reads — must be mounted before /api/tenants so it
+// doesn't pass through the authenticate middleware on the tenants router.
+// Authorisation is the URL signature itself.
+app.use('/api/files', publicFilesRoutes);
 app.use('/api/tenants', tenantsRoutes);
 
 // 404

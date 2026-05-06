@@ -8,8 +8,10 @@ import { Link } from 'react-router-dom';
 import { Icon } from './icons';
 import { TypeChip, IssueId, Avatar, STATUSES, type StatusId } from './shell';
 import { useDismiss } from './use-dismiss';
-import { HOLIDAYS, IDEAL_POINTS_PER_DAY, TENANT_MEMBERS, computeTaskLoad, isWorkingDate, type Issue } from '../fixtures';
+import { HOLIDAYS, IDEAL_POINTS_PER_DAY, computeTaskLoad, isWorkingDate, type Issue } from '../fixtures';
 import { useIssues } from '../state/issues';
+import { useProjects } from '../state/projects';
+import { useUsers } from '../state/users';
 import type { IssueGroupKey } from './issues-table';
 
 interface Group {
@@ -20,6 +22,20 @@ interface Group {
 }
 
 export type GanttGranularity = 'auto' | 'day' | 'week';
+
+/**
+ * Slice 6 — distinguishes the two gantts. Planning is ephemeral (writes
+ * only to the localStorage overrides layer); reality persists every drag
+ * commit through the BE PATCH endpoint. Default for unwitting callers is
+ * `'planning'` so workspace-level My Issues / All Issues behave exactly
+ * as before.
+ *
+ * In reality mode, drags STILL write through the override layer for
+ * smooth visual feedback during the gesture; on mouseup the override is
+ * cleared and the final value is sent to the BE so the persisted state
+ * lives entirely in the workspace cache.
+ */
+export type GanttMode = 'reality' | 'planning';
 
 interface IssuesGanttProps {
   groups: Group[];
@@ -38,6 +54,8 @@ interface IssuesGanttProps {
    * spans; 'day' and 'week' force the tick mode regardless of span.
    */
   granularity: GanttGranularity;
+  /** Reality vs planning. See `GanttMode`. Defaults to 'planning'. */
+  mode?: GanttMode;
 }
 
 // Tree row produced by `flattenTree` — depth drives the indent, hasChildren
@@ -51,11 +69,11 @@ interface TreeRow {
 }
 
 function buildAndFlattenTree(items: Issue[], collapsedNodes: Set<string>): TreeRow[] {
-  const ids = new Set(items.map((i) => i.id));
+  const keys = new Set(items.map((i) => i.key));
   const childMap: Record<string, Issue[]> = {};
   const roots: Issue[] = [];
   for (const i of items) {
-    if (i.parent && ids.has(i.parent)) {
+    if (i.parent && keys.has(i.parent)) {
       (childMap[i.parent] ??= []).push(i);
     } else {
       roots.push(i);
@@ -63,9 +81,9 @@ function buildAndFlattenTree(items: Issue[], collapsedNodes: Set<string>): TreeR
   }
   const out: TreeRow[] = [];
   const walk = (issue: Issue, depth: number, ancestorCollapsed: boolean) => {
-    const children = childMap[issue.id] ?? [];
+    const children = childMap[issue.key] ?? [];
     const hasChildren = children.length > 0;
-    const isExpanded = !collapsedNodes.has(issue.id);
+    const isExpanded = !collapsedNodes.has(issue.key);
     out.push({
       issue, depth, hasChildren, isExpanded,
       parentChainCollapsed: ancestorCollapsed,
@@ -297,6 +315,7 @@ function groupSpan(items: Issue[]): BarSpec | null {
 
 export function IssuesGantt({
   groups, groupBy, collapsed, onToggleCollapsed, tenant, workspace, hierarchical, granularity,
+  mode = 'planning',
 }: IssuesGanttProps) {
   const [collapsedNodes, setCollapsedNodes] = useState<Set<string>>(() => new Set());
   const toggleNode = (id: string) => setCollapsedNodes((prev) => {
@@ -304,18 +323,54 @@ export function IssuesGantt({
     if (next.has(id)) next.delete(id); else next.add(id);
     return next;
   });
-  // Edits flow through the IssuesProvider, which persists overrides to
-  // localStorage so a refresh keeps gantt drags / reassignments. Group
-  // derivation in `IssuesTable` already reads from `useIssues()`, so a
-  // reassignment naturally moves the bar into the new assignee's group.
-  const { updateIssue } = useIssues();
+  // Edits flow through the IssuesProvider. In planning mode they persist
+  // to the localStorage overrides layer so a refresh keeps the user's
+  // what-if drags. In reality mode the override is used purely for live
+  // visual feedback during the drag — on commit (mouseup) the final
+  // value is PATCHed to the BE and the override is cleared so the cache
+  // is the single source of truth.
+  const { updateIssue, patchIssue, resetIssue } = useIssues();
+  // During-drag preview — same code path for both modes; in reality mode
+  // we'll clear the override on commit/error.
   const updateDates = useCallback(
-    (id: string, next: { startDate?: string; endDate?: string }) => updateIssue(id, next),
+    (key: string, next: { startDate?: string; endDate?: string }) => updateIssue(key, next),
     [updateIssue],
   );
+  // Bar-drag commit. In planning mode the override IS the persisted
+  // state; we do nothing extra. In reality mode we PATCH and clear.
+  // Errors don't surface visually here yet — the bar simply snaps back
+  // to the BE-canonical position via the override clear; a toast layer
+  // (later slice) is the right home for non-blocking failure feedback.
+  const commitDates = useCallback(
+    async (key: string, next: { startDate: string; endDate: string }) => {
+      if (mode !== 'reality') return;
+      const result = await patchIssue(key, { startDate: next.startDate, endDate: next.endDate });
+      // Either way, drop the override — on success the cache holds the
+      // server value; on error the cache is rolled back inside patchIssue.
+      resetIssue(key);
+      if (!result.ok) {
+        // Surface to the console for now — gantt-level non-blocking
+        // failures will plug into the toast system in a later slice.
+        console.warn(`[gantt] failed to persist dates for ${key}: ${result.message}`);
+      }
+    },
+    [mode, patchIssue, resetIssue],
+  );
+  // Assignee-change commit (the bar's edit popover changes assignee). Same
+  // shape as commitDates: PATCH + override clear on reality, no-op planning.
   const updateAssignee = useCallback(
-    (id: string, name: string) => updateIssue(id, { assignee: name }),
-    [updateIssue],
+    async (key: string, userId: string | null) => {
+      // Optimistic local — keeps planning behaviour intact AND gives
+      // reality-mode users the same instant feedback.
+      updateIssue(key, { assigneeUserId: userId });
+      if (mode !== 'reality') return;
+      const result = await patchIssue(key, { assigneeUserId: userId });
+      resetIssue(key);
+      if (!result.ok) {
+        console.warn(`[gantt] failed to reassign ${key}: ${result.message}`);
+      }
+    },
+    [mode, updateIssue, patchIssue, resetIssue],
   );
   // Which row's edit popover is open, if any. Anchored to the bar; opened by
   // a no-drag click on the bar, dismissed by outside-click or Escape.
@@ -324,7 +379,7 @@ export function IssuesGantt({
   const allItems = useMemo(() => effectiveGroups.flatMap((g) => g.items), [effectiveGroups]);
   const lookup = useMemo(() => {
     const m = new Map<string, Issue>();
-    for (const i of allItems) m.set(i.id, i);
+    for (const i of allItems) m.set(i.key, i);
     return m;
   }, [allItems]);
 
@@ -472,7 +527,7 @@ export function IssuesGantt({
                       .filter((row) => !row.parentChainCollapsed)
                       .map((row) => (
                         <IssueRow
-                          key={row.issue.id}
+                          key={row.issue.key}
                           issue={row.issue}
                           tenant={tenant}
                           workspace={workspace}
@@ -485,18 +540,19 @@ export function IssuesGantt({
                           depth={row.depth}
                           hasChildren={row.hasChildren}
                           isExpanded={row.isExpanded}
-                          onToggleExpand={row.hasChildren ? () => toggleNode(row.issue.id) : undefined}
+                          onToggleExpand={row.hasChildren ? () => toggleNode(row.issue.key) : undefined}
                           onDateChange={updateDates}
+                          onDateCommit={commitDates}
                           onAssigneeChange={updateAssignee}
-                          editingOpen={editingId === row.issue.id}
-                          onOpenEdit={() => setEditingId(row.issue.id)}
+                          editingOpen={editingId === row.issue.key}
+                          onOpenEdit={() => setEditingId(row.issue.key)}
                           onCloseEdit={() => setEditingId(null)}
                           lookup={lookup}
                         />
                       ))
                   : g.items.map((issue) => (
                       <IssueRow
-                        key={issue.id}
+                        key={issue.key}
                         issue={issue}
                         tenant={tenant}
                         workspace={workspace}
@@ -507,9 +563,10 @@ export function IssuesGantt({
                         ticks={ticks}
                         todayOffset={todayOffset}
                         onDateChange={updateDates}
+                        onDateCommit={commitDates}
                         onAssigneeChange={updateAssignee}
-                        editingOpen={editingId === issue.id}
-                        onOpenEdit={() => setEditingId(issue.id)}
+                        editingOpen={editingId === issue.key}
+                        onOpenEdit={() => setEditingId(issue.key)}
                         onCloseEdit={() => setEditingId(null)}
                         lookup={lookup}
                       />
@@ -678,8 +735,15 @@ interface IssueRowProps extends RowChromeProps {
   hasChildren?: boolean;
   isExpanded?: boolean;
   onToggleExpand?: () => void;
-  onDateChange: (id: string, next: { startDate?: string; endDate?: string }) => void;
-  onAssigneeChange: (id: string, name: string) => void;
+  /** Live during-drag preview — fires every mousemove. */
+  onDateChange: (key: string, next: { startDate?: string; endDate?: string }) => void;
+  /**
+   * End-of-drag commit — fires once on mouseup with the final dates.
+   * Reality mode uses this to PATCH the BE; planning mode is a no-op
+   * since the live override already represents the persisted state.
+   */
+  onDateCommit: (key: string, next: { startDate: string; endDate: string }) => void | Promise<void>;
+  onAssigneeChange: (key: string, userId: string | null) => void | Promise<void>;
   editingOpen: boolean;
   onOpenEdit: () => void;
   onCloseEdit: () => void;
@@ -689,7 +753,7 @@ function IssueRow({
   issue, tenant, workspace,
   range, dayPx, timelineWidth, weekly, ticks, todayOffset,
   depth = 0, hasChildren = false, isExpanded = true, onToggleExpand,
-  onDateChange, onAssigneeChange, editingOpen, onOpenEdit, onCloseEdit, lookup,
+  onDateChange, onDateCommit, onAssigneeChange, editingOpen, onOpenEdit, onCloseEdit, lookup,
 }: IssueRowProps) {
   // Tasks/Bugs carry their own dates and the bar is editable.
   // Stories/Epics derive a read-only bar from descendant leaves.
@@ -704,7 +768,11 @@ function IssueRow({
     ? computeTaskLoad(issue.estimate, issue.startDate, issue.endDate)
     : null;
   const overloaded = !!(load && load.overload > 1.0001);
-  const issueHref = `/${tenant}/${workspace}/${issue.project}/issue/${issue.id}`;
+  // Resolve the project's slug for the link target. UUIDs never appear in
+  // URLs (slug stays the user-facing handle).
+  const { getProjectById } = useProjects();
+  const projectSlug = getProjectById(issue.projectId)?.slug ?? '';
+  const issueHref = `/${tenant}/${workspace}/${projectSlug}/issue/${issue.key}`;
 
   // 16px per depth, plus an extra 16px gutter so root rows still leave room
   // for the chevron column when something at the same level has children.
@@ -740,6 +808,11 @@ function IssueRow({
     // 3px threshold counts. A clean mousedown→mouseup with no drag opens the
     // edit popover instead of mutating dates.
     let didDrag = false;
+    // Latest committed-during-drag values; the mouseup handler reuses these
+    // for the BE PATCH so we don't recompute deltas after the listener has
+    // already detached.
+    let lastStart = origStart;
+    let lastEnd = origEnd;
     const onMove = (ev: MouseEvent) => {
       if (!didDrag && (Math.abs(ev.clientX - startX) > 3 || Math.abs(ev.clientY - startY) > 3)) {
         didDrag = true;
@@ -756,7 +829,9 @@ function IssueRow({
       } else if (mode === 'resize-end') {
         newEnd = Math.max(origStart, origEnd + deltaDays);
       }
-      onDateChange(issue.id, { startDate: dayToIso(newStart), endDate: dayToIso(newEnd) });
+      lastStart = newStart;
+      lastEnd = newEnd;
+      onDateChange(issue.key, { startDate: dayToIso(newStart), endDate: dayToIso(newEnd) });
     };
     const onUp = () => {
       window.removeEventListener('mousemove', onMove);
@@ -764,7 +839,18 @@ function IssueRow({
       document.body.style.cursor = '';
       document.body.style.userSelect = '';
       // Click on the bar body (not the resize handles) opens the edit popover.
-      if (!didDrag && mode === 'move') onOpenEdit();
+      if (!didDrag && mode === 'move') {
+        onOpenEdit();
+        return;
+      }
+      // Real drag completed — commit final dates. Reality mode PATCHes
+      // and clears the local override; planning mode is a no-op.
+      if (didDrag) {
+        onDateCommit(issue.key, {
+          startDate: dayToIso(lastStart),
+          endDate: dayToIso(lastEnd),
+        });
+      }
     };
     window.addEventListener('mousemove', onMove);
     window.addEventListener('mouseup', onUp);
@@ -780,16 +866,26 @@ function IssueRow({
     e.preventDefault();
     const trackRect = e.currentTarget.getBoundingClientRect();
     const anchorDay = range.start + Math.floor((e.clientX - trackRect.left) / dayPx);
-    onDateChange(issue.id, { startDate: dayToIso(anchorDay), endDate: dayToIso(anchorDay) });
+    let lastStart = anchorDay;
+    let lastEnd = anchorDay;
+    onDateChange(issue.key, { startDate: dayToIso(anchorDay), endDate: dayToIso(anchorDay) });
     const onMove = (ev: MouseEvent) => {
       const day = range.start + Math.floor((ev.clientX - trackRect.left) / dayPx);
       const s = Math.min(anchorDay, day);
       const ed = Math.max(anchorDay, day);
-      onDateChange(issue.id, { startDate: dayToIso(s), endDate: dayToIso(ed) });
+      lastStart = s;
+      lastEnd = ed;
+      onDateChange(issue.key, { startDate: dayToIso(s), endDate: dayToIso(ed) });
     };
     const onUp = () => {
       window.removeEventListener('mousemove', onMove);
       window.removeEventListener('mouseup', onUp);
+      // Commit the final span on release. A click without movement still
+      // commits a one-day span (lastStart === lastEnd === anchorDay).
+      onDateCommit(issue.key, {
+        startDate: dayToIso(lastStart),
+        endDate: dayToIso(lastEnd),
+      });
       document.body.style.cursor = '';
       document.body.style.userSelect = '';
     };
@@ -831,7 +927,7 @@ function IssueRow({
           onMouseEnter={(e) => { e.currentTarget.style.textDecoration = 'underline'; }}
           onMouseLeave={(e) => { e.currentTarget.style.textDecoration = 'none'; }}
         >
-          <IssueId id={issue.id} />
+          <IssueId id={issue.key} />
         </Link>
         <span
           style={{
@@ -871,8 +967,8 @@ function IssueRow({
         {bar && (
           <div
             title={(() => {
-              if (!editable) return `${issue.id} · ${issue.title}\nRolled up from descendants`;
-              const head = `${issue.id} · ${issue.title}\n${issue.startDate ?? '—'} → ${issue.endDate ?? '—'}`;
+              if (!editable) return `${issue.key} · ${issue.title}\nRolled up from descendants`;
+              const head = `${issue.key} · ${issue.title}\n${issue.startDate ?? '—'} → ${issue.endDate ?? '—'}`;
               const loadLine = load
                 ? `\n${issue.estimate} pts over ${load.workingDays} working day${load.workingDays === 1 ? '' : 's'} → ${formatPpd(load.pointsPerDay)} pts/day${overloaded ? ` (${formatOverload(load.overload)} ideal load — overworked)` : ''}`
                 : '';
@@ -941,7 +1037,7 @@ function IssueRow({
             tenant={tenant}
             workspace={workspace}
             left={(bar.startDay - range.start) * dayPx + 1}
-            onAssigneeChange={(name) => onAssigneeChange(issue.id, name)}
+            onAssigneeChange={(userId) => onAssigneeChange(issue.key, userId)}
             onClose={onCloseEdit}
           />
         )}
@@ -1011,20 +1107,18 @@ function BarEditPopover({
   workspace: string;
   /** Pixel offset of the bar's left edge within the track row. */
   left: number;
-  onAssigneeChange: (name: string) => void;
+  /** Receives the picked user's UUID (or null to clear). */
+  onAssigneeChange: (userId: string | null) => void;
   onClose: () => void;
 }) {
   const ref = useRef<HTMLDivElement>(null);
   useDismiss(ref, onClose, true);
   const [search, setSearch] = useState('');
+  const { searchUsers } = useUsers();
+  const { getProjectById } = useProjects();
+  const projectSlug = getProjectById(issue.projectId)?.slug ?? '';
 
-  const members = useMemo(
-    () => (TENANT_MEMBERS[tenant] ?? []).filter((m) => m.status === 'active'),
-    [tenant],
-  );
-  const filtered = !search.trim()
-    ? members
-    : members.filter((m) => m.name.toLowerCase().includes(search.toLowerCase()));
+  const filtered = useMemo(() => searchUsers(search), [searchUsers, search]);
 
   return (
     <div
@@ -1051,13 +1145,13 @@ function BarEditPopover({
       }}>
         <TypeChip type={issue.type} />
         <Link
-          to={`/${tenant}/${workspace}/${issue.project}/issue/${issue.id}`}
+          to={`/${tenant}/${workspace}/${projectSlug}/issue/${issue.key}`}
           onClick={onClose}
           style={{ textDecoration: 'none', color: 'inherit' }}
           onMouseEnter={(e) => { e.currentTarget.style.textDecoration = 'underline'; }}
           onMouseLeave={(e) => { e.currentTarget.style.textDecoration = 'none'; }}
         >
-          <IssueId id={issue.id} />
+          <IssueId id={issue.key} />
         </Link>
         <span style={{
           flex: 1, minWidth: 0, fontSize: 12, color: 'var(--fg)',
@@ -1092,13 +1186,13 @@ function BarEditPopover({
         </div>
       </div>
       <div className="scroll" style={{ maxHeight: 240, overflow: 'auto', padding: 4 }}>
-        {filtered.map((m) => {
-          const isCurrent = m.name === issue.assignee;
+        {filtered.map((u) => {
+          const isCurrent = u.id === issue.assigneeUserId;
           return (
             <button
-              key={m.email}
+              key={u.id}
               type="button"
-              onClick={() => { onAssigneeChange(m.name); onClose(); }}
+              onClick={() => { onAssigneeChange(u.id); onClose(); }}
               style={{
                 display: 'flex', alignItems: 'center', gap: 8, width: '100%',
                 padding: '6px 8px', borderRadius: 5, fontSize: 13,
@@ -1108,12 +1202,12 @@ function BarEditPopover({
               onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--bg-subtle)'; }}
               onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
             >
-              <Avatar name={m.name} size={20} />
+              <Avatar name={u.displayName} size={20} />
               <span style={{
                 flex: 1, minWidth: 0,
                 overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
               }}>
-                {m.name}
+                {u.displayName}
               </span>
               {isCurrent && <Icon name="check" size={12} color="var(--accent)" />}
             </button>

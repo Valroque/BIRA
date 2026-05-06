@@ -106,6 +106,20 @@ async function resolveProject(req: { scope?: { workspaceId?: string }; params: {
 }
 
 /**
+ * Gate write paths on project status. Mirrors `requireActiveWorkspace`
+ * but at the project scope: issue mutations are blocked when the project
+ * is archived, returning 409 with the unarchive hint.
+ */
+function requireActiveProject(project: { slug: string; status: string }): void {
+  if (project.status !== 'active') {
+    throw new AppError(
+      `Project '${project.slug}' is archived — unarchive it before making changes`,
+      409
+    );
+  }
+}
+
+/**
  * Pulls the slug context off `req.scope` for `getIssue` (slice C — needed
  * to build attachment readUrls). Throws if scope is missing — callers
  * inside this router are always mounted under the workspace-scope chain
@@ -146,6 +160,7 @@ router.post(
       throw new AppError('Workspace scope missing', 500);
     }
     const project = await resolveProject(req);
+    requireActiveProject(project);
     const input = CreateIssueSchema.parse(req.body);
     // Resolve `parent` (issue key) → uuid. We do this in the route so
     // the usecase signature stays uuid-typed and the FE-friendly key
@@ -201,7 +216,7 @@ router.patch(
   requireActiveWorkspace,
   asyncHandler(async (req, res) => {
     if (!req.scope?.workspaceId || !req.user) throw new AppError('Workspace scope missing', 500);
-    await resolveProject(req);
+    requireActiveProject(await resolveProject(req));
     const patch = UpdateIssueSchema.parse(req.body);
     const issue = await updateIssue(req.scope.workspaceId, req.params.key, patch, {
       actingUserId: req.user.id,
@@ -224,7 +239,7 @@ router.patch(
   requireActiveWorkspace,
   asyncHandler(async (req, res) => {
     if (!req.scope?.workspaceId) throw new AppError('Workspace scope missing', 500);
-    await resolveProject(req);
+    requireActiveProject(await resolveProject(req));
     const body = SetParentSchema.parse(req.body);
 
     const child = await issueService.findByKey(req.scope.workspaceId, req.params.key);
@@ -263,7 +278,7 @@ router.post(
   requireActiveWorkspace,
   asyncHandler(async (req, res) => {
     if (!req.scope?.workspaceId) throw new AppError('Workspace scope missing', 500);
-    await resolveProject(req);
+    requireActiveProject(await resolveProject(req));
     const body = RelatesBodySchema.parse(req.body);
     await relateIssues({
       workspaceId: req.scope.workspaceId,
@@ -286,7 +301,7 @@ router.delete(
     if (!ISSUE_KEY_RE.test(req.params.relatedKey)) {
       throw new AppError('Invalid issue key', 400);
     }
-    await resolveProject(req);
+    requireActiveProject(await resolveProject(req));
     await unrelateIssues({
       workspaceId: req.scope.workspaceId,
       aKey: req.params.key,
@@ -305,7 +320,7 @@ router.post(
   requireActiveWorkspace,
   asyncHandler(async (req, res) => {
     if (!req.scope?.workspaceId) throw new AppError('Workspace scope missing', 500);
-    await resolveProject(req);
+    requireActiveProject(await resolveProject(req));
     const body = DependencyBodySchema.parse(req.body);
     await addDependency({
       workspaceId: req.scope.workspaceId,
@@ -328,7 +343,7 @@ router.delete(
     if (!ISSUE_KEY_RE.test(req.params.blockerKey)) {
       throw new AppError('Invalid issue key', 400);
     }
-    await resolveProject(req);
+    requireActiveProject(await resolveProject(req));
     await removeDependency({
       workspaceId: req.scope.workspaceId,
       blockerKey: req.params.blockerKey,
@@ -380,7 +395,7 @@ router.post(
     if (!req.user || !req.scope?.workspaceId) {
       throw new AppError('Workspace scope missing', 500);
     }
-    await resolveProject(req);
+    requireActiveProject(await resolveProject(req));
     const issue = await issueService.findByKey(req.scope.workspaceId, req.params.key);
     if (!issue) throw new AppError(`Issue '${req.params.key}' not found`, 404);
 

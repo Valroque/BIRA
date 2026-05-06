@@ -15,9 +15,13 @@ import {
   FilterChip, AddFilterButton, applyFilters, newFilterId, type Filter,
 } from '../components/issue-filters';
 import { AvatarStack } from './teams';
+// `ISSUES` is referenced ONLY by the `BoardBulkExpanded` design-canvas
+// reference component below. Live board data flows through `useIssues()`.
 import { ISSUES, projectEffectiveMembers, type Issue } from '../fixtures';
 import { useProjects } from '../state/projects';
 import { useIssues } from '../state/issues';
+import { useUsers, UNKNOWN_USER_LABEL } from '../state/users';
+import { ErrorState, SkeletonRow } from '../components/states';
 
 const PRIORITY_LABEL: Record<Issue['priority'], string> = {
   urgent: 'Urgent', high: 'High', med: 'Medium', low: 'Low', none: 'No priority',
@@ -41,7 +45,7 @@ const DEMO_SELECTED = ['CMT-241', 'CMT-238', 'CMT-237', 'CMT-235', 'CMT-234'];
 export function BoardView({ selectedCount, showBulkBar = true }: BoardViewProps) {
   const { tenant, workspace, project, tenantName, workspaceName } = useTenantBreadcrumbs();
   const { getProject } = useProjects();
-  const { issues } = useIssues();
+  const { issues, loading, error, refresh } = useIssues();
   const projectInfo = getProject(project);
   const members = projectInfo ? projectEffectiveMembers(projectInfo, tenant) : [];
   const { config, setConfig, reset } = useBoardConfig(tenant, workspace, project);
@@ -67,10 +71,15 @@ export function BoardView({ selectedCount, showBulkBar = true }: BoardViewProps)
     setFilters((fs) => [...fs, { id: newFilterId(), type, values: [] }]);
 
   // Scope the board to issues that belong to the current project (fixtures
-  // now include Orbit and Atlas issues too), then apply user filters.
+  // now include Orbit and Atlas issues too), then apply user filters. The URL
+  // slug resolves to a project UUID via useProjects() at the boundary so the
+  // issue compare is uuid-on-uuid.
+  const projectId = projectInfo?.id;
   const projectIssues = useMemo(
-    () => applyFilters(issues.filter((i) => i.project === project), filters),
-    [issues, project, filters],
+    () => projectId
+      ? applyFilters(issues.filter((i) => i.projectId === projectId), filters)
+      : [],
+    [issues, projectId, filters],
   );
   const issuesIn = (col: BoardColumn) =>
     projectIssues.filter((i) => col.statuses.includes(i.status));
@@ -78,6 +87,32 @@ export function BoardView({ selectedCount, showBulkBar = true }: BoardViewProps)
   // Hide the "project" filter type from the picker — the board is already
   // project-scoped, so it would always be a no-op here.
   const reservedFilterTypes: Filter['type'][] = ['project'];
+
+  // Error: show ErrorState in the body. Keep the chrome so the user can still
+  // navigate. Retry calls `refresh()` from the provider.
+  if (error && !loading) {
+    return (
+      <div className="bira" style={{ height: '100%', display: 'flex', flexDirection: 'column', background: 'var(--bg)' }}>
+        <TopBar breadcrumbs={[
+          { label: tenantName, to: `/${tenant}/workspaces` },
+          { label: workspaceName, to: `/${tenant}/${workspace}/projects` },
+          { label: projectInfo?.name ?? project, to: `/${tenant}/${workspace}/${project}` },
+          'Board',
+        ]} />
+        <Tabs active="board" tabs={projectTabs(tenant, workspace, project)} />
+        <ErrorState
+          code="LOAD_ISSUES"
+          title="Couldn’t load issues"
+          description={error}
+          action={
+            <button type="button" onClick={() => { void refresh(); }} className="btn btn-primary btn-sm">
+              <Icon name="refresh" size={13} />Retry
+            </button>
+          }
+        />
+      </div>
+    );
+  }
 
   return (
     <div className="bira" style={{ height: '100%', display: 'flex', flexDirection: 'column', background: 'var(--bg)' }}>
@@ -145,7 +180,27 @@ export function BoardView({ selectedCount, showBulkBar = true }: BoardViewProps)
       </Toolbar>
 
       <div style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column', position: 'relative' }}>
-        {config.groupBy === 'none' ? (
+        {loading && issues.length === 0 ? (
+          <div className="scroll" style={{
+            flex: 1, overflowX: 'auto', overflowY: 'hidden', display: 'flex',
+            gap: 10, padding: '12px 12px 60px', background: 'var(--bg-subtle)',
+          }}>
+            {config.columns.map((col) => (
+              <div key={col.id} style={{ width: 280, flexShrink: 0, display: 'flex', flexDirection: 'column' }}>
+                <ColumnHeader col={col} count={0} />
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  {[0, 1, 2].map((i) => (
+                    <div key={i} className="card" style={{ padding: 10 }}>
+                      <SkeletonRow width="60%" height={10} />
+                      <div style={{ height: 6 }} />
+                      <SkeletonRow width="100%" height={14} />
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : config.groupBy === 'none' ? (
           <div className="scroll" style={{
             flex: 1, overflowX: 'auto', overflowY: 'hidden', display: 'flex',
             gap: 10, padding: '12px 12px 60px', background: 'var(--bg-subtle)',
@@ -160,12 +215,12 @@ export function BoardView({ selectedCount, showBulkBar = true }: BoardViewProps)
                   <div className="scroll" style={{ flex: 1, overflow: 'auto', display: 'flex', flexDirection: 'column', gap: 6 }}>
                     {colIssues.map((i) => (
                       <BoardCard
-                        key={i.id}
+                        key={i.key}
                         issue={i}
                         tenant={tenant}
                         workspace={workspace}
                         project={project}
-                        selected={selectedIds.has(i.id)}
+                        selected={selectedIds.has(i.key)}
                         onToggleSelect={toggleSelect}
                         showStatus={grouped}
                       />
@@ -314,19 +369,44 @@ interface Lane {
   count: number;
 }
 
-function deriveLanes(issues: Issue[], groupBy: GroupBy): Lane[] {
+function deriveLanes(
+  issues: Issue[],
+  groupBy: GroupBy,
+  resolveAssigneeName: (id: string | null) => string,
+): Lane[] {
   switch (groupBy) {
     case 'assignee': {
-      const names = Array.from(new Set(issues.map((i) => i.assignee))).sort();
-      return names.map((name) => ({
-        key: name,
-        label: (
-          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-            <Avatar name={name} size={18} />{name}
-          </span>
-        ),
-        count: issues.filter((i) => i.assignee === name).length,
-      }));
+      // Lane key is the assignee UUID (or '__unassigned__' for unassigned).
+      // Display resolves uuid → name at the boundary so we never render a uuid.
+      const ids = new Set<string | null>();
+      for (const i of issues) ids.add(i.assigneeUserId);
+      const concreteIds = Array.from(ids)
+        .filter((id): id is string => id !== null)
+        .sort((a, b) => resolveAssigneeName(a).localeCompare(resolveAssigneeName(b)));
+      const lanes: Lane[] = concreteIds.map((id) => {
+        const name = resolveAssigneeName(id);
+        return {
+          key: id,
+          label: (
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+              <Avatar name={name} size={18} />{name}
+            </span>
+          ),
+          count: issues.filter((i) => i.assigneeUserId === id).length,
+        };
+      });
+      if (ids.has(null)) {
+        lanes.push({
+          key: '__unassigned__',
+          label: (
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, color: 'var(--fg-muted)', fontStyle: 'italic' }}>
+              <Avatar name="?" size={18} />Unassigned
+            </span>
+          ),
+          count: issues.filter((i) => i.assigneeUserId === null).length,
+        });
+      }
+      return lanes;
     }
     case 'priority': {
       const order: Issue['priority'][] = ['urgent', 'high', 'med', 'low', 'none'];
@@ -385,7 +465,10 @@ function deriveLanes(issues: Issue[], groupBy: GroupBy): Lane[] {
 
 function isInLane(issue: Issue, groupBy: GroupBy, key: string): boolean {
   switch (groupBy) {
-    case 'assignee': return issue.assignee === key;
+    case 'assignee':
+      return key === '__unassigned__'
+        ? issue.assigneeUserId === null
+        : issue.assigneeUserId === key;
     case 'priority': return issue.priority === key;
     case 'type':     return issue.type === key;
     case 'label':    return key === '__none__' ? issue.labels.length === 0 : issue.labels.includes(key);
@@ -408,7 +491,17 @@ function SwimlaneBoard({
   columns, issues, issuesIn, groupBy,
   selectedIds, onToggleSelect, tenant, workspace, project,
 }: SwimlaneBoardProps) {
-  const lanes = useMemo(() => deriveLanes(issues, groupBy), [issues, groupBy]);
+  const { getUser } = useUsers();
+  const resolveAssigneeName = (id: string | null) =>
+    id ? (getUser(id)?.displayName ?? UNKNOWN_USER_LABEL) : 'Unassigned';
+  const lanes = useMemo(
+    () => deriveLanes(issues, groupBy, resolveAssigneeName),
+    // resolveAssigneeName closes over getUser; including the underlying users
+    // map (via useUsers's stable reference) keeps lanes in sync if the roster
+    // changes mid-session.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [issues, groupBy, getUser],
+  );
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const toggleLane = (key: string) =>
     setCollapsed((prev) => {
@@ -495,12 +588,12 @@ function SwimlaneBoard({
                         >
                           {cards.map((i) => (
                             <BoardCard
-                              key={i.id}
+                              key={i.key}
                               issue={i}
                               tenant={tenant}
                               workspace={workspace}
                               project={project}
-                              selected={selectedIds.has(i.id)}
+                              selected={selectedIds.has(i.key)}
                               onToggleSelect={onToggleSelect}
                               showStatus={grouped}
                             />
@@ -635,16 +728,20 @@ interface BoardCardProps {
 }
 export function BoardCard({ issue, tenant, workspace, project, selected, onToggleSelect, showStatus }: BoardCardProps) {
   const statusMeta = STATUSES.find((s) => s.id === issue.status);
+  const { getUser } = useUsers();
+  const assigneeName = issue.assigneeUserId
+    ? (getUser(issue.assigneeUserId)?.displayName ?? UNKNOWN_USER_LABEL)
+    : '';
   const stopAndToggle = (e: MouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
-    onToggleSelect?.(issue.id);
+    onToggleSelect?.(issue.key);
   };
   const linkable = tenant && workspace && project;
-  const Wrapper: React.ElementType = linkable ? Link : 'div';
   const wrapperProps = linkable
-    ? { to: `/${tenant}/${workspace}/${project}/issue/${issue.id}`, style: { textDecoration: 'none', color: 'inherit' } }
+    ? { to: `/${tenant}/${workspace}/${project}/issue/${issue.key}`, style: { textDecoration: 'none', color: 'inherit' } }
     : {};
+  const Wrapper: React.ElementType = linkable ? Link : 'div';
   return (
     <Wrapper
       {...wrapperProps as object}
@@ -662,13 +759,13 @@ export function BoardCard({ issue, tenant, workspace, project, selected, onToggl
           type="checkbox"
           className="cb"
           checked={!!selected}
-          onChange={() => onToggleSelect?.(issue.id)}
+          onChange={() => onToggleSelect?.(issue.key)}
           onClick={stopAndToggle}
           readOnly={!onToggleSelect}
           style={{ marginLeft: -2 }}
         />
         <TypeChip type={issue.type} />
-        <IssueId id={issue.id} />
+        <IssueId id={issue.key} />
         {showStatus && statusMeta && (
           <StatusPill
             status={issue.status}
@@ -695,7 +792,7 @@ export function BoardCard({ issue, tenant, workspace, project, selected, onToggl
         {issue.estimate != null && (
           <span className="tnum" style={{ fontSize: 11, color: 'var(--fg-muted)' }}>{issue.estimate}</span>
         )}
-        <Avatar name={issue.assignee} size={18} />
+        {assigneeName && <Avatar name={assigneeName} size={18} />}
       </div>
     </Wrapper>
   );
@@ -733,10 +830,10 @@ export function BoardBulkExpanded() {
                 <span style={{ fontWeight: 600 }}>{s.name}</span>
               </div>
               {ISSUES.filter((i) => i.status === s.id).slice(0, 3).map((i) => (
-                <div key={i.id} className="card" style={{ padding: 8, marginBottom: 6, fontSize: 12 }}>
+                <div key={i.key} className="card" style={{ padding: 8, marginBottom: 6, fontSize: 12 }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
                     <TypeChip type={i.type} />
-                    <span className="mono" style={{ fontSize: 11, color: 'var(--fg-subtle)' }}>{i.id}</span>
+                    <span className="mono" style={{ fontSize: 11, color: 'var(--fg-subtle)' }}>{i.key}</span>
                   </div>
                   <div style={{ fontSize: 12, color: 'var(--fg)' }}>{i.title.slice(0, 60)}…</div>
                 </div>

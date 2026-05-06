@@ -24,27 +24,39 @@ export function useMentionSearch(
     }
 
     const controller = new AbortController();
-    let debounceTimer: ReturnType<typeof setTimeout>;
+    let cancelled = false;
 
-    debounceTimer = setTimeout(async () => {
-      setLoading(true);
-      setError(null);
+    setLoading(true);
+    setError(null);
+
+    // 200ms feels like the sweet spot — long enough to skip per-keystroke
+    // requests, short enough that the picker stays responsive after the
+    // user stops typing. Any in-flight request from a previous query gets
+    // aborted via the cleanup below.
+    const debounceTimer = setTimeout(async () => {
       try {
-        const results = await searchMentionables(tenant, workspace, query, { types: opts?.types }, {
-          signal: controller.signal,
-        });
+        const results = await searchMentionables(
+          tenant,
+          workspace,
+          query,
+          { types: opts?.types },
+          { signal: controller.signal },
+        );
+        if (cancelled) return;
         setHits(results);
+        setLoading(false);
       } catch (err: unknown) {
         // AbortError means a newer query cancelled this one — ignore silently.
         if (err instanceof Error && err.name === 'AbortError') return;
+        if (cancelled) return;
         setError(err instanceof Error ? err.message : 'Search failed');
         setHits([]);
-      } finally {
         setLoading(false);
       }
-    }, 150);
+    }, 200);
 
     return () => {
+      cancelled = true;
       clearTimeout(debounceTimer);
       controller.abort();
     };

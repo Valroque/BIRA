@@ -14,10 +14,11 @@ import { Section } from '../components/section';
 import { ProjectBadge } from '../components/project-chip';
 import { ErrorState } from '../components/states';
 import {
-  ISSUES, TEAMS, tenantMemberByEmail,
+  TEAMS, tenantMemberByEmail,
   type TenantMember, type Issue,
 } from '../fixtures';
 import { useProjects } from '../state/projects';
+import { useIssues } from '../state/issues';
 
 const ROLE_LABEL: Record<TenantMember['tenantRole'], string> = {
   admin: 'Admin',
@@ -59,11 +60,13 @@ export function MemberProfilePage() {
 function MemberProfile({ member }: { member: TenantMember }) {
   const { tenant, workspace, tenantName, workspaceName } = useTenantBreadcrumbs();
   const { projects } = useProjects();
+  const { issues } = useIssues();
 
   // Issues visible to a member: anything currently assigned to them. The
   // fixture model doesn't carry a separate "reporter" field per issue, so
   // assignee is the only person dimension we can surface here for v1.
-  const assigned = ISSUES.filter((i) => i.assignee === member.name);
+  // Match by UUID — `member.id` is the canonical identity.
+  const assigned = issues.filter((i) => i.assigneeUserId === member.id);
 
   const teams = TEAMS.filter((t) => t.memberEmails.includes(member.email));
 
@@ -203,7 +206,7 @@ function MemberProfile({ member }: { member: TenantMember }) {
             ) : (
               <div className="card" style={{ padding: 0 }}>
                 {assigned.map((i, idx) => (
-                  <AssignedIssueRow key={i.id} issue={i} first={idx === 0} tenant={tenant} workspace={workspace} />
+                  <AssignedIssueRow key={i.key} issue={i} first={idx === 0} tenant={tenant} workspace={workspace} />
                 ))}
               </div>
             )}
@@ -216,9 +219,11 @@ function MemberProfile({ member }: { member: TenantMember }) {
 }
 
 function AssignedIssueRow({ issue, first, tenant, workspace }: { issue: Issue; first: boolean; tenant: string; workspace: string }) {
+  const { getProjectById } = useProjects();
+  const projectSlug = getProjectById(issue.projectId)?.slug ?? '';
   return (
     <Link
-      to={`/${tenant}/${workspace}/${issue.project}/issue/${issue.id}`}
+      to={`/${tenant}/${workspace}/${projectSlug}/issue/${issue.key}`}
       style={{
         display: 'flex', alignItems: 'center', gap: 10,
         padding: '10px 14px', textDecoration: 'none', color: 'inherit',
@@ -227,7 +232,7 @@ function AssignedIssueRow({ issue, first, tenant, workspace }: { issue: Issue; f
     >
       <StatusDot status={issue.status} size={10} />
       <TypeChip type={issue.type} />
-      <IssueId id={issue.id} />
+      <IssueId id={issue.key} />
       <span style={{
         flex: 1, fontSize: 13,
         overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',

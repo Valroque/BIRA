@@ -3,10 +3,16 @@ import { hashPassword } from '../../src/lib/passwordUtils.js';
 
 /**
  * Seed:
- *   1. DreamStreet — primary tenant, with one admin (admin@dreamstreet.io).
- *      Tenants are seed-only in v1, so this is how DreamStreet exists at all.
- *      Intentionally workspace-less / workflow-less so manual QA can exercise
- *      the `noWorkflow` permissive fallback in `evaluateTransition`.
+ *   1. DreamStreet — primary tenant. Carries 13 users (2 tenant admins +
+ *      11 other tenant members) and a `test-workspace` workspace with a
+ *      `playground` project, default workflow, and a board's worth of
+ *      dummy issues. Every active dreamstreet user has an *explicit*
+ *      workspace_memberships row in test-workspace so they're addable to
+ *      teams — implicit (tenant-admin-only) members can't join teams,
+ *      see `services/teamService.ts → addMember`. The `noWorkflow`
+ *      permissive fallback in `evaluateTransition` is still testable by
+ *      clearing `project_workflows` for any (project, issueType) pair
+ *      after seeding.
  *   2. Acme Corp — long-standing demo tenant kept for the existing fixture
  *      surface (workspaces, projects, multi-user role mix). Acme additionally
  *      gets the full FE-fixture data: workflows + transitions + transition
@@ -56,6 +62,114 @@ export async function seed(knex: Knex): Promise<void> {
         passwordHash: standardPasswordHash,
         firstName: 'Dream',
         lastName: 'Admin',
+        phone: null,
+        isActive: true,
+        mustResetPassword: false,
+      },
+      {
+        email: 'alex@dreamstreet.io',
+        passwordHash: standardPasswordHash,
+        firstName: 'Alex',
+        lastName: 'Morgan',
+        phone: null,
+        isActive: true,
+        mustResetPassword: false,
+      },
+      {
+        email: 'taylor@dreamstreet.io',
+        passwordHash: standardPasswordHash,
+        firstName: 'Taylor',
+        lastName: 'Quinn',
+        phone: null,
+        isActive: true,
+        mustResetPassword: false,
+      },
+      {
+        email: 'jamie@dreamstreet.io',
+        passwordHash: standardPasswordHash,
+        firstName: 'Jamie',
+        lastName: 'Reed',
+        phone: null,
+        isActive: true,
+        mustResetPassword: false,
+      },
+      {
+        email: 'casey@dreamstreet.io',
+        passwordHash: standardPasswordHash,
+        firstName: 'Casey',
+        lastName: 'Park',
+        phone: null,
+        isActive: true,
+        mustResetPassword: false,
+      },
+      {
+        email: 'robin@dreamstreet.io',
+        passwordHash: standardPasswordHash,
+        firstName: 'Robin',
+        lastName: 'Cole',
+        phone: null,
+        isActive: true,
+        mustResetPassword: false,
+      },
+      {
+        email: 'elena@dreamstreet.io',
+        passwordHash: standardPasswordHash,
+        firstName: 'Elena',
+        lastName: 'Sokolov',
+        phone: null,
+        isActive: true,
+        mustResetPassword: false,
+      },
+      {
+        email: 'noah@dreamstreet.io',
+        passwordHash: standardPasswordHash,
+        firstName: 'Noah',
+        lastName: 'Park',
+        phone: null,
+        isActive: true,
+        mustResetPassword: false,
+      },
+      {
+        email: 'sage@dreamstreet.io',
+        passwordHash: standardPasswordHash,
+        firstName: 'Sage',
+        lastName: 'Carter',
+        phone: null,
+        isActive: true,
+        mustResetPassword: false,
+      },
+      {
+        email: 'harper@dreamstreet.io',
+        passwordHash: standardPasswordHash,
+        firstName: 'Harper',
+        lastName: 'Diaz',
+        phone: null,
+        isActive: true,
+        mustResetPassword: false,
+      },
+      {
+        email: 'omar@dreamstreet.io',
+        passwordHash: standardPasswordHash,
+        firstName: 'Omar',
+        lastName: 'Hassan',
+        phone: null,
+        isActive: true,
+        mustResetPassword: false,
+      },
+      {
+        email: 'mei@dreamstreet.io',
+        passwordHash: standardPasswordHash,
+        firstName: 'Mei',
+        lastName: 'Lin',
+        phone: null,
+        isActive: true,
+        mustResetPassword: false,
+      },
+      {
+        email: 'kiran@dreamstreet.io',
+        passwordHash: standardPasswordHash,
+        firstName: 'Kiran',
+        lastName: 'Bhat',
         phone: null,
         isActive: true,
         mustResetPassword: false,
@@ -177,6 +291,18 @@ export async function seed(knex: Knex): Promise<void> {
   // DreamStreet has one admin. Acme has the multi-role demo cast.
   await knex('tenant_memberships').insert([
     { userId: idFor('admin@dreamstreet.io'), tenantId: dreamStreetId, role: 'admin', status: 'active' },
+    { userId: idFor('alex@dreamstreet.io'), tenantId: dreamStreetId, role: 'admin', status: 'active' },
+    { userId: idFor('taylor@dreamstreet.io'), tenantId: dreamStreetId, role: 'write', status: 'active' },
+    { userId: idFor('jamie@dreamstreet.io'), tenantId: dreamStreetId, role: 'write', status: 'active' },
+    { userId: idFor('casey@dreamstreet.io'), tenantId: dreamStreetId, role: 'write', status: 'active' },
+    { userId: idFor('robin@dreamstreet.io'), tenantId: dreamStreetId, role: 'read', status: 'active' },
+    { userId: idFor('elena@dreamstreet.io'), tenantId: dreamStreetId, role: 'write', status: 'active' },
+    { userId: idFor('noah@dreamstreet.io'), tenantId: dreamStreetId, role: 'write', status: 'active' },
+    { userId: idFor('sage@dreamstreet.io'), tenantId: dreamStreetId, role: 'write', status: 'active' },
+    { userId: idFor('harper@dreamstreet.io'), tenantId: dreamStreetId, role: 'read', status: 'active' },
+    { userId: idFor('omar@dreamstreet.io'), tenantId: dreamStreetId, role: 'write', status: 'active' },
+    { userId: idFor('mei@dreamstreet.io'), tenantId: dreamStreetId, role: 'write', status: 'active' },
+    { userId: idFor('kiran@dreamstreet.io'), tenantId: dreamStreetId, role: 'read', status: 'active' },
     { userId: idFor('jordan@acme.com'), tenantId: acmeCorpId, role: 'admin', status: 'active' },
     { userId: idFor('sam@acme.com'), tenantId: acmeCorpId, role: 'admin', status: 'active' },
     { userId: idFor('morgan@acme.com'), tenantId: acmeCorpId, role: 'write', status: 'active' },
@@ -961,21 +1087,228 @@ const persist = debounce((view) => {
     await knex('issue_dependencies').insert(depInserts);
   }
 
+  // ── DreamStreet: test-workspace + playground project ────────────────
+  // Mirror of the acme block above, scoped down: one workspace, one
+  // project, one default workflow, no transition rules, no issue links —
+  // just enough to render a populated board and exercise the team / member
+  // flows. Every active dreamstreet user gets an explicit
+  // workspace_memberships row (admins are explicit too, even though
+  // tenant-admin already gives them implicit access — explicit rows are
+  // what `teamService.addMember` requires).
+  const dsWorkspace = (await knex('workspaces')
+    .insert({
+      tenantId: dreamStreetId,
+      slug: 'test-workspace',
+      name: 'Test Workspace',
+      letter: 'T',
+      color: '#4f46e5',
+      bg: '#e0e7ff',
+    })
+    .returning(['id', 'slug'])) as Array<{ id: string; slug: string }>;
+  const dsWorkspaceId = dsWorkspace[0]!.id;
+
+  // Explicit workspace memberships — keep the admin/write/read mix from
+  // tenant memberships so RBAC scenarios are exercisable.
+  const dsMembershipsSeed: Array<{ email: string; role: 'admin' | 'write' | 'read' }> = [
+    { email: 'admin@dreamstreet.io', role: 'admin' },
+    { email: 'alex@dreamstreet.io', role: 'admin' },
+    { email: 'taylor@dreamstreet.io', role: 'write' },
+    { email: 'jamie@dreamstreet.io', role: 'write' },
+    { email: 'casey@dreamstreet.io', role: 'write' },
+    { email: 'robin@dreamstreet.io', role: 'read' },
+    { email: 'elena@dreamstreet.io', role: 'write' },
+    { email: 'noah@dreamstreet.io', role: 'write' },
+    { email: 'sage@dreamstreet.io', role: 'write' },
+    { email: 'harper@dreamstreet.io', role: 'read' },
+    { email: 'omar@dreamstreet.io', role: 'write' },
+    { email: 'mei@dreamstreet.io', role: 'write' },
+    { email: 'kiran@dreamstreet.io', role: 'read' },
+  ];
+  await knex('workspace_memberships').insert(
+    dsMembershipsSeed.map((m) => ({
+      userId: idFor(m.email),
+      workspaceId: dsWorkspaceId,
+      role: m.role,
+      status: 'active',
+    }))
+  );
+
+  // Project.
+  const dsAdminId = idFor('admin@dreamstreet.io');
+  const dsProjectRow = (await knex('projects')
+    .insert({
+      workspaceId: dsWorkspaceId,
+      slug: 'playground',
+      key: 'PLG',
+      name: 'Playground',
+      letter: 'P',
+      color: '#9333ea',
+      bg: '#f3e8ff',
+      description: 'Sandbox project for poking at the FE — populated with dummy issues across statuses.',
+      status: 'active',
+      createdByUserId: dsAdminId,
+    })
+    .returning(['id'])) as Array<{ id: string }>;
+  const dsProjectId = dsProjectRow[0]!.id;
+
+  // Default workflow — the same six-state shape as Acme's `default`. Inlined
+  // here rather than DRY-ed with the acme block above because the workflow
+  // table is workspace-scoped and the slugs are independent.
+  const dsWorkflowRow = (await knex('workflows')
+    .insert({
+      workspaceId: dsWorkspaceId,
+      slug: 'default',
+      name: 'Default',
+      description: 'Six-state flow with reopen and request-changes back-edges.',
+    })
+    .returning(['id'])) as Array<{ id: string }>;
+  const dsWorkflowId = dsWorkflowRow[0]!.id;
+
+  const dsNodeDefs = [
+    { key: 'n1', statusId: 'backlog', x: 40, y: 240, isInitial: true, isTerminal: false },
+    { key: 'n2', statusId: 'todo', x: 220, y: 240, isInitial: false, isTerminal: false },
+    { key: 'n3', statusId: 'in-progress', x: 400, y: 160, isInitial: false, isTerminal: false },
+    { key: 'n4', statusId: 'in-review', x: 580, y: 160, isInitial: false, isTerminal: false },
+    { key: 'n5', statusId: 'done', x: 760, y: 240, isInitial: false, isTerminal: true },
+    { key: 'n6', statusId: 'canceled', x: 400, y: 380, isInitial: false, isTerminal: true },
+  ];
+  const dsNodeRows = (await knex('workflow_nodes')
+    .insert(dsNodeDefs.map((n) => ({
+      workflowId: dsWorkflowId,
+      statusId: n.statusId,
+      x: n.x,
+      y: n.y,
+      isInitial: n.isInitial,
+      isTerminal: n.isTerminal,
+    })))
+    .returning(['id', 'statusId'])) as Array<{ id: string; statusId: string }>;
+  const dsNodeIdByKey = new Map<string, string>();
+  dsNodeDefs.forEach((n, i) => {
+    dsNodeIdByKey.set(n.key, dsNodeRows[i]!.id);
+  });
+
+  const dsEdgeDefs = [
+    { fromKey: 'n1', toKey: 'n2', label: null, dashed: false },
+    { fromKey: 'n2', toKey: 'n3', label: null, dashed: false },
+    { fromKey: 'n3', toKey: 'n4', label: 'PR opened', dashed: false },
+    { fromKey: 'n4', toKey: 'n5', label: 'approve', dashed: true },
+    { fromKey: 'n4', toKey: 'n3', label: 'request changes', dashed: false },
+    { fromKey: 'n3', toKey: 'n2', label: null, dashed: false },
+    { fromKey: 'n2', toKey: 'n6', label: null, dashed: false },
+    { fromKey: 'n3', toKey: 'n6', label: null, dashed: false },
+    { fromKey: 'n5', toKey: 'n2', label: 'reopen', dashed: true },
+  ];
+  await knex('workflow_transitions').insert(
+    dsEdgeDefs.map((e) => ({
+      workflowId: dsWorkflowId,
+      fromNodeId: dsNodeIdByKey.get(e.fromKey)!,
+      toNodeId: dsNodeIdByKey.get(e.toKey)!,
+      label: e.label,
+      dashed: e.dashed,
+    }))
+  );
+
+  // Assign the default workflow to all four issue types on playground.
+  await knex('project_workflows').insert(
+    (['T', 'B', 'S', 'E'] as const).map((issueType) => ({
+      projectId: dsProjectId,
+      issueType,
+      workflowId: dsWorkflowId,
+    }))
+  );
+
+  // Dummy issues — at least one in every status so the board renders all
+  // columns populated. Reporter is the workspace admin; assignees rotate
+  // across the dreamstreet roster. No parent links / relates / depends-on
+  // — keep this surface simple, the acme set above already exercises that.
+  type DsIssueSeed = {
+    seq: number;
+    type: 'T' | 'B' | 'S' | 'E';
+    title: string;
+    status: 'backlog' | 'todo' | 'in-progress' | 'in-review' | 'done' | 'canceled';
+    priority: 'urgent' | 'high' | 'med' | 'low' | 'none';
+    assigneeEmail: string;
+    labels: string[];
+    estimate: number | null;
+  };
+  const dsIssueSeeds: DsIssueSeed[] = [
+    // backlog
+    { seq: 1, type: 'T', title: 'Spike: pick a charting library for the dashboard', status: 'backlog', priority: 'med', assigneeEmail: 'taylor@dreamstreet.io', labels: ['spike', 'frontend'], estimate: 3 },
+    { seq: 2, type: 'B', title: 'Sidebar collapse animation stutters on Safari', status: 'backlog', priority: 'low', assigneeEmail: 'noah@dreamstreet.io', labels: ['frontend'], estimate: 2 },
+    { seq: 3, type: 'T', title: 'Wire up structured logs to log aggregator', status: 'backlog', priority: 'high', assigneeEmail: 'omar@dreamstreet.io', labels: ['observability'], estimate: 5 },
+    // todo
+    { seq: 4, type: 'T', title: 'Add E2E test for the login → workspace redirect', status: 'todo', priority: 'med', assigneeEmail: 'elena@dreamstreet.io', labels: ['testing'], estimate: 3 },
+    { seq: 5, type: 'B', title: 'Empty state on Inbox shifts vertically on first paint', status: 'todo', priority: 'low', assigneeEmail: 'sage@dreamstreet.io', labels: ['frontend'], estimate: 1 },
+    { seq: 6, type: 'T', title: 'Document the workflow editor keyboard shortcuts', status: 'todo', priority: 'low', assigneeEmail: 'mei@dreamstreet.io', labels: ['docs'], estimate: 2 },
+    // in-progress
+    { seq: 7, type: 'T', title: 'Implement bulk-edit menu on the board', status: 'in-progress', priority: 'high', assigneeEmail: 'jamie@dreamstreet.io', labels: ['board'], estimate: 5 },
+    { seq: 8, type: 'B', title: 'Tile prefetch fires twice on slow networks', status: 'in-progress', priority: 'urgent', assigneeEmail: 'casey@dreamstreet.io', labels: ['regression'], estimate: 4 },
+    { seq: 9, type: 'T', title: 'Migrate icon set to inline SVG', status: 'in-progress', priority: 'med', assigneeEmail: 'noah@dreamstreet.io', labels: ['frontend'], estimate: 3 },
+    // in-review
+    { seq: 10, type: 'T', title: 'Persist column layout per-user in localStorage', status: 'in-review', priority: 'med', assigneeEmail: 'taylor@dreamstreet.io', labels: ['frontend'], estimate: 2 },
+    { seq: 11, type: 'B', title: 'Composer drops focus when opening mention picker', status: 'in-review', priority: 'high', assigneeEmail: 'elena@dreamstreet.io', labels: ['comments', 'regression'], estimate: 2 },
+    // done
+    { seq: 12, type: 'T', title: 'Set up CI pipeline for the web app', status: 'done', priority: 'high', assigneeEmail: 'omar@dreamstreet.io', labels: ['ops'], estimate: 4 },
+    { seq: 13, type: 'T', title: 'Add JWT refresh-token rotation', status: 'done', priority: 'urgent', assigneeEmail: 'jamie@dreamstreet.io', labels: ['auth'], estimate: 5 },
+    // canceled
+    { seq: 14, type: 'B', title: 'Investigate flaky tile-cache test (could not repro)', status: 'canceled', priority: 'low', assigneeEmail: 'casey@dreamstreet.io', labels: ['testing'], estimate: 1 },
+  ];
+
+  await knex('issues').insert(
+    dsIssueSeeds.map((s) => ({
+      workspaceId: dsWorkspaceId,
+      projectId: dsProjectId,
+      key: `PLG-${s.seq}`,
+      seq: s.seq,
+      type: s.type,
+      status: s.status,
+      priority: s.priority,
+      title: s.title,
+      description: null,
+      labels: s.labels,
+      assigneeUserId: idFor(s.assigneeEmail),
+      reporterUserId: dsAdminId,
+      parentIssueId: null,
+      startDate: null,
+      endDate: null,
+      estimate: s.estimate,
+    }))
+  );
+
+  // Bump nextIssueNumber past the highest seeded seq for playground.
+  const dsMaxSeq = dsIssueSeeds.reduce((m, s) => (s.seq > m ? s.seq : m), 0);
+  await knex('projects').where('id', dsProjectId).update({
+    nextIssueNumber: dsMaxSeq + 1,
+    updatedAt: knex.fn.now(),
+  });
+
   // eslint-disable-next-line no-console
   console.log(
     [
       'Seeded:',
-      '  2 tenants (dreamstreet [intentionally workflow-less], acme-corp)',
-      '  3 workspaces, 3 projects, 3 workflows, 8 users:',
-      '    admin@dreamstreet.io / password123        (dreamstreet admin)',
-      '    jordan@acme.com      / password123        (acme admin)',
-      '    sam@acme.com         / password123        (acme admin)',
-      '    morgan@acme.com      / password123        (acme write)',
-      '    riley@acme.com       / temp-riley-1234    (acme write, mustResetPassword=true)',
-      '    maya@acme.com        / password123        (acme write)',
-      '    priya@acme.com       / password123        (acme write)',
-      '    avery@acme.com       / password123        (acme read)',
-      `  ${issueInsertRows.length} issues,`,
+      '  2 tenants (dreamstreet, acme-corp)',
+      '  4 workspaces, 4 projects, 4 workflows, 20 users:',
+      '    admin@dreamstreet.io   / password123        (dreamstreet admin)',
+      '    alex@dreamstreet.io    / password123        (dreamstreet admin)',
+      '    taylor@dreamstreet.io  / password123        (dreamstreet write)',
+      '    jamie@dreamstreet.io   / password123        (dreamstreet write)',
+      '    casey@dreamstreet.io   / password123        (dreamstreet write)',
+      '    robin@dreamstreet.io   / password123        (dreamstreet read)',
+      '    elena@dreamstreet.io   / password123        (dreamstreet write)',
+      '    noah@dreamstreet.io    / password123        (dreamstreet write)',
+      '    sage@dreamstreet.io    / password123        (dreamstreet write)',
+      '    harper@dreamstreet.io  / password123        (dreamstreet read)',
+      '    omar@dreamstreet.io    / password123        (dreamstreet write)',
+      '    mei@dreamstreet.io     / password123        (dreamstreet write)',
+      '    kiran@dreamstreet.io   / password123        (dreamstreet read)',
+      '    jordan@acme.com        / password123        (acme admin)',
+      '    sam@acme.com           / password123        (acme admin)',
+      '    morgan@acme.com        / password123        (acme write)',
+      '    riley@acme.com         / temp-riley-1234    (acme write, mustResetPassword=true)',
+      '    maya@acme.com          / password123        (acme write)',
+      '    priya@acme.com         / password123        (acme write)',
+      '    avery@acme.com         / password123        (acme read)',
+      `  ${issueInsertRows.length + dsIssueSeeds.length} issues (acme: ${issueInsertRows.length}, dreamstreet: ${dsIssueSeeds.length}),`,
       `  ${relatesInserts.length} relates / ${depInserts.length} depends-on links,`,
       `  ${ruleInserts.length} transition rules.`,
     ].join('\n')
