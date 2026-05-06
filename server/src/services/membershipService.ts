@@ -143,6 +143,122 @@ export async function deleteWorkspaceMembership(
 
 // ── Hydrated views ────────────────────────────────────────────────────────
 
+export interface TenantMemberView {
+  membershipId: string;
+  userId: string;
+  tenantId: string;
+  role: Role;
+  status: TenantMembershipStatus;
+  lastSeenAt: string | null;
+  createdAt: string;
+  updatedAt: string | null;
+  user: {
+    id: string;
+    email: string;
+    firstName: string;
+    lastName: string;
+    avatar: string | null;
+    isActive: boolean;
+    displayName: string;
+  };
+}
+
+/**
+ * List tenant members hydrated with user details.
+ *
+ * Two independent queries combined in JS (per project rule: no SQL JOINs
+ * without explicit approval — memory: feedback_no_db_joins_without_approval):
+ *   1. `tenant_memberships` rows for the tenant
+ *   2. `users` rows for those userIds
+ *
+ * Sorted alphabetically by display name. No implicit / synthetic rows —
+ * tenant membership has no parent layer to inherit from, so every row
+ * here is a real `tenant_memberships` row with a real uuid `membershipId`.
+ */
+export async function listTenantMembers(
+  tenantId: string
+): Promise<TenantMemberView[]> {
+  const memberships = (await db('tenant_memberships')
+    .where('tenant_id', tenantId)
+    .select(
+      'id as membershipId',
+      'user_id as userId',
+      'tenant_id as tenantId',
+      'role',
+      'status',
+      'last_seen_at as lastSeenAt',
+      'created_at as createdAt',
+      'updated_at as updatedAt'
+    )) as Array<{
+    membershipId: string;
+    userId: string;
+    tenantId: string;
+    role: Role;
+    status: TenantMembershipStatus;
+    lastSeenAt: Date | string | null;
+    createdAt: Date | string;
+    updatedAt: Date | string | null;
+  }>;
+
+  const userIds = memberships.map((m) => m.userId);
+  const userRows = userIds.length === 0 ? [] : ((await db('users')
+    .whereIn('id', userIds)
+    .select(
+      'id',
+      'email',
+      'first_name as firstName',
+      'last_name as lastName',
+      'avatar',
+      'is_active as isActive'
+    )) as Array<{
+    id: string;
+    email: string;
+    firstName: string;
+    lastName: string;
+    avatar: string | null;
+    isActive: boolean;
+  }>);
+  const userById = new Map(userRows.map((u) => [u.id, u]));
+
+  const isoOrNull = (v: Date | string | null) =>
+    v === null ? null : v instanceof Date ? v.toISOString() : new Date(v).toISOString();
+  const iso = (v: Date | string) =>
+    v instanceof Date ? v.toISOString() : new Date(v).toISOString();
+
+  const views: TenantMemberView[] = [];
+  for (const m of memberships) {
+    const user = userById.get(m.userId);
+    if (!user) continue; // FK guarantees this won't happen; defensive.
+    views.push({
+      membershipId: m.membershipId,
+      userId: m.userId,
+      tenantId: m.tenantId,
+      role: m.role,
+      status: m.status,
+      lastSeenAt: isoOrNull(m.lastSeenAt),
+      createdAt: iso(m.createdAt),
+      updatedAt: m.updatedAt ? iso(m.updatedAt) : null,
+      user: {
+        id: user.id,
+        email: user.email,
+        firstName: user.firstName,
+        lastName: user.lastName,
+        avatar: user.avatar,
+        isActive: user.isActive,
+        displayName: `${user.firstName} ${user.lastName}`.trim(),
+      },
+    });
+  }
+
+  views.sort((a, b) => {
+    const an = a.user.firstName + a.user.lastName;
+    const bn = b.user.firstName + b.user.lastName;
+    return an.localeCompare(bn);
+  });
+
+  return views;
+}
+
 export interface WorkspaceMemberView {
   membershipId: string;
   userId: string;

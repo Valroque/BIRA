@@ -5,7 +5,7 @@
 // tenant rows (no per-user role).
 
 import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from 'react';
-import { listTenants } from '../api/tenants';
+import { listTenants, updateTenant as updateTenantApi, type UpdateTenantPatch } from '../api/tenants';
 import { ApiError } from '../api/client';
 import type { Tenant } from '../fixtures';
 
@@ -20,6 +20,8 @@ export interface TenantsCtxValue {
   getTenant: (slug: string) => Tenant | undefined;
   /** Refetch the list (e.g. after a "retry" click). */
   refresh: () => Promise<void>;
+  /** Patch tenant display fields (name/letter/color/bg). Slug is immutable. */
+  updateTenant: (slug: string, patch: UpdateTenantPatch) => Promise<Tenant>;
 }
 
 const TenantsContext = createContext<TenantsCtxValue | undefined>(undefined);
@@ -55,7 +57,16 @@ export function TenantsProvider({ children }: { children: ReactNode }) {
     [tenants],
   );
 
-  const value: TenantsCtxValue = { tenants, loading, error, getTenant, refresh };
+  const updateTenant = useCallback(
+    async (slug: string, patch: UpdateTenantPatch): Promise<Tenant> => {
+      const updated = await updateTenantApi(slug, patch);
+      setTenants((prev) => prev.map((t) => (t.slug === slug ? updated : t)));
+      return updated;
+    },
+    [],
+  );
+
+  const value: TenantsCtxValue = { tenants, loading, error, getTenant, refresh, updateTenant };
 
   return <TenantsContext.Provider value={value}>{children}</TenantsContext.Provider>;
 }

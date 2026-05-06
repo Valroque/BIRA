@@ -27,6 +27,7 @@ change.
 | `get_tenant` | Tenant detail by slug |
 | `create_tenant` | Any authenticated user; caller becomes admin |
 | `deactivate_tenant` / `reactivate_tenant` | Tenant admin lifecycle |
+| `list_tenant_members` | Hydrated tenant directory; visible to any tenant member |
 | `admin_reset_password` | Tenant admin issues a one-time temp password for another member |
 | `deactivate_user` / `reactivate_user` | Tenant admin flips another member's `isActive` flag (effective scope is global) |
 

@@ -62,6 +62,22 @@ export async function create(
   return Tenant.fromRow(row);
 }
 
+export interface UpdateTenantInput {
+  name?: string;
+  letter?: string;
+  color?: string;
+  bg?: string;
+}
+
+export async function update(id: string, patch: UpdateTenantInput): Promise<Tenant | null> {
+  if (Object.keys(patch).length === 0) return getById(id);
+  const [row] = (await db('tenants')
+    .where('id', id)
+    .update({ ...patch, updatedAt: db.fn.now() })
+    .returning(COLUMNS)) as TenantRow[];
+  return row ? Tenant.fromRow(row) : null;
+}
+
 export async function setStatus(id: string, status: TenantStatus): Promise<Tenant | null> {
   const [row] = (await db('tenants')
     .where('id', id)

@@ -12,3 +12,18 @@ export async function listTenants(): Promise<Tenant[]> {
   const items = await apiFetch<RawTenant[]>('/api/tenants');
   return items.map(adaptTenant);
 }
+
+export interface UpdateTenantPatch {
+  name?: string;
+  letter?: string;
+  color?: string;
+  bg?: string;
+}
+
+export async function updateTenant(slug: string, patch: UpdateTenantPatch): Promise<Tenant> {
+  const raw = await apiFetch<RawTenant>(`/api/tenants/${encodeURIComponent(slug)}`, {
+    method: 'PATCH',
+    body: JSON.stringify(patch),
+  });
+  return adaptTenant(raw);
+}
