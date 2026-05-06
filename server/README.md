@@ -485,6 +485,14 @@ transition can carry zero or more rules (closed enum: `role`,
 PATCH, passing `nodes` and/or `transitions` performs a full-replace —
 existing rows are deleted then re-inserted in one transaction.
 
+On PATCH, each `nodes[]` entry may carry an optional `id` (uuid).
+Supplied ids are preserved verbatim through the delete-then-insert so
+that `transitions[]` in the same PATCH can reference them; omit the id
+on freshly-added nodes and the BE mints one. Within-input uniqueness
+is enforced (duplicate supplied ids → 400). This lets the editor save
+nodes + transitions atomically without round-tripping for fresh node
+uuids first.
+
 The status-transition guard (`evaluateTransition`) runs from
 `updateIssue` whenever `status` changes and acting-user context is
 supplied: deny → 403 with the reason. If the project's `(project,

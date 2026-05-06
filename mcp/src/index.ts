@@ -729,6 +729,10 @@ tool(
 
 const RULE_TYPE = z.enum(['role', 'assignee_only', 'reporter_only', 'required_fields', 'not_self']);
 const NodeInput = z.object({
+  // Optional client-supplied uuid. Preserved verbatim on PATCH so
+  // transitions in the same payload can reference existing nodes;
+  // omit on fresh nodes — BE mints one.
+  id: z.string().uuid().optional(),
   statusId: STATUS,
   x: z.number().int(),
   y: z.number().int(),
@@ -804,7 +808,7 @@ tool(
 
 tool(
   'update_workflow',
-  'Replace a workflow definition. Pass nodes and/or transitions to fully replace those sets; pass name/description to rename.',
+  'Replace a workflow definition. Pass nodes and/or transitions to fully replace those sets; pass name/description to rename. Each node may carry an optional id (uuid) — supply existing node ids to preserve them across the full-replace so transitions in the same call can reference them; omit id on new nodes and the BE mints one.',
   z.object({
     tenantSlug: z.string().min(1),
     workspaceSlug: z.string().min(1),

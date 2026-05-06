@@ -25,6 +25,11 @@ const slugSchema = z
   .regex(/^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/, 'Slug must be lowercase a-z, 0-9, dashes');
 
 const NodeSchema = z.object({
+  // Client-supplied uuid for nodes that already exist on the BE (the
+  // editor saves nodes + transitions atomically and needs to keep the
+  // ids stable across the full-replace). Omit on freshly-added nodes —
+  // BE mints one. See server/README.md "Workflows" section.
+  id: z.string().uuid().optional(),
   statusId: z.enum(STATUSES),
   x: z.number().int(),
   y: z.number().int(),
