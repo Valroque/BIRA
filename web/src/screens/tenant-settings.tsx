@@ -1,85 +1,16 @@
 // Tenant-level settings: general (details / logo / danger zone) and members.
-// Sits outside WorkspaceLayout — no sidebar, full-bleed like the workspace
-// picker / tenant picker. Mirrors the structure of `screens/settings.tsx`
-// (workspace settings) so the two read the same.
+// Rendered inside the unified `SettingsLayout` (see screens/settings.tsx) — the
+// two section components below provide the body content; the layout shell
+// (breadcrumbs, header, left-nav) is supplied by the host.
 import { useState } from 'react';
-import { NavLink, Outlet, useLocation, useParams } from 'react-router-dom';
+import { useParams } from 'react-router-dom';
 import { Icon } from '../components/icons';
-import { TopBar, Avatar, useTenantBreadcrumbs, useTenantContext } from '../components/shell';
+import { Avatar, useTenantContext } from '../components/shell';
 import { Modal, ModalHeader, ModalBody, ModalFooter } from '../components/modal';
 import { Field, Hint, DangerRow } from '../components/forms';
 import { Section } from '../components/section';
 import { TENANT_MEMBERS, type TenantMember, type TenantRole } from '../fixtures';
 import { useTenants } from '../state/tenants';
-
-// --- Outer layout (header + secondary tab strip + outlet) ---
-
-export function TenantSettingsLayout() {
-  const { tenant, workspace, tenantName, workspaceName } = useTenantBreadcrumbs();
-  const { pathname } = useLocation();
-  const base = `/${tenant}/${workspace}/tenant-settings`;
-  const sections = [
-    { id: 'general', to: `${base}/general`, label: 'General', icon: 'settings' },
-    { id: 'members', to: `${base}/members`, label: 'Members', icon: 'users' },
-  ];
-
-  return (
-    <div className="bira" style={{ height: '100%', display: 'flex', flexDirection: 'column', background: 'var(--bg)' }}>
-      <TopBar
-        breadcrumbs={[
-          { label: tenantName, to: `/${tenant}/workspaces` },
-          { label: workspaceName, to: `/${tenant}/${workspace}/projects` },
-          'Tenant settings',
-        ]}
-      />
-      <div style={{
-        padding: '20px 28px 0', borderBottom: '1px solid var(--border-muted)',
-      }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 4 }}>
-          <h1 style={{ fontSize: 22, fontWeight: 600, letterSpacing: -0.4, margin: 0 }}>
-            Settings
-          </h1>
-          <span style={{
-            fontSize: 11, fontWeight: 600, letterSpacing: 0.4, textTransform: 'uppercase',
-            color: 'var(--accent-active)', background: 'var(--accent-muted)',
-            padding: '2px 8px', borderRadius: 4,
-          }}>
-            Tenant
-          </span>
-        </div>
-        <p style={{ fontSize: 13, color: 'var(--fg-muted)', margin: '4px 0 14px' }}>
-          Configure your tenant — workspaces, members, and the org-level danger zone.
-        </p>
-        <div style={{ display: 'flex', gap: 2 }}>
-          {sections.map((s) => {
-            const active = pathname === s.to || pathname.startsWith(s.to + '/');
-            return (
-              <NavLink
-                key={s.id}
-                to={s.to}
-                style={{
-                  padding: '8px 14px', fontSize: 13, fontWeight: 500,
-                  color: active ? 'var(--fg)' : 'var(--fg-muted)',
-                  borderBottom: active ? '2px solid var(--accent)' : '2px solid transparent',
-                  marginBottom: -1, display: 'flex', alignItems: 'center', gap: 6,
-                  textDecoration: 'none',
-                }}
-              >
-                <Icon name={s.icon} size={14} />
-                {s.label}
-              </NavLink>
-            );
-          })}
-        </div>
-      </div>
-      <div className="scroll" style={{ flex: 1, overflow: 'auto', padding: '24px 28px' }}>
-        <div style={{ maxWidth: 720 }}>
-          <Outlet />
-        </div>
-      </div>
-    </div>
-  );
-}
 
 // --- General (tenant) ---
 

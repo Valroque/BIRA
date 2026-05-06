@@ -21,7 +21,7 @@ import { RuleEditorPage } from './screens/rule-editor';
 import { CreateIssuePage } from './screens/create-issue';
 import { AcceptInvitePage } from './screens/accept-invite';
 import { SettingsLayout, GeneralSettings, MembersSettings, ProfileSettings } from './screens/settings';
-import { TenantSettingsLayout, TenantGeneralSettings, TenantMembersSettings } from './screens/tenant-settings';
+import { TenantGeneralSettings, TenantMembersSettings } from './screens/tenant-settings';
 import { ProjectsPage } from './screens/projects';
 import { ProjectSettingsPage } from './screens/project-settings';
 import { WorkflowsPage } from './screens/workflows';
@@ -70,9 +70,8 @@ function WorkspaceLayout() {
     sidebarActive = m ? `team-${m[1]}` : 'all-teams';
   }
   else if (pathname.endsWith('/teams')) sidebarActive = 'all-teams';
-  else if (/\/tenant-settings(\/|$)/.test(pathname)) sidebarActive = 'tenant-settings';
-  // Workspace-level settings (3 segments deep): /:tenant/:workspace/settings
-  else if (/^\/[^/]+\/[^/]+\/settings(\/|$)/.test(pathname)) sidebarActive = 'settings';
+  // Settings is one entry point for workspace, tenant, and account preferences.
+  else if (/^\/[^/]+\/[^/]+\/(settings|tenant-settings)(\/|$)/.test(pathname)) sidebarActive = 'settings';
   else if (project) {
     if (pathname.endsWith('/board')) sidebarActive = `${project}-board`;
     else if (pathname.endsWith('/list')) sidebarActive = `${project}-list`;
@@ -165,11 +164,10 @@ export default function App() {
 
             <Route element={<WorkspaceLayout />}>
               <Route path="/:tenant/:workspace" element={<WorkspaceHomeRedirect />} />
-              <Route path="/:tenant/:workspace/tenant-settings" element={<TenantSettingsLayout />}>
-                <Route index element={<Navigate to="general" replace />} />
-                <Route path="general" element={<TenantGeneralSettings />} />
-                <Route path="members" element={<TenantMembersSettings />} />
-              </Route>
+              {/* Legacy /tenant-settings paths now live under /settings/tenant/*. */}
+              <Route path="/:tenant/:workspace/tenant-settings" element={<Navigate to="../settings/tenant/general" replace />} />
+              <Route path="/:tenant/:workspace/tenant-settings/general" element={<Navigate to="../../settings/tenant/general" replace />} />
+              <Route path="/:tenant/:workspace/tenant-settings/members" element={<Navigate to="../../settings/tenant/members" replace />} />
               <Route path="/:tenant/:workspace/inbox" element={<InboxPage />} />
               <Route path="/:tenant/:workspace/my-issues" element={<MyIssuesPage />} />
               <Route path="/:tenant/:workspace/all-issues" element={<AllIssuesPage />} />
@@ -193,6 +191,9 @@ export default function App() {
                 <Route path="general" element={<GeneralSettings />} />
                 <Route path="members" element={<MembersSettings />} />
                 <Route path="profile" element={<ProfileSettings />} />
+                <Route path="tenant" element={<Navigate to="general" replace />} />
+                <Route path="tenant/general" element={<TenantGeneralSettings />} />
+                <Route path="tenant/members" element={<TenantMembersSettings />} />
               </Route>
             </Route>
           </Route>

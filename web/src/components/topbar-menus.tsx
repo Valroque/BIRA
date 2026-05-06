@@ -1,10 +1,11 @@
-// Dropdown menus that live in the TopBar: notifications and the user menu.
+// Notifications dropdown surfaced in the TopBar. The user menu used to live
+// here too, but it's now a flat block at the foot of the Sidebar — see
+// `SidebarUserBlock` in shell.tsx.
 import { useRef, useState, type ReactNode } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link } from 'react-router-dom';
 import { Icon } from './icons';
-import { Avatar, KBD, useTenantContext } from './shell';
+import { Avatar } from './shell';
 import { useDismiss } from './use-dismiss';
-import { useAuth } from '../state/auth';
 
 interface Notification {
   id: string;
@@ -98,91 +99,3 @@ export function NotificationsButton() {
   );
 }
 
-export function UserMenu() {
-  const [open, setOpen] = useState(false);
-  const ref = useRef<HTMLDivElement>(null);
-  const navigate = useNavigate();
-  const { tenant, workspace } = useTenantContext();
-  const { user, logout } = useAuth();
-  useDismiss(ref, () => setOpen(false), open);
-
-  const displayName = user?.displayName ?? 'Account';
-  const email = user?.email ?? '';
-
-  const go = (to: string) => { setOpen(false); navigate(to); };
-  const signOut = () => { logout(); go('/tenants'); };
-
-  return (
-    <div ref={ref} style={{ position: 'relative' }}>
-      <button
-        onClick={() => setOpen((o) => !o)}
-        style={{
-          background: 'transparent', border: 'none', padding: 0, cursor: 'pointer',
-          display: 'inline-flex', alignItems: 'center',
-        }}
-      >
-        <Avatar name={displayName} />
-      </button>
-      {open && (
-        <div style={{
-          position: 'absolute', top: '100%', right: 0, marginTop: 6,
-          width: 240, background: 'var(--bg)',
-          border: '1px solid var(--border)', borderRadius: 8,
-          boxShadow: 'var(--shadow-lg)', zIndex: 50, overflow: 'hidden',
-        }}>
-          <div style={{ padding: '12px 14px', borderBottom: '1px solid var(--border-muted)' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-              <Avatar name={displayName} size={32} />
-              <div style={{ minWidth: 0 }}>
-                <div style={{ fontSize: 13, fontWeight: 600 }}>{displayName}</div>
-                <div style={{ fontSize: 11, color: 'var(--fg-muted)', overflow: 'hidden', textOverflow: 'ellipsis' }}>{email}</div>
-              </div>
-            </div>
-          </div>
-          <div style={{ padding: 4 }}>
-            <MenuRow icon="user" label="Profile" onClick={() => go(`/${tenant}/${workspace}/settings/profile`)} />
-            <MenuRow icon="settings" label="Workspace settings" onClick={() => go(`/${tenant}/${workspace}/settings/general`)} />
-            <MenuRow icon="users" label="Members & invites" onClick={() => go(`/${tenant}/${workspace}/settings/members`)} />
-            <div style={{ height: 1, background: 'var(--border-muted)', margin: '4px 0' }} />
-            <MenuRow icon="globe" label="Switch workspace" onClick={() => go(`/${tenant}/workspaces`)} />
-            <MenuRow icon="moon" label="Theme: light" disabled />
-            <div style={{ height: 1, background: 'var(--border-muted)', margin: '4px 0' }} />
-            <MenuRow icon="power" label="Sign out" onClick={signOut} danger />
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
-
-interface MenuRowProps {
-  icon: string;
-  label: string;
-  shortcut?: string;
-  onClick?: () => void;
-  disabled?: boolean;
-  danger?: boolean;
-}
-function MenuRow({ icon, label, shortcut, onClick, disabled, danger }: MenuRowProps) {
-  return (
-    <button
-      onClick={onClick}
-      disabled={disabled}
-      data-tip={disabled ? 'Coming soon' : undefined}
-      style={{
-        display: 'flex', alignItems: 'center', gap: 8, padding: '6px 10px',
-        width: '100%', borderRadius: 5, border: 'none', background: 'transparent',
-        cursor: disabled ? 'not-allowed' : 'pointer',
-        textAlign: 'left', fontSize: 13,
-        color: danger ? 'var(--blocked)' : disabled ? 'var(--fg-faint)' : 'var(--fg)',
-        opacity: disabled ? 0.65 : 1,
-      }}
-      onMouseEnter={(e) => { if (!disabled) e.currentTarget.style.background = 'var(--bg-subtle)'; }}
-      onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
-    >
-      <Icon name={icon} size={13} color={danger ? 'var(--blocked)' : 'var(--fg-muted)'} />
-      <span style={{ flex: 1 }}>{label}</span>
-      {shortcut && <KBD k={shortcut} />}
-    </button>
-  );
-}

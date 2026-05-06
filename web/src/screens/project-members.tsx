@@ -494,7 +494,7 @@ function UserGrantRow({
 const PROVENANCE_LABEL: Record<Provenance, string> = {
   'explicit-user': 'User override',
   'tenant-admin': 'Tenant admin',
-  'workspace-admin': 'Workspace admin',
+  'workspace-admin': 'Workspace manager',
   team: 'Team',
 };
 
@@ -535,7 +535,7 @@ function EffectiveRow({
               ? 'Explicit per-user grant — wins over any team grants'
               : member.provenance === 'tenant-admin'
                 ? 'Implicit admin from tenant-membership role'
-                : 'Implicit admin from workspace-membership role'
+                : 'Implicit admin from workspace-membership role (manager)'
         }
       >
         {sourceLabel}

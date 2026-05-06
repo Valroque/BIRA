@@ -11,7 +11,7 @@ import { useMemo, useState, type FormEvent, type MouseEvent } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { Icon } from '../components/icons';
 import { Field, Hint } from '../components/forms';
-import { TopBar } from '../components/shell';
+import { TopBar, BiraBrand, SidebarUserBlock } from '../components/shell';
 import {
   RESERVED_WORKSPACE_SLUGS, pickProjectColor,
   type Workspace, type WorkspaceRole,
@@ -42,17 +42,17 @@ export function WorkspacesPage() {
   }, [workspaces, filter, showArchived]);
 
   return (
-    <div className="bira" style={{
-      minHeight: '100%', display: 'flex', flexDirection: 'column',
-    }}>
-      <TopBar breadcrumbs={[tenantName, 'Workspaces']} showSearch={false} showNewIssue={false} />
+    <div className="bira" style={{ minHeight: '100%', display: 'flex' }}>
+      <PickerSidebar />
+      <div style={{
+        flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0,
+      }}>
+      <TopBar breadcrumbs={[tenantName, 'Workspaces']} showSearch={false} />
       <div style={{
         flex: 1, display: 'flex', flexDirection: 'column',
         alignItems: 'center', background: 'var(--bg-subtle)', padding: '48px 24px',
       }}>
         <div style={{ width: '100%', maxWidth: 560 }}>
-          <Brand />
-
           <div style={{
             display: 'flex', alignItems: 'flex-end', gap: 12, marginBottom: 14,
           }}>
@@ -65,14 +65,9 @@ export function WorkspacesPage() {
               </p>
             </div>
             {workspaces.length > 0 && (
-              <>
-                <Link to={`/${tenant}/settings`} className="btn btn-sm" style={{ textDecoration: 'none' }}>
-                  <Icon name="settings" size={13} />Tenant settings
-                </Link>
-                <button onClick={() => setShowCreate(true)} className="btn btn-primary btn-sm">
-                  <Icon name="plus" size={13} />New workspace
-                </button>
-              </>
+              <button onClick={() => setShowCreate(true)} className="btn btn-primary btn-sm">
+                <Icon name="plus" size={13} />New workspace
+              </button>
             )}
           </div>
 
@@ -120,13 +115,54 @@ export function WorkspacesPage() {
                   onShowArchived={() => setShowArchived(true)}
                 />
               : <WorkspaceList workspaces={filtered} tenant={tenant} />}
-
-          <Footer />
         </div>
+      </div>
       </div>
 
       {showCreate && <CreateWorkspaceModal onClose={() => setShowCreate(false)} />}
     </div>
+  );
+}
+
+/**
+ * Slim sidebar for the workspaces picker — no workspace context exists yet,
+ * so this shows just the brand, a "Workspaces" anchor for the current page,
+ * and a footer with sign-out / switch-tenant. Everything else (projects,
+ * teams, settings) lives behind a workspace selection.
+ */
+function PickerSidebar() {
+  return (
+    <aside style={{
+      width: 232, background: 'var(--bg-subtle)',
+      borderRight: '1px solid var(--border-muted)',
+      display: 'flex', flexDirection: 'column', flexShrink: 0,
+    }}>
+      <BiraBrand />
+      <nav style={{ padding: '6px', flex: 1 }}>
+        <div style={{
+          display: 'flex', alignItems: 'center', gap: 8, height: 28,
+          padding: '0 8px', margin: '0 6px', borderRadius: 6,
+          background: 'var(--accent-subtle)', color: 'var(--accent-active)',
+          fontSize: 13, fontWeight: 600,
+        }}>
+          <Icon name="grid" size={15} />Workspaces
+        </div>
+        <Link
+          to="/tenants"
+          style={{
+            display: 'flex', alignItems: 'center', gap: 8, height: 28,
+            padding: '0 8px', margin: '4px 6px 0', borderRadius: 6,
+            color: 'var(--fg-muted)', fontSize: 13, fontWeight: 500,
+            textDecoration: 'none',
+          }}
+        >
+          <Icon name="globe" size={15} />Switch tenant
+        </Link>
+      </nav>
+      <div style={{ padding: '0 0 10px' }}>
+        <SidebarUserBlock collapsed={false} />
+      </div>
+    </aside>
   );
 }
 
@@ -174,23 +210,6 @@ function NoMatch({
       <div style={{ fontSize: 12, marginTop: 4 }}>
         Try a different name, or create a new workspace.
       </div>
-    </div>
-  );
-}
-
-function Brand() {
-  return (
-    <div style={{
-      display: 'flex', alignItems: 'center', gap: 8, marginBottom: 28,
-    }}>
-      <div style={{
-        width: 32, height: 32, borderRadius: 8,
-        background: 'linear-gradient(135deg, var(--accent), #6366f1)',
-        display: 'flex', alignItems: 'center', justifyContent: 'center',
-        color: '#fff', fontWeight: 700, fontSize: 16,
-        fontFamily: 'var(--font-mono)', letterSpacing: -0.5,
-      }}>B</div>
-      <span style={{ fontSize: 18, fontWeight: 700, letterSpacing: -0.5 }}>BIRA</span>
     </div>
   );
 }
@@ -334,28 +353,6 @@ function EmptyState({ onCreate }: { onCreate: () => void }) {
           Switch tenant
         </Link>
       </div>
-    </div>
-  );
-}
-
-function Footer() {
-  const { user, logout } = useAuth();
-  const navigate = useNavigate();
-  const signedInAs = user?.email ?? '';
-  const signOut = () => { logout(); navigate('/tenants'); };
-  return (
-    <div style={{
-      display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-      marginTop: 18, fontSize: 12, color: 'var(--fg-muted)',
-    }}>
-      <span>Signed in as <span style={{ color: 'var(--fg)' }}>{signedInAs}</span></span>
-      <span style={{ display: 'flex', gap: 12 }}>
-        <Link to="/tenants" style={{ color: 'var(--accent)', textDecoration: 'none' }}>Switch tenant</Link>
-        <button onClick={signOut} style={{
-          background: 'none', border: 'none', padding: 0, cursor: 'pointer',
-          color: 'var(--accent)', fontSize: 12,
-        }}>Sign out</button>
-      </span>
     </div>
   );
 }

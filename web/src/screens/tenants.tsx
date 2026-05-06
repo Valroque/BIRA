@@ -25,7 +25,7 @@ export function TenantsPage() {
     <div className="bira" style={{
       minHeight: '100%', display: 'flex', flexDirection: 'column',
     }}>
-      <TopBar breadcrumbs={['Tenants']} showSearch={false} showNewIssue={false} showUserMenu={false} />
+      <TopBar breadcrumbs={['Tenants']} showSearch={false} showNotifications={false} />
       <div style={{
         flex: 1, display: 'flex', flexDirection: 'column',
         alignItems: 'center', background: 'var(--bg-subtle)', padding: '48px 24px',
