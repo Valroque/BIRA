@@ -10,6 +10,8 @@ import { setTenantStatus } from '../usecases/tenants/setTenantStatus.js';
 import workspacesRouter from './workspaces.js';
 import projectsRouter from './projects.js';
 import tenantMembersRouter from './tenantMembers.js';
+import workspaceMembersRouter from './workspaceMembers.js';
+import teamsRouter from './teams.js';
 import issuesRouter from './issues.js';
 import workflowsRouter from './workflows.js';
 import filesRouter from './files.js';
@@ -33,25 +35,25 @@ const CreateTenantSchema = z.object({
 
 const router: Router = Router();
 
-router.use(authenticate);
-// Hard gate: a user with `mustResetPassword` set cannot touch ANY tenant
-// surface — including the top-level tenant list. The only escape hatch is
-// POST /api/auth/change-password, which is mounted on a different router
-// that intentionally does not gate locked users.
-router.use(requirePasswordResetCleared);
-
-// GET /api/tenants?includeDeactivated=true — tenants visible to the current
-// user. Deactivated tenants are hidden by default; opt in to surface them
-// (e.g. so the owning admin can find them and reactivate).
+// GET /api/tenants — public. Returns all active tenants, ordered by name.
+// Powers the pre-login tenant picker. Deactivated tenants are always
+// excluded; there is no `includeDeactivated` knob here because there is no
+// caller context to authorise it against.
 router.get(
   '/',
-  asyncHandler(async (req, res) => {
-    if (!req.user) throw new AppError('Authentication required', 401);
-    const includeDeactivated = req.query.includeDeactivated === 'true';
-    const items = await listTenants(req.user.id, { includeDeactivated });
+  asyncHandler(async (_req, res) => {
+    const items = await listTenants();
     res.json({ success: true, data: items });
   })
 );
+
+// All routes below this line require authentication.
+router.use(authenticate);
+// Hard gate: a user with `mustResetPassword` set cannot touch any auth-gated
+// tenant surface. The only escape hatch is POST /api/auth/change-password,
+// which is mounted on a different router that intentionally does not gate
+// locked users.
+router.use(requirePasswordResetCleared);
 
 // POST /api/tenants — any authenticated user may spin up their own tenant.
 // The caller is granted `admin` membership on the new tenant in the same
@@ -87,9 +89,9 @@ router.get(
 );
 
 // POST /api/tenants/:tenantSlug/deactivate — tenant admin only. Soft-freeze;
-// no data is destroyed. The tenant disappears from the default `GET
-// /api/tenants` list (an admin can still find it via
-// `?includeDeactivated=true` to reactivate).
+// no data is destroyed. The tenant disappears from the public `GET
+// /api/tenants` picker. An admin who knows the slug can still reach the
+// detail endpoint and POST `/reactivate` to flip it back.
 router.post(
   '/:tenantSlug/deactivate',
   authorize('admin'),
@@ -164,6 +166,23 @@ router.use(
   '/:tenantSlug/workspaces/:workspaceSlug/comments',
   resolveWorkspaceScope,
   commentsRouter
+);
+
+// /api/tenants/:tenantSlug/workspaces/:workspaceSlug/members — workspace
+// member directory + add / update / remove. Workspace scope is resolved
+// here so the members router can read role + ids directly.
+router.use(
+  '/:tenantSlug/workspaces/:workspaceSlug/members',
+  resolveWorkspaceScope,
+  workspaceMembersRouter
+);
+
+// /api/tenants/:tenantSlug/workspaces/:workspaceSlug/teams — team CRUD
+// + team membership management. Mirrors the workspace-members mount.
+router.use(
+  '/:tenantSlug/workspaces/:workspaceSlug/teams',
+  resolveWorkspaceScope,
+  teamsRouter
 );
 
 // /api/tenants/:tenantSlug/members — tenant member admin actions (e.g. admin

@@ -7,16 +7,22 @@ import { Modal, ModalHeader, ModalFooter } from '../components/modal';
 import { Field, Hint } from '../components/forms';
 import { ProjectBadge } from '../components/project-chip';
 import {
-  CURRENT_USER, DEFAULT_PROJECT_WORKFLOWS, ISSUES, ISSUE_TYPE_NAMES, TENANT_MEMBERS,
-  RESERVED_PROJECT_SLUGS, TEAMS, WORKFLOWS,
+  DEFAULT_PROJECT_WORKFLOWS, ISSUE_TYPE_NAMES,
+  RESERVED_PROJECT_SLUGS,
   pickProjectColor, projectEffectiveMembers,
-  type IssueTypeLetter, type TenantMember, type Project,
+  type IssueTypeLetter, type Project,
 } from '../fixtures';
 import { useProjects } from '../state/projects';
+import { useIssues } from '../state/issues';
+import { useAuth } from '../state/auth';
+import { useWorkflows } from '../state/workflows';
+import { useTeams } from '../state/teams';
+import { useUsers, UNKNOWN_USER_LABEL } from '../state/users';
 
 export function ProjectsPage() {
   const { tenant, workspace, tenantName, workspaceName } = useTenantBreadcrumbs();
   const { projects } = useProjects();
+  const { issues } = useIssues();
   const [showCreate, setShowCreate] = useState(false);
   const [filter, setFilter] = useState('');
 
@@ -27,6 +33,18 @@ export function ProjectsPage() {
   });
   const active = filtered.filter((p) => p.status === 'active');
   const archived = filtered.filter((p) => p.status === 'archived');
+
+  // Open-issue counts per project. The list endpoint doesn't expose
+  // aggregates yet so we compute client-side off the workspace cache —
+  // good enough while the FE is the only consumer.
+  const openByProjectId = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const i of issues) {
+      if (i.status === 'done' || i.status === 'canceled') continue;
+      m.set(i.projectId, (m.get(i.projectId) ?? 0) + 1);
+    }
+    return m;
+  }, [issues]);
 
   return (
     <div className="bira" style={{ height: '100%', display: 'flex', flexDirection: 'column', background: 'var(--bg)' }}>
@@ -63,10 +81,10 @@ export function ProjectsPage() {
 
       <div className="scroll" style={{ flex: 1, overflow: 'auto', padding: '24px 28px' }}>
         {active.length > 0 && (
-          <Group label="Active" projects={active} tenant={tenant} workspace={workspace} />
+          <Group label="Active" projects={active} tenant={tenant} workspace={workspace} openByProjectId={openByProjectId} />
         )}
         {archived.length > 0 && (
-          <Group label="Archived" projects={archived} tenant={tenant} workspace={workspace} dim />
+          <Group label="Archived" projects={archived} tenant={tenant} workspace={workspace} dim openByProjectId={openByProjectId} />
         )}
         {filtered.length === 0 && (
           <div style={{
@@ -100,15 +118,20 @@ export function ProjectsPage() {
   );
 }
 
-function Group({ label, projects, tenant, workspace, dim }: { label: string; projects: Project[]; tenant: string; workspace: string; dim?: boolean }) {
+function Group({ label, projects, tenant, workspace, dim, openByProjectId }: {
+  label: string;
+  projects: Project[];
+  tenant: string;
+  workspace: string;
+  dim?: boolean;
+  openByProjectId: Map<string, number>;
+}) {
   return (
     <section style={{ marginBottom: 28, opacity: dim ? 0.65 : 1 }}>
       <div className="label-section" style={{ marginBottom: 10 }}>{label} · {projects.length}</div>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 12 }}>
         {projects.map((p) => {
-          const open = ISSUES.filter(
-            (i) => i.project === p.slug && i.status !== 'done' && i.status !== 'canceled',
-          ).length;
+          const open = openByProjectId.get(p.id) ?? 0;
           const memberCount = projectEffectiveMembers(p, tenant).length;
           return (
             <Link
@@ -156,7 +179,19 @@ function CreateProjectModal({ onClose }: { onClose: () => void }) {
   const navigate = useNavigate();
   const { tenant, workspace } = useTenantContext();
   const { projects, addProject } = useProjects();
-  const activeMembers: TenantMember[] = (TENANT_MEMBERS[tenant] ?? []).filter((m) => m.status === 'active');
+  const { user: currentUser } = useAuth();
+  const { workflows: catalog } = useWorkflows();
+  const { teams } = useTeams();
+  const { users } = useUsers();
+  const currentUserId = currentUser?.id ?? '';
+  // Filter the creator out of the candidate set — they're auto-granted
+  // admin server-side, so giving the user a chip to deselect themselves
+  // is just confusion. The remaining list is the pool of *additional*
+  // edit-access grantees.
+  const candidateUsers = useMemo(
+    () => users.filter((u) => u.id !== currentUserId),
+    [users, currentUserId],
+  );
 
   const [name, setName] = useState('');
   // The user can override the auto-derived key but not the slug (slug is the
@@ -166,9 +201,10 @@ function CreateProjectModal({ onClose }: { onClose: () => void }) {
   const [keyTouched, setKeyTouched] = useState(false);
   const [description, setDescription] = useState('');
   const [workflows, setWorkflows] = useState<Record<IssueTypeLetter, string>>(DEFAULT_PROJECT_WORKFLOWS);
-  const [teamSlugs, setTeamSlugs] = useState<string[]>([]);
-  // Edit access starts with just the creator. They can add more before submit.
-  const [userEmails, setUserEmails] = useState<string[]>([CURRENT_USER.email]);
+  // UUIDs throughout — slugs are URL-only; identity is uuid (see
+  // `project_uuid_identity_in_fe.md`).
+  const [teamIds, setTeamIds] = useState<string[]>([]);
+  const [userIds, setUserIds] = useState<string[]>([]);
 
   const onName = (v: string) => {
     setName(v);
@@ -208,14 +244,10 @@ function CreateProjectModal({ onClose }: { onClose: () => void }) {
       bg: palette.bg,
       description: description.trim(),
       workflows,
-      teamSlugs,
-      // The creator is implicitly an editor. Listing them in `userEmails`
-      // makes that visible on the Members page; teams the creator is in
-      // would also grant access transitively.
-      userEmails: userEmails.includes(CURRENT_USER.email)
-        ? userEmails
-        : [CURRENT_USER.email, ...userEmails],
-      createdByEmail: CURRENT_USER.email,
+      teamIds,
+      // Creator is intentionally NOT in this list — the BE auto-grants
+      // them admin in the same transaction as the project insert.
+      userIds,
     });
     onClose();
     navigate(`/${tenant}/${workspace}/${created.slug}`);
@@ -288,8 +320,11 @@ function CreateProjectModal({ onClose }: { onClose: () => void }) {
                     className="input input-sm"
                     style={{ width: 'auto', maxWidth: 130 }}
                   >
-                    {Object.values(WORKFLOWS).map((w) => (
-                      <option key={w.id} value={w.id}>{w.name}</option>
+                    {catalog.length === 0 && (
+                      <option value="">Default</option>
+                    )}
+                    {catalog.map((w) => (
+                      <option key={w.id} value={w.slug}>{w.name}</option>
                     ))}
                   </select>
                 </label>
@@ -299,69 +334,87 @@ function CreateProjectModal({ onClose }: { onClose: () => void }) {
           </Field>
 
           <Field label="Teams with access" optional>
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-              {TEAMS.map((team) => {
-                const on = teamSlugs.includes(team.slug);
-                return (
-                  <button
-                    key={team.slug}
-                    type="button"
-                    onClick={() => setTeamSlugs((prev) =>
-                      on ? prev.filter((s) => s !== team.slug) : [...prev, team.slug],
-                    )}
-                    className="btn btn-sm"
-                    style={{
-                      gap: 6, height: 28,
-                      background: on ? 'var(--accent-subtle)' : 'var(--bg)',
-                      borderColor: on ? 'var(--accent)' : 'var(--border)',
-                      color: on ? 'var(--accent-active)' : 'var(--fg)',
-                      fontWeight: on ? 600 : 500,
-                    }}
-                  >
-                    <span style={{
-                      width: 6, height: 6, borderRadius: 3, background: team.color,
-                    }} />
-                    {team.name}
-                  </button>
-                );
-              })}
-            </div>
-            <Hint>Adds every member of the selected teams.</Hint>
+            {teams.length === 0 ? (
+              <Hint>
+                No teams in this workspace yet. Create one from the{' '}
+                <Link to={`/${tenant}/${workspace}/teams`} style={{ color: 'var(--accent)' }}>
+                  Teams page
+                </Link>{' '}
+                first to grant team-level access.
+              </Hint>
+            ) : (
+              <>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                  {teams.map((team) => {
+                    const on = teamIds.includes(team.id);
+                    return (
+                      <button
+                        key={team.id}
+                        type="button"
+                        onClick={() => setTeamIds((prev) =>
+                          on ? prev.filter((id) => id !== team.id) : [...prev, team.id],
+                        )}
+                        className="btn btn-sm"
+                        style={{
+                          gap: 6, height: 28,
+                          background: on ? 'var(--accent-subtle)' : 'var(--bg)',
+                          borderColor: on ? 'var(--accent)' : 'var(--border)',
+                          color: on ? 'var(--accent-active)' : 'var(--fg)',
+                          fontWeight: on ? 600 : 500,
+                        }}
+                      >
+                        <span style={{
+                          width: 6, height: 6, borderRadius: 3, background: team.color,
+                        }} />
+                        {team.name}
+                      </button>
+                    );
+                  })}
+                </div>
+                <Hint>Selected teams are granted <strong>read</strong> access — upgrade individual teams from the project Members page.</Hint>
+              </>
+            )}
           </Field>
 
-          <Field label="People with edit access">
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-              {activeMembers.map((m) => {
-                const on = userEmails.includes(m.email);
-                const isSelf = m.email === CURRENT_USER.email;
-                return (
-                  <button
-                    key={m.email}
-                    type="button"
-                    onClick={() => {
-                      if (isSelf) return; // creator is always included
-                      setUserEmails((prev) =>
-                        on ? prev.filter((e) => e !== m.email) : [...prev, m.email],
-                      );
-                    }}
-                    className="btn btn-sm"
-                    data-tip={isSelf ? 'Creator — always included' : undefined}
-                    style={{
-                      gap: 6, height: 28,
-                      background: on ? 'var(--accent-subtle)' : 'var(--bg)',
-                      borderColor: on ? 'var(--accent)' : 'var(--border)',
-                      color: on ? 'var(--accent-active)' : 'var(--fg)',
-                      fontWeight: on ? 600 : 500,
-                      cursor: isSelf ? 'default' : 'pointer',
-                    }}
-                  >
-                    <Avatar name={m.name} size={18} />
-                    {m.name}{isSelf ? ' (you)' : ''}
-                  </button>
-                );
-              })}
-            </div>
-            <Hint>You can refine this anytime from the project's Members page.</Hint>
+          <Field label="People with edit access" optional>
+            {candidateUsers.length === 0 ? (
+              <Hint>You're the only workspace member — the project will start with you as admin. Invite others from{' '}
+                <Link to={`/${tenant}/${workspace}/settings/members`} style={{ color: 'var(--accent)' }}>Members</Link>
+                {' '}to grant additional access.
+              </Hint>
+            ) : (
+              <>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                  {candidateUsers.map((u) => {
+                    const on = userIds.includes(u.id);
+                    const label = u.displayName || UNKNOWN_USER_LABEL;
+                    return (
+                      <button
+                        key={u.id}
+                        type="button"
+                        onClick={() =>
+                          setUserIds((prev) =>
+                            on ? prev.filter((id) => id !== u.id) : [...prev, u.id],
+                          )
+                        }
+                        className="btn btn-sm"
+                        style={{
+                          gap: 6, height: 28,
+                          background: on ? 'var(--accent-subtle)' : 'var(--bg)',
+                          borderColor: on ? 'var(--accent)' : 'var(--border)',
+                          color: on ? 'var(--accent-active)' : 'var(--fg)',
+                          fontWeight: on ? 600 : 500,
+                        }}
+                      >
+                        <Avatar name={label} size={18} />
+                        {label}
+                      </button>
+                    );
+                  })}
+                </div>
+                <Hint>Selected users are granted <strong>write</strong> access. You're auto-granted admin as the creator.</Hint>
+              </>
+            )}
           </Field>
 
           {error && (

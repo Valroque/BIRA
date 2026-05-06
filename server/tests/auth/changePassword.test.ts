@@ -72,22 +72,24 @@ describe('POST /api/auth/change-password', () => {
     expect(newLogin.body.data.user.id).toBe(user.id);
   });
 
-  it('clears mustResetPassword for a user starting locked; /api/tenants reachable after', async () => {
+  it('clears mustResetPassword for a user starting locked; tenant-detail reachable after', async () => {
     const { user, password } = await createUser({
       password: 'temppass1234',
       mustReset: true,
     });
-    // Add to a tenant so /api/tenants would otherwise return rows.
+    // Membership grants tenant-detail access once unlocked.
     const tenant = await createTenant();
     await addTenantMember(user.id, tenant.id, 'write');
 
     const { token } = await loginAs(user.email, password);
 
-    // Sanity check: locked → /api/tenants is 423.
-    const lockedTenants = await api()
-      .get('/api/tenants')
+    // Sanity check: locked → any auth-gated tenant endpoint is 423.
+    // Use the tenant-detail endpoint (gated) rather than GET /api/tenants
+    // (the public pre-login picker — no gate).
+    const lockedDetail = await api()
+      .get(`/api/tenants/${tenant.slug}`)
       .set('Authorization', `Bearer ${token}`);
-    expect(lockedTenants.status).toBe(423);
+    expect(lockedDetail.status).toBe(423);
 
     const res = await api()
       .post('/api/auth/change-password')
@@ -97,12 +99,12 @@ describe('POST /api/auth/change-password', () => {
     expect(res.status).toBe(200);
     expect(res.body.data.mustResetPassword).toBe(false);
 
-    // After clearing, /api/tenants succeeds with the same access token —
-    // authenticate() refetches the user row each request, so the cleared
-    // flag is observed without re-login.
-    const afterTenants = await api()
-      .get('/api/tenants')
+    // After clearing, the same gated endpoint succeeds with the same
+    // access token — authenticate() refetches the user row each
+    // request, so the cleared flag is observed without re-login.
+    const afterDetail = await api()
+      .get(`/api/tenants/${tenant.slug}`)
       .set('Authorization', `Bearer ${token}`);
-    expect(afterTenants.status).toBe(200);
+    expect(afterDetail.status).toBe(200);
   });
 });

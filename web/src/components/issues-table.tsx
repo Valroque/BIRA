@@ -24,14 +24,15 @@ import {
 import {
   FilterChip, AddFilterButton, applyFilters, applySortStack, cycleSort,
   COLUMN_SORT_FIELD, newFilterId,
-  type Filter, type Sort,
+  type Filter, type Sort, type SortContext,
 } from './issue-filters';
 import { useDismiss } from './use-dismiss';
 import { ProjectBadge } from './project-chip';
 import { EmptyState } from './states';
-import { IssuesGantt, type GanttGranularity } from './issues-gantt';
+import { IssuesGantt, type GanttGranularity, type GanttMode } from './issues-gantt';
 import { ISSUE_TYPE_NAMES, type Issue, type IssueTypeLetter, type Project } from '../fixtures';
 import { useProjects } from '../state/projects';
+import { useUsers, UNKNOWN_USER_LABEL, type WorkspaceUser } from '../state/users';
 
 export type IssueGroupKey = 'none' | 'status' | 'project' | 'assignee' | 'priority' | 'type';
 export type IssueView = 'list' | 'gantt';
@@ -135,6 +136,13 @@ export interface IssuesTableProps {
    * survive even if the persisted blob is stale.
    */
   persistKey?: string;
+  /**
+   * Slice 6 — distinguishes the planning gantt (workspace-level My Issues
+   * / All Issues — what-if drags stay in localStorage) from the reality
+   * gantt (project-scoped /list — drags PATCH the BE). Defaults to
+   * `'planning'` so unwitting callers keep the historical behaviour.
+   */
+  ganttMode?: GanttMode;
 }
 
 interface PersistedView {
@@ -187,6 +195,7 @@ export function IssuesTable(props: IssuesTableProps) {
     emptyDescription = 'Issues you create or that match your filters will appear here.',
     emptyAction,
     persistKey,
+    ganttMode = 'planning',
   } = props;
 
   // Project-scoped pages drop the 'project' option from the picker so the user
@@ -198,6 +207,7 @@ export function IssuesTable(props: IssuesTableProps) {
 
   const { tenant, workspace } = useTenantContext();
   const { projects } = useProjects();
+  const { users } = useUsers();
 
   // Tenant + workspace scoped so a project filter from one workspace doesn't
   // bleed into another (project slugs aren't globally unique here).
@@ -292,9 +302,20 @@ export function IssuesTable(props: IssuesTableProps) {
     if (level === 'stories-tasks') return filtered.filter((i) => i.type !== 'E');
     return filtered;
   }, [issues, filters, level]);
+  // Sort context resolves uuid → display name once per render so the
+  // assignee / project comparators read the human-readable order, not the
+  // arbitrary uuid order.
+  const sortContext = useMemo<SortContext>(() => {
+    const assigneeNameById = new Map<string, string>();
+    for (const u of users) assigneeNameById.set(u.id, u.displayName);
+    const projectNameById = new Map<string, string>();
+    for (const p of projects) projectNameById.set(p.id, p.name);
+    return { assigneeNameById, projectNameById };
+  }, [users, projects]);
+
   const sortedIssues = useMemo(
-    () => applySortStack(filteredIssues, sortStack),
-    [filteredIssues, sortStack],
+    () => applySortStack(filteredIssues, sortStack, sortContext),
+    [filteredIssues, sortStack, sortContext],
   );
 
   const onHeaderSort = (colId: ColumnId) => {
@@ -302,11 +323,11 @@ export function IssuesTable(props: IssuesTableProps) {
     if (!field) return;
     setSortStack((prev) => cycleSort(prev, field));
   };
-  const allVisibleIds = filteredIssues.map((i) => i.id);
-  const allSelected = allVisibleIds.length > 0 && allVisibleIds.every((id) => selectedIds.has(id));
-  const someSelected = !allSelected && allVisibleIds.some((id) => selectedIds.has(id));
+  const allVisibleKeys = filteredIssues.map((i) => i.key);
+  const allSelected = allVisibleKeys.length > 0 && allVisibleKeys.every((k) => selectedIds.has(k));
+  const someSelected = !allSelected && allVisibleKeys.some((k) => selectedIds.has(k));
   const toggleSelectAll = () => {
-    setSelectedIds(allSelected ? new Set() : new Set(allVisibleIds));
+    setSelectedIds(allSelected ? new Set() : new Set(allVisibleKeys));
   };
 
   // Hide the Project column when the page is single-project, OR when rows are
@@ -316,8 +337,8 @@ export function IssuesTable(props: IssuesTableProps) {
   const gridColumns = buildRowColumns(widths, order, visible, showProject);
 
   const groups = useMemo<Group[]>(
-    () => deriveGroups(filteredIssues, sortedIssues, groupBy, projects),
-    [filteredIssues, sortedIssues, groupBy, projects],
+    () => deriveGroups(filteredIssues, sortedIssues, groupBy, projects, users),
+    [filteredIssues, sortedIssues, groupBy, projects, users],
   );
 
   const hasUnlockedFilters = filters.some((f) => !f.locked);
@@ -465,6 +486,7 @@ export function IssuesTable(props: IssuesTableProps) {
             workspace={workspace}
             hierarchical={level === 'all'}
             granularity={granularity}
+            mode={ganttMode}
           />
         ) : (
           groups.map((g) => {
@@ -497,11 +519,11 @@ export function IssuesTable(props: IssuesTableProps) {
                 )}
                 {(isFlat || !isCollapsed) && g.items.map((i) => (
                   <ListRow
-                    key={i.id}
+                    key={i.key}
                     issue={i}
                     tenant={tenant}
                     workspace={workspace}
-                    selected={selectedIds.has(i.id)}
+                    selected={selectedIds.has(i.key)}
                     onToggleSelect={toggleSelect}
                     showProject={showProject}
                     columns={gridColumns}
@@ -527,6 +549,7 @@ function deriveGroups(
   sortedIssues: Issue[],
   groupBy: IssueGroupKey,
   projects: Project[],
+  users: WorkspaceUser[],
 ): Group[] {
   if (groupBy === 'none') {
     return [{ id: '__all__', label: '', items: sortedIssues }];
@@ -542,13 +565,14 @@ function deriveGroups(
       .filter((g) => g.items.length > 0);
   }
   if (groupBy === 'project') {
-    // Project declaration order — sort-independent.
+    // Project declaration order — sort-independent. Group ids are project
+    // UUIDs; the visible label resolves to the project name.
     return projects
-      .filter((p) => filteredIssues.some((i) => i.project === p.slug))
+      .filter((p) => filteredIssues.some((i) => i.projectId === p.id))
       .map<Group>((p) => ({
-        id: p.slug, label: p.name,
+        id: p.id, label: p.name,
         swatch: <ProjectBadge project={p} />,
-        items: sortedIssues.filter((i) => i.project === p.slug),
+        items: sortedIssues.filter((i) => i.projectId === p.id),
       }));
   }
   if (groupBy === 'priority') {
@@ -569,13 +593,44 @@ function deriveGroups(
         items: sortedIssues.filter((i) => i.type === t),
       }));
   }
-  // assignee — alphabetical
-  const names = Array.from(new Set(filteredIssues.map((i) => i.assignee))).sort();
-  return names.map<Group>((n) => ({
-    id: n, label: n,
-    swatch: <Avatar name={n} size={16} />,
-    items: sortedIssues.filter((i) => i.assignee === n),
-  }));
+  // Assignee — group ids are user UUIDs (or '__unassigned__' for issues
+  // with no assignee). Labels resolve to display names; ordering is
+  // alphabetical by display name + an "Unassigned" bucket at the end.
+  const userById = new Map(users.map((u) => [u.id, u]));
+  const presentIds = new Set<string | null>();
+  for (const i of filteredIssues) presentIds.add(i.assigneeUserId);
+  const knownIds = users
+    .filter((u) => presentIds.has(u.id))
+    .sort((a, b) => a.displayName.localeCompare(b.displayName))
+    .map((u) => u.id);
+  // Stragglers: an `assigneeUserId` that doesn't resolve to a current user
+  // (deactivated, removed). Group them under their uuid with the placeholder
+  // label so the list still renders without leaking the uuid.
+  const orphanIds: string[] = [];
+  for (const id of presentIds) {
+    if (id && !userById.has(id) && !orphanIds.includes(id)) orphanIds.push(id);
+  }
+  orphanIds.sort();
+  const groups: Group[] = [];
+  for (const id of [...knownIds, ...orphanIds]) {
+    const u = userById.get(id);
+    const name = u?.displayName ?? UNKNOWN_USER_LABEL;
+    groups.push({
+      id,
+      label: name,
+      swatch: <Avatar name={name} size={16} />,
+      items: sortedIssues.filter((i) => i.assigneeUserId === id),
+    });
+  }
+  if (presentIds.has(null)) {
+    groups.push({
+      id: '__unassigned__',
+      label: 'Unassigned',
+      swatch: <Avatar name="?" size={16} />,
+      items: sortedIssues.filter((i) => i.assigneeUserId === null),
+    });
+  }
+  return groups;
 }
 
 // ---------------------------------------------------------------------------

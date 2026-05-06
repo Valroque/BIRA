@@ -59,7 +59,7 @@ describe('POST /api/tenants/:tenantSlug/deactivate', () => {
     expect(res.status).toBe(404);
   });
 
-  it('200 happy path: status flips and visibility in GET /api/tenants follows includeDeactivated', async () => {
+  it('200 happy path: status flips and tenant disappears from public GET /api/tenants', async () => {
     const tenant = await createTenant({ slug: 'soon-frozen' });
     const { user, password } = await createUser();
     await addTenantMember(user.id, tenant.id, 'admin');
@@ -73,21 +73,14 @@ describe('POST /api/tenants/:tenantSlug/deactivate', () => {
     expect(res.status).toBe(200);
     expect(res.body.data.status).toBe('deactivated');
 
+    // GET /api/tenants is the public pre-login picker; deactivated tenants
+    // are always excluded. Recovery for an admin is via the slug-known
+    // detail endpoint, not a flag on this list.
     const defaultList = await api()
       .get('/api/tenants')
       .set('Authorization', `Bearer ${token}`);
-    const defaultSlugs = defaultList.body.data.map(
-      (item: { tenant: { slug: string } }) => item.tenant.slug
-    );
+    const defaultSlugs = defaultList.body.data.map((item: { slug: string }) => item.slug);
     expect(defaultSlugs).not.toContain('soon-frozen');
-
-    const fullList = await api()
-      .get('/api/tenants?includeDeactivated=true')
-      .set('Authorization', `Bearer ${token}`);
-    const fullSlugs = fullList.body.data.map(
-      (item: { tenant: { slug: string } }) => item.tenant.slug
-    );
-    expect(fullSlugs).toContain('soon-frozen');
   });
 
   it('409 on workspace create after deactivation (requireActiveTenant gate)', async () => {

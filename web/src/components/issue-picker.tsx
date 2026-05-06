@@ -20,7 +20,7 @@ interface IssuePickerModalProps {
   subtitle?: string;
   /** Restrict to issues that match this predicate. */
   filter?: (issue: Issue) => boolean;
-  /** Issue ids to hide from the list (current issue, already-linked, etc.). */
+  /** Issue keys to hide from the list (current issue, already-linked, etc.). */
   excludeIds?: string[];
   onSelect: (issue: Issue) => void;
   onClose: () => void;
@@ -48,10 +48,10 @@ export function IssuePickerModal({
     const idHit = trimmed.match(ISSUE_ID_RE);
     const q = (idHit ? idHit[0] : trimmed).toLowerCase();
     return issues.filter((i) => {
-      if (exclude.has(i.id)) return false;
+      if (exclude.has(i.key)) return false;
       if (filter && !filter(i)) return false;
       if (!q) return true;
-      return i.id.toLowerCase().includes(q) || i.title.toLowerCase().includes(q);
+      return i.key.toLowerCase().includes(q) || i.title.toLowerCase().includes(q);
     }).slice(0, 50);
   }, [query, filter, exclude, issues]);
 
@@ -93,7 +93,7 @@ export function IssuePickerModal({
         ) : (
           matches.map((issue) => (
             <button
-              key={issue.id}
+              key={issue.key}
               type="button"
               onClick={() => onSelect(issue)}
               style={{
@@ -108,7 +108,7 @@ export function IssuePickerModal({
             >
               <TypeChip type={issue.type} />
               <span className="mono" style={{ color: 'var(--fg-muted)', fontSize: 12, flexShrink: 0 }}>
-                {issue.id}
+                {issue.key}
               </span>
               <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>
                 {issue.title}

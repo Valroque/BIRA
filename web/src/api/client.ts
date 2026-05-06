@@ -118,6 +118,12 @@ export async function apiFetch<T>(path: string, init: RequestInit = {}): Promise
     throw new ApiError(res.status, message, body);
   }
 
+  // 204 No Content is a valid 2xx with no body — common for DELETE. Return
+  // undefined cast to T so callers that pass `<void>` see no exception.
+  if (res.status === 204) {
+    return undefined as T;
+  }
+
   const json = await res.json();
   // Unwrap the { success, data } envelope when present.
   return (json?.data !== undefined ? json.data : json) as T;

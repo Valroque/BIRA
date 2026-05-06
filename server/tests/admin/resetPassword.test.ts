@@ -112,11 +112,15 @@ describe('POST /api/tenants/:tenantSlug/members/:userId/reset-password', () => {
     expect(tempLogin.status).toBe(200);
     const lockedToken = tempLogin.body.data.token;
 
-    // Subsequent /api/tenants/... → 423.
-    const tenantsRes = await api()
-      .get('/api/tenants')
+    // Subsequent auth-gated calls → 423. GET /api/tenants is the public
+    // pre-login picker (no gate); we hit a tenant-detail endpoint
+    // instead — that one sits under the `requirePasswordResetCleared`
+    // middleware and the locked user is a member, so the gate is the
+    // only thing that should reject it.
+    const detailRes = await api()
+      .get(`/api/tenants/${tenant.slug}`)
       .set('Authorization', `Bearer ${lockedToken}`);
-    expect(tenantsRes.status).toBe(423);
-    expect(tenantsRes.body.code).toBe('PASSWORD_RESET_REQUIRED');
+    expect(detailRes.status).toBe(423);
+    expect(detailRes.body.code).toBe('PASSWORD_RESET_REQUIRED');
   });
 });

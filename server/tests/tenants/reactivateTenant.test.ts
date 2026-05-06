@@ -59,9 +59,8 @@ describe('POST /api/tenants/:tenantSlug/reactivate', () => {
     const list = await api()
       .get('/api/tenants')
       .set('Authorization', `Bearer ${token}`);
-    const slugs = list.body.data.map(
-      (item: { tenant: { slug: string } }) => item.tenant.slug
-    );
+    // GET /api/tenants is the public pre-login picker — flat Tenant[].
+    const slugs = list.body.data.map((item: { slug: string }) => item.slug);
     expect(slugs).toContain('round-trip');
   });
 

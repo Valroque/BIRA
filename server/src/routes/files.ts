@@ -3,6 +3,7 @@ import multer from 'multer';
 import { asyncHandler } from '../middleware/errorHandler.js';
 import {
   authorize,
+  requireActiveTenant,
   requireActiveWorkspace,
 } from '../middleware/tenantScope.js';
 import { AppError } from '../lib/errors.js';
@@ -59,8 +60,9 @@ const router: Router = Router({ mergeParams: true });
 // POST /api/tenants/:tenantSlug/workspaces/:workspaceSlug/files
 router.post(
   '/',
-  requireActiveWorkspace,
   authorize('write'),
+  requireActiveTenant,
+  requireActiveWorkspace,
   multerMiddleware,
   asyncHandler(async (req, res) => {
     if (!req.user || !req.scope?.workspaceId) {
@@ -113,8 +115,9 @@ router.get(
 // DELETE /api/tenants/:tenantSlug/workspaces/:workspaceSlug/files/:id
 router.delete(
   '/:id',
-  requireActiveWorkspace,
   authorize('write'),
+  requireActiveTenant,
+  requireActiveWorkspace,
   asyncHandler(async (req, res) => {
     if (!req.user || !req.scope?.workspaceId) {
       throw new AppError('Workspace scope missing', 500);

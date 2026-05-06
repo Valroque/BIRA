@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { api } from '../helpers/app.js';
 import { addTenantMember, createTenant, createUser, loginAs } from '../helpers/factories.js';
 
-describe('requirePasswordResetCleared (mounted on /api/tenants)', () => {
+describe('requirePasswordResetCleared (mounted on auth-gated /api/tenants routes)', () => {
   async function setupLockedUser() {
     const tenant = await createTenant();
     const { user, password } = await createUser({
@@ -14,12 +14,10 @@ describe('requirePasswordResetCleared (mounted on /api/tenants)', () => {
     return { tenant, user, password, token };
   }
 
-  it('GET /api/tenants → 423 with PASSWORD_RESET_REQUIRED', async () => {
+  it('GET /api/tenants → 200 (public picker is below the gate)', async () => {
     const { token } = await setupLockedUser();
     const res = await api().get('/api/tenants').set('Authorization', `Bearer ${token}`);
-    expect(res.status).toBe(423);
-    expect(res.body.code).toBe('PASSWORD_RESET_REQUIRED');
-    expect(res.body.success).toBe(false);
+    expect(res.status).toBe(200);
   });
 
   it('GET /api/tenants/:slug/workspaces → 423', async () => {
@@ -53,8 +51,8 @@ describe('requirePasswordResetCleared (mounted on /api/tenants)', () => {
     expect(res.body.data.mustResetPassword).toBe(false);
   });
 
-  it('after change-password, GET /api/tenants → 200', async () => {
-    const { token } = await setupLockedUser();
+  it('after change-password, GET /api/tenants/:slug/workspaces → 200', async () => {
+    const { token, tenant } = await setupLockedUser();
 
     await api()
       .post('/api/auth/change-password')
@@ -62,7 +60,9 @@ describe('requirePasswordResetCleared (mounted on /api/tenants)', () => {
       .send({ currentPassword: 'temppass1234', newPassword: 'rotatedpass2' })
       .expect(200);
 
-    const res = await api().get('/api/tenants').set('Authorization', `Bearer ${token}`);
+    const res = await api()
+      .get(`/api/tenants/${tenant.slug}/workspaces`)
+      .set('Authorization', `Bearer ${token}`);
     expect(res.status).toBe(200);
     expect(Array.isArray(res.body.data)).toBe(true);
   });

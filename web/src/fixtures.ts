@@ -16,6 +16,8 @@ export const ISSUE_TYPE_NAMES: Record<IssueTypeLetter, string> = {
 // ---------------------------------------------------------------------------
 
 export interface Project {
+  /** Stable UUID — primary identity matching the BE. Never rendered. */
+  id: string;
   /** URL slug. Lowercase a-z, 0-9, dashes. Unique per workspace. */
   slug: string;
   name: string;
@@ -73,11 +75,25 @@ export function pickProjectColor(slug: string): { color: string; bg: string } {
 }
 
 /**
+ * Stable mock UUIDs for seed projects. Hand-picked so a UUID still hints at
+ * which project it belongs to when debugging (the trailing letter/word is
+ * recognisable). UUIDs themselves are never rendered — `useProjects()` resolves
+ * them to slug / name / colour at the boundary.
+ */
+export const SEED_PROJECT_IDS = {
+  comet: '00000000-0000-0000-0000-000000000c01',
+  orbit: '00000000-0000-0000-0000-000000000c02',
+  atlas: '00000000-0000-0000-0000-000000000c03',
+  halo:  '00000000-0000-0000-0000-000000000c04',
+} as const;
+
+/**
  * Workspace-default seed projects. Shaped exactly like what the create-project
  * form produces, so seeded projects render identically to user-added ones.
  */
 export const SEED_PROJECTS: Project[] = [
   {
+    id: SEED_PROJECT_IDS.comet,
     slug: 'comet',
     name: 'Comet',
     key: 'CMT',
@@ -93,6 +109,7 @@ export const SEED_PROJECTS: Project[] = [
     userEmails: ['priya@acme.com'],
   },
   {
+    id: SEED_PROJECT_IDS.orbit,
     slug: 'orbit',
     name: 'Orbit',
     key: 'ORB',
@@ -108,6 +125,7 @@ export const SEED_PROJECTS: Project[] = [
     userEmails: ['sam@acme.com'],
   },
   {
+    id: SEED_PROJECT_IDS.atlas,
     slug: 'atlas',
     name: 'Atlas',
     key: 'ATL',
@@ -123,6 +141,7 @@ export const SEED_PROJECTS: Project[] = [
     userEmails: ['priya@acme.com'],
   },
   {
+    id: SEED_PROJECT_IDS.halo,
     slug: 'halo',
     name: 'Halo',
     key: 'HAL',
@@ -149,17 +168,26 @@ export const RESERVED_PROJECT_SLUGS = new Set<string>([
 // ---------------------------------------------------------------------------
 
 export interface Issue {
-  id: string;
+  /**
+   * Human-readable issue key (e.g. 'COM-101'). Identity AND display — unlike
+   * other entities, the key is its own URL handle and the canonical thing
+   * users type / paste / copy. Matches the BE `issues.key` column.
+   */
+  key: string;
   type: IssueTypeLetter;
   title: string;
   status: 'backlog' | 'todo' | 'in-progress' | 'in-review' | 'done' | 'canceled';
   priority: 'urgent' | 'high' | 'med' | 'low' | 'none';
-  assignee: string;
+  /**
+   * UUID of the assignee, or null when unassigned. Resolve to a display name
+   * via `useUsers().getUser(id)` at every consumer; the UUID is never rendered.
+   */
+  assigneeUserId: string | null;
   labels: string[];
   updated: string;
   estimate?: number;
-  /** Slug of the project that owns this issue. Drives the URL of issue detail. */
-  project: ProjectSlug;
+  /** UUID of the project that owns this issue. Resolve via `useProjects().getProjectById(id)`. */
+  projectId: string;
   /**
    * ISO date (YYYY-MM-DD). Optional — backlog/todo issues typically don't
    * have a start date until someone picks them up.
@@ -168,34 +196,35 @@ export interface Issue {
   /** ISO date (YYYY-MM-DD). The target / due date for the issue. Optional. */
   endDate?: string;
   /**
-   * Parent issue id. Hierarchy rules (see docs/product.md):
+   * Parent issue key. Hierarchy rules (see docs/product.md):
    *   Epic → Story → Task/Bug, plus Epic → Task/Bug.
    *   Stories parent under Epics; Tasks/Bugs under either Epic or Story.
    *   Epics never have a parent.
    * Storage is denormalised — the parent's `children` array also carries
-   * this issue's id. Both sides must stay in sync.
+   * this issue's key. Both sides must stay in sync.
    */
   parent?: string;
   /**
-   * Direct child issue ids. Mirror of `parent` on the other side; both
+   * Direct child issue keys. Mirror of `parent` on the other side; both
    * are stored so we can render either direction without a scan.
    */
   children?: string[];
   /**
    * Symmetric "relates to" link between two issues. If A.relatedTo
-   * contains B, then B.relatedTo contains A. Untyped beyond the verb.
+   * contains B's key, then B.relatedTo contains A's key. Untyped beyond
+   * the verb.
    */
   relatedTo?: string[];
   /**
    * Directed "depends on" predecessors — Task-only. If A.dependsOn
-   * contains B, A cannot start until B has ended; equivalently, B
+   * contains B's key, A cannot start until B has ended; equivalently, B
    * blocks A. Storage is symmetric for fast inverse lookup: B's
-   * `dependedOnBy` contains A. The relation graph must be a DAG —
+   * `dependedOnBy` contains A's key. The relation graph must be a DAG —
    * cycles are rejected at edit time. Only valid when both ends
    * have `type === 'T'`.
    */
   dependsOn?: string[];
-  /** Inverse of `dependsOn` — successors / Tasks that this Task blocks. */
+  /** Inverse of `dependsOn` — successor keys this Task blocks. */
   dependedOnBy?: string[];
   /**
    * Long-form body of the issue. Rendered with `renderRichText` so triple-
@@ -206,6 +235,27 @@ export interface Issue {
   description?: string;
 }
 
+/**
+ * Stable mock UUIDs for seed users. Hand-picked so a UUID still hints at
+ * which user it belongs to when debugging — never rendered.
+ */
+export const SEED_USER_IDS = {
+  // dreamstreet
+  'admin@dreamstreet.io': '00000000-0000-0000-0000-0000000000d0',
+  // acme-corp
+  'jordan@acme.com': '00000000-0000-0000-0000-0000000000a1',
+  'maya@acme.com':   '00000000-0000-0000-0000-0000000000a2',
+  'sam@acme.com':    '00000000-0000-0000-0000-0000000000a3',
+  'priya@acme.com':  '00000000-0000-0000-0000-0000000000a4',
+  'riley@acme.com':  '00000000-0000-0000-0000-0000000000a5',
+  'avery@acme.com':  '00000000-0000-0000-0000-0000000000a6',
+} as const;
+
+const U = SEED_USER_IDS;
+const P_COMET = SEED_PROJECT_IDS.comet;
+const P_ORBIT = SEED_PROJECT_IDS.orbit;
+const P_ATLAS = SEED_PROJECT_IDS.atlas;
+
 // Today (in this prototype's reference frame) is 2026-04-27. Dates below are
 // hand-tuned around it: backlog usually has no start date, in-progress /
 // in-review have a start date and a target end, done has both filled in.
@@ -213,9 +263,15 @@ export interface Issue {
 // Hierarchy + relations are stored on BOTH ends. If you touch one side
 // (parent/child, relatedTo), update the other side too — there's no
 // auto-mirroring.
+//
+// **Deprecated as of slice 5 (2026-05-05).** Issues now load from the live
+// BE via `useIssues()` (see `src/state/issues.tsx`). This array is kept as
+// a TS-shape reference + a fallback for design-canvas screens that render
+// reference UI; do not import it from new code. The full deletion lands
+// after slice 11 once every screen has migrated.
 export const ISSUES: Issue[] = [
   // --- Comet ---
-  { id: 'CMT-241', project: 'comet', type: 'B', title: 'Reorder of states corrupts saved view state when filter is active', status: 'in-review', priority: 'urgent', assignee: 'Maya Chen', labels: ['regression', 'workflow'], updated: '2h ago', estimate: 3, startDate: '2026-04-22', endDate: '2026-04-29', relatedTo: ['CMT-229'], description: `Saving the workflow editor's view state (filter chips, expanded sections) writes through a debounced effect. When a state node is reordered while a filter is active, the persisted slot order is computed from the visible subset and reapplied to the full set on reload — silently dropping nodes that were filtered out.
+  { key: 'CMT-241', projectId: P_COMET, type: 'B', title: 'Reorder of states corrupts saved view state when filter is active', status: 'in-review', priority: 'urgent', assigneeUserId: U['maya@acme.com'], labels: ['regression', 'workflow'], updated: '2h ago', estimate: 3, startDate: '2026-04-22', endDate: '2026-04-29', relatedTo: ['CMT-229'], description: `Saving the workflow editor's view state (filter chips, expanded sections) writes through a debounced effect. When a state node is reordered while a filter is active, the persisted slot order is computed from the visible subset and reapplied to the full set on reload — silently dropping nodes that were filtered out.
 
 Repro:
 1. Open /comet/workflow
@@ -231,26 +287,26 @@ const persist = debounce((view) => {
   storage.set('workflow:order', next);
 }, 250);
 \`\`\`` },
-  { id: 'CMT-238', project: 'comet', type: 'S', title: 'Allow workspace admins to fork the default workflow per project', status: 'in-progress', priority: 'high', assignee: 'Jordan Lee', labels: ['workflow', 'admin'], updated: '4h ago', estimate: 8, parent: 'CMT-232' },
-  { id: 'CMT-237', project: 'comet', type: 'T', title: 'Document the 5 transition rule types in /help', status: 'todo', priority: 'med', assignee: 'Priya Rao', labels: ['docs'], updated: 'yesterday', estimate: 2, endDate: '2026-05-04', parent: 'CMT-232', dependsOn: ['CMT-234'] },
-  { id: 'CMT-235', project: 'comet', type: 'B', title: 'Self-loop edges render outside node hit area at zoom < 60%', status: 'todo', priority: 'low', assignee: 'Maya Chen', labels: ['workflow'], updated: '2d ago', estimate: 1 },
-  { id: 'CMT-234', project: 'comet', type: 'T', title: 'Add bulk-edit support for status and assignee on board view', status: 'in-progress', priority: 'high', assignee: 'Sam Park', labels: ['board'], updated: '1d ago', estimate: 5, startDate: '2026-04-20', endDate: '2026-05-01', dependedOnBy: ['CMT-237'] },
-  { id: 'CMT-232', project: 'comet', type: 'E', title: 'Custom field schema per project', status: 'backlog', priority: 'high', assignee: 'Jordan Lee', labels: ['fields', 'q3'], updated: '3d ago', estimate: 21, children: ['CMT-238', 'CMT-237', 'CMT-230', 'CMT-223', 'CMT-220'] },
-  { id: 'CMT-230', project: 'comet', type: 'S', title: 'Auto-archive Done issues after 30 days', status: 'in-review', priority: 'med', assignee: 'Sam Park', labels: ['retention'], updated: '5h ago', estimate: 3, parent: 'CMT-232' },
-  { id: 'CMT-229', project: 'comet', type: 'B', title: 'Cycle detection misses A→B→A back-edges in graph linter', status: 'in-progress', priority: 'urgent', assignee: 'Maya Chen', labels: ['workflow'], updated: '8h ago', estimate: 5, startDate: '2026-04-24', endDate: '2026-04-28', relatedTo: ['CMT-241'] },
-  { id: 'CMT-227', project: 'comet', type: 'T', title: 'Slug validation on workspace creation', status: 'done', priority: 'med', assignee: 'Priya Rao', labels: ['onboarding'], updated: '1d ago', estimate: 2, startDate: '2026-04-21', endDate: '2026-04-25' },
-  { id: 'CMT-225', project: 'comet', type: 'B', title: 'Empty state on inbox triggers layout flash on first load', status: 'todo', priority: 'low', assignee: 'Sam Park', labels: ['frontend'], updated: '4d ago', estimate: 2 },
-  { id: 'CMT-223', project: 'comet', type: 'S', title: 'Slack-style /commands in comments', status: 'backlog', priority: 'med', assignee: 'Jordan Lee', labels: ['comments'], updated: '1w ago', estimate: 8, parent: 'CMT-232' },
-  { id: 'CMT-220', project: 'comet', type: 'T', title: 'Export workflow as YAML', status: 'backlog', priority: 'low', assignee: 'Priya Rao', labels: ['workflow'], updated: '1w ago', estimate: 3, parent: 'CMT-232' },
+  { key: 'CMT-238', projectId: P_COMET, type: 'S', title: 'Allow workspace admins to fork the default workflow per project', status: 'in-progress', priority: 'high', assigneeUserId: U['jordan@acme.com'], labels: ['workflow', 'admin'], updated: '4h ago', estimate: 8, parent: 'CMT-232' },
+  { key: 'CMT-237', projectId: P_COMET, type: 'T', title: 'Document the 5 transition rule types in /help', status: 'todo', priority: 'med', assigneeUserId: U['priya@acme.com'], labels: ['docs'], updated: 'yesterday', estimate: 2, endDate: '2026-05-04', parent: 'CMT-232', dependsOn: ['CMT-234'] },
+  { key: 'CMT-235', projectId: P_COMET, type: 'B', title: 'Self-loop edges render outside node hit area at zoom < 60%', status: 'todo', priority: 'low', assigneeUserId: U['maya@acme.com'], labels: ['workflow'], updated: '2d ago', estimate: 1 },
+  { key: 'CMT-234', projectId: P_COMET, type: 'T', title: 'Add bulk-edit support for status and assignee on board view', status: 'in-progress', priority: 'high', assigneeUserId: U['sam@acme.com'], labels: ['board'], updated: '1d ago', estimate: 5, startDate: '2026-04-20', endDate: '2026-05-01', dependedOnBy: ['CMT-237'] },
+  { key: 'CMT-232', projectId: P_COMET, type: 'E', title: 'Custom field schema per project', status: 'backlog', priority: 'high', assigneeUserId: U['jordan@acme.com'], labels: ['fields', 'q3'], updated: '3d ago', estimate: 21, children: ['CMT-238', 'CMT-237', 'CMT-230', 'CMT-223', 'CMT-220'] },
+  { key: 'CMT-230', projectId: P_COMET, type: 'S', title: 'Auto-archive Done issues after 30 days', status: 'in-review', priority: 'med', assigneeUserId: U['sam@acme.com'], labels: ['retention'], updated: '5h ago', estimate: 3, parent: 'CMT-232' },
+  { key: 'CMT-229', projectId: P_COMET, type: 'B', title: 'Cycle detection misses A→B→A back-edges in graph linter', status: 'in-progress', priority: 'urgent', assigneeUserId: U['maya@acme.com'], labels: ['workflow'], updated: '8h ago', estimate: 5, startDate: '2026-04-24', endDate: '2026-04-28', relatedTo: ['CMT-241'] },
+  { key: 'CMT-227', projectId: P_COMET, type: 'T', title: 'Slug validation on workspace creation', status: 'done', priority: 'med', assigneeUserId: U['priya@acme.com'], labels: ['onboarding'], updated: '1d ago', estimate: 2, startDate: '2026-04-21', endDate: '2026-04-25' },
+  { key: 'CMT-225', projectId: P_COMET, type: 'B', title: 'Empty state on inbox triggers layout flash on first load', status: 'todo', priority: 'low', assigneeUserId: U['sam@acme.com'], labels: ['frontend'], updated: '4d ago', estimate: 2 },
+  { key: 'CMT-223', projectId: P_COMET, type: 'S', title: 'Slack-style /commands in comments', status: 'backlog', priority: 'med', assigneeUserId: U['jordan@acme.com'], labels: ['comments'], updated: '1w ago', estimate: 8, parent: 'CMT-232' },
+  { key: 'CMT-220', projectId: P_COMET, type: 'T', title: 'Export workflow as YAML', status: 'backlog', priority: 'low', assigneeUserId: U['priya@acme.com'], labels: ['workflow'], updated: '1w ago', estimate: 3, parent: 'CMT-232' },
 
   // --- Orbit ---
-  { id: 'ORB-58', project: 'orbit', type: 'S', title: 'Render top-of-funnel chart with project-level filter', status: 'in-progress', priority: 'high', assignee: 'Jordan Lee', labels: ['analytics'], updated: '1h ago', estimate: 5, parent: 'ORB-40', children: ['ORB-52'], relatedTo: ['ORB-55'] },
-  { id: 'ORB-55', project: 'orbit', type: 'B', title: 'Date-range picker drops timezone offset on apply', status: 'in-review', priority: 'urgent', assignee: 'Riley Singh', labels: ['regression', 'analytics'], updated: '3h ago', estimate: 2, startDate: '2026-04-25', endDate: '2026-04-28', relatedTo: ['ORB-58'] },
-  { id: 'ORB-52', project: 'orbit', type: 'T', title: 'Add CSV export for cohort table', status: 'todo', priority: 'med', assignee: 'Jordan Lee', labels: ['exports'], updated: '6h ago', estimate: 3, endDate: '2026-05-10', parent: 'ORB-58', dependsOn: ['ORB-32'] },
-  { id: 'ORB-49', project: 'orbit', type: 'B', title: 'Loading spinner persists after error response', status: 'todo', priority: 'low', assignee: 'Avery Kim', labels: ['frontend'], updated: '2d ago', estimate: 1 },
-  { id: 'ORB-44', project: 'orbit', type: 'S', title: 'Per-user retention view on dashboard', status: 'backlog', priority: 'med', assignee: 'Riley Singh', labels: ['analytics', 'retention'], updated: '4d ago', estimate: 8, parent: 'ORB-40' },
-  { id: 'ORB-40', project: 'orbit', type: 'E', title: 'Cohort analysis revamp', status: 'backlog', priority: 'high', assignee: 'Jordan Lee', labels: ['q3', 'analytics'], updated: '1w ago', estimate: 21, children: ['ORB-58', 'ORB-44', 'ORB-32'] },
-  { id: 'ORB-32', project: 'orbit', type: 'T', title: 'Tighten type-safety on event schema', status: 'done', priority: 'low', assignee: 'Sam Park', labels: ['refactor'], updated: '3d ago', estimate: 2, startDate: '2026-04-17', endDate: '2026-04-24', parent: 'ORB-40', dependedOnBy: ['ORB-52'] },
+  { key: 'ORB-58', projectId: P_ORBIT, type: 'S', title: 'Render top-of-funnel chart with project-level filter', status: 'in-progress', priority: 'high', assigneeUserId: U['jordan@acme.com'], labels: ['analytics'], updated: '1h ago', estimate: 5, parent: 'ORB-40', children: ['ORB-52'], relatedTo: ['ORB-55'] },
+  { key: 'ORB-55', projectId: P_ORBIT, type: 'B', title: 'Date-range picker drops timezone offset on apply', status: 'in-review', priority: 'urgent', assigneeUserId: U['riley@acme.com'], labels: ['regression', 'analytics'], updated: '3h ago', estimate: 2, startDate: '2026-04-25', endDate: '2026-04-28', relatedTo: ['ORB-58'] },
+  { key: 'ORB-52', projectId: P_ORBIT, type: 'T', title: 'Add CSV export for cohort table', status: 'todo', priority: 'med', assigneeUserId: U['jordan@acme.com'], labels: ['exports'], updated: '6h ago', estimate: 3, endDate: '2026-05-10', parent: 'ORB-58', dependsOn: ['ORB-32'] },
+  { key: 'ORB-49', projectId: P_ORBIT, type: 'B', title: 'Loading spinner persists after error response', status: 'todo', priority: 'low', assigneeUserId: U['avery@acme.com'], labels: ['frontend'], updated: '2d ago', estimate: 1 },
+  { key: 'ORB-44', projectId: P_ORBIT, type: 'S', title: 'Per-user retention view on dashboard', status: 'backlog', priority: 'med', assigneeUserId: U['riley@acme.com'], labels: ['analytics', 'retention'], updated: '4d ago', estimate: 8, parent: 'ORB-40' },
+  { key: 'ORB-40', projectId: P_ORBIT, type: 'E', title: 'Cohort analysis revamp', status: 'backlog', priority: 'high', assigneeUserId: U['jordan@acme.com'], labels: ['q3', 'analytics'], updated: '1w ago', estimate: 21, children: ['ORB-58', 'ORB-44', 'ORB-32'] },
+  { key: 'ORB-32', projectId: P_ORBIT, type: 'T', title: 'Tighten type-safety on event schema', status: 'done', priority: 'low', assigneeUserId: U['sam@acme.com'], labels: ['refactor'], updated: '3d ago', estimate: 2, startDate: '2026-04-17', endDate: '2026-04-24', parent: 'ORB-40', dependedOnBy: ['ORB-52'] },
 
   // --- Atlas ---
   // Demo Epic with a small DAG of Task dependencies — useful for verifying
@@ -265,28 +321,28 @@ const persist = debounce((view) => {
   // (Mon-Fri only), and the seeded HOLIDAYS list (May 1 is Labour Day,
   // skipped). Estimates honour ~4 pts/day. ATL-131 is in-progress
   // (today is 2026-04-29); the rest sit in backlog awaiting predecessors.
-  { id: 'ATL-136', project: 'atlas', type: 'T', title: 'QA pass on device farm against new tile format', status: 'backlog', priority: 'med', assignee: 'Sam Park', labels: ['qa', 'offline'], updated: '1d ago', estimate: 4, startDate: '2026-05-15', endDate: '2026-05-18', parent: 'ATL-130', dependsOn: ['ATL-135'] },
-  { id: 'ATL-135', project: 'atlas', type: 'T', title: 'Add compaction metrics + Grafana panels', status: 'backlog', priority: 'med', assignee: 'Avery Kim', labels: ['observability'], updated: '1d ago', estimate: 6, startDate: '2026-05-12', endDate: '2026-05-14', parent: 'ATL-130', dependsOn: ['ATL-133', 'ATL-134'], dependedOnBy: ['ATL-136'] },
-  { id: 'ATL-134', project: 'atlas', type: 'T', title: 'Update tile reader to handle compacted format', status: 'backlog', priority: 'high', assignee: 'Priya Rao', labels: ['offline', 'reader'], updated: '1d ago', estimate: 8, startDate: '2026-05-07', endDate: '2026-05-11', parent: 'ATL-130', dependsOn: ['ATL-132'], dependedOnBy: ['ATL-135'] },
-  { id: 'ATL-133', project: 'atlas', type: 'T', title: 'Migrate stored tiles to compacted format in place', status: 'backlog', priority: 'high', assignee: 'Maya Chen', labels: ['offline', 'migration'], updated: '1d ago', estimate: 8, startDate: '2026-05-07', endDate: '2026-05-11', parent: 'ATL-130', dependsOn: ['ATL-132'], dependedOnBy: ['ATL-135'] },
+  { key: 'ATL-136', projectId: P_ATLAS, type: 'T', title: 'QA pass on device farm against new tile format', status: 'backlog', priority: 'med', assigneeUserId: U['sam@acme.com'], labels: ['qa', 'offline'], updated: '1d ago', estimate: 4, startDate: '2026-05-15', endDate: '2026-05-18', parent: 'ATL-130', dependsOn: ['ATL-135'] },
+  { key: 'ATL-135', projectId: P_ATLAS, type: 'T', title: 'Add compaction metrics + Grafana panels', status: 'backlog', priority: 'med', assigneeUserId: U['avery@acme.com'], labels: ['observability'], updated: '1d ago', estimate: 6, startDate: '2026-05-12', endDate: '2026-05-14', parent: 'ATL-130', dependsOn: ['ATL-133', 'ATL-134'], dependedOnBy: ['ATL-136'] },
+  { key: 'ATL-134', projectId: P_ATLAS, type: 'T', title: 'Update tile reader to handle compacted format', status: 'backlog', priority: 'high', assigneeUserId: U['priya@acme.com'], labels: ['offline', 'reader'], updated: '1d ago', estimate: 8, startDate: '2026-05-07', endDate: '2026-05-11', parent: 'ATL-130', dependsOn: ['ATL-132'], dependedOnBy: ['ATL-135'] },
+  { key: 'ATL-133', projectId: P_ATLAS, type: 'T', title: 'Migrate stored tiles to compacted format in place', status: 'backlog', priority: 'high', assigneeUserId: U['maya@acme.com'], labels: ['offline', 'migration'], updated: '1d ago', estimate: 8, startDate: '2026-05-07', endDate: '2026-05-11', parent: 'ATL-130', dependsOn: ['ATL-132'], dependedOnBy: ['ATL-135'] },
   // ATL-132 starts Mon May 4 because Fri May 1 is a holiday (Labour Day).
-  { id: 'ATL-132', project: 'atlas', type: 'T', title: 'Implement compaction algorithm', status: 'backlog', priority: 'high', assignee: 'Maya Chen', labels: ['offline'], updated: '1d ago', estimate: 12, startDate: '2026-05-04', endDate: '2026-05-06', parent: 'ATL-130', dependsOn: ['ATL-131'], dependedOnBy: ['ATL-133', 'ATL-134'] },
-  { id: 'ATL-131', project: 'atlas', type: 'T', title: 'Audit current cache schema and pick compaction target', status: 'in-progress', priority: 'high', assignee: 'Maya Chen', labels: ['offline', 'spike'], updated: '2h ago', estimate: 4, startDate: '2026-04-29', endDate: '2026-04-30', parent: 'ATL-130', dependedOnBy: ['ATL-132'] },
-  { id: 'ATL-130', project: 'atlas', type: 'E', title: 'Offline tile compaction', status: 'in-progress', priority: 'high', assignee: 'Maya Chen', labels: ['offline', 'q2'], updated: '2h ago', estimate: 42, children: ['ATL-131', 'ATL-132', 'ATL-133', 'ATL-134', 'ATL-135', 'ATL-136'] },
+  { key: 'ATL-132', projectId: P_ATLAS, type: 'T', title: 'Implement compaction algorithm', status: 'backlog', priority: 'high', assigneeUserId: U['maya@acme.com'], labels: ['offline'], updated: '1d ago', estimate: 12, startDate: '2026-05-04', endDate: '2026-05-06', parent: 'ATL-130', dependsOn: ['ATL-131'], dependedOnBy: ['ATL-133', 'ATL-134'] },
+  { key: 'ATL-131', projectId: P_ATLAS, type: 'T', title: 'Audit current cache schema and pick compaction target', status: 'in-progress', priority: 'high', assigneeUserId: U['maya@acme.com'], labels: ['offline', 'spike'], updated: '2h ago', estimate: 4, startDate: '2026-04-29', endDate: '2026-04-30', parent: 'ATL-130', dependedOnBy: ['ATL-132'] },
+  { key: 'ATL-130', projectId: P_ATLAS, type: 'E', title: 'Offline tile compaction', status: 'in-progress', priority: 'high', assigneeUserId: U['maya@acme.com'], labels: ['offline', 'q2'], updated: '2h ago', estimate: 42, children: ['ATL-131', 'ATL-132', 'ATL-133', 'ATL-134', 'ATL-135', 'ATL-136'] },
   // Fire-drill bug for Maya — overlaps ATL-118 + ATL-131 on Apr 29-30 to
   // demo the per-assignee daily-load overlay (Maya hits ~6 pts/day on
   // those two days, 1.5× the 4/day ideal).
-  { id: 'ATL-119', project: 'atlas', type: 'B', title: 'Tile prefetch corrupts cache index on simultaneous writes', status: 'in-progress', priority: 'urgent', assignee: 'Maya Chen', labels: ['offline', 'regression'], updated: '15m ago', estimate: 6, startDate: '2026-04-29', endDate: '2026-04-30' },
-  { id: 'ATL-118', project: 'atlas', type: 'B', title: 'Map tiles fail to load when offline cache is full', status: 'in-progress', priority: 'urgent', assignee: 'Maya Chen', labels: ['offline', 'map'], updated: '45m ago', estimate: 5, startDate: '2026-04-26', endDate: '2026-04-30' },
-  { id: 'ATL-115', project: 'atlas', type: 'S', title: 'Pinch-zoom acceleration curve on mobile', status: 'in-review', priority: 'med', assignee: 'Jordan Lee', labels: ['mobile', 'map'], updated: '2h ago', estimate: 3, parent: 'ATL-100' },
-  { id: 'ATL-112', project: 'atlas', type: 'T', title: 'Migrate icon set to Lucide v2', status: 'todo', priority: 'low', assignee: 'Priya Rao', labels: ['frontend'], updated: '1d ago', estimate: 2, endDate: '2026-05-15' },
-  { id: 'ATL-110', project: 'atlas', type: 'S', title: 'Cluster overlay markers above zoom 14', status: 'todo', priority: 'high', assignee: 'Jordan Lee', labels: ['map'], updated: '2d ago', estimate: 5, parent: 'ATL-100' },
-  { id: 'ATL-104', project: 'atlas', type: 'B', title: 'GPX import drops elevation column', status: 'backlog', priority: 'med', assignee: 'Avery Kim', labels: ['imports'], updated: '5d ago', estimate: 3 },
-  { id: 'ATL-100', project: 'atlas', type: 'E', title: 'Real-time location sharing for teams', status: 'backlog', priority: 'high', assignee: 'Maya Chen', labels: ['q4', 'collaboration'], updated: '2w ago', estimate: 34, children: ['ATL-115', 'ATL-110'] },
-  { id: 'ATL-98',  project: 'atlas', type: 'T', title: 'Tile server health check endpoint', status: 'done', priority: 'med', assignee: 'Sam Park', labels: ['ops'], updated: '6d ago', estimate: 2, startDate: '2026-04-14', endDate: '2026-04-21' },
+  { key: 'ATL-119', projectId: P_ATLAS, type: 'B', title: 'Tile prefetch corrupts cache index on simultaneous writes', status: 'in-progress', priority: 'urgent', assigneeUserId: U['maya@acme.com'], labels: ['offline', 'regression'], updated: '15m ago', estimate: 6, startDate: '2026-04-29', endDate: '2026-04-30' },
+  { key: 'ATL-118', projectId: P_ATLAS, type: 'B', title: 'Map tiles fail to load when offline cache is full', status: 'in-progress', priority: 'urgent', assigneeUserId: U['maya@acme.com'], labels: ['offline', 'map'], updated: '45m ago', estimate: 5, startDate: '2026-04-26', endDate: '2026-04-30' },
+  { key: 'ATL-115', projectId: P_ATLAS, type: 'S', title: 'Pinch-zoom acceleration curve on mobile', status: 'in-review', priority: 'med', assigneeUserId: U['jordan@acme.com'], labels: ['mobile', 'map'], updated: '2h ago', estimate: 3, parent: 'ATL-100' },
+  { key: 'ATL-112', projectId: P_ATLAS, type: 'T', title: 'Migrate icon set to Lucide v2', status: 'todo', priority: 'low', assigneeUserId: U['priya@acme.com'], labels: ['frontend'], updated: '1d ago', estimate: 2, endDate: '2026-05-15' },
+  { key: 'ATL-110', projectId: P_ATLAS, type: 'S', title: 'Cluster overlay markers above zoom 14', status: 'todo', priority: 'high', assigneeUserId: U['jordan@acme.com'], labels: ['map'], updated: '2d ago', estimate: 5, parent: 'ATL-100' },
+  { key: 'ATL-104', projectId: P_ATLAS, type: 'B', title: 'GPX import drops elevation column', status: 'backlog', priority: 'med', assigneeUserId: U['avery@acme.com'], labels: ['imports'], updated: '5d ago', estimate: 3 },
+  { key: 'ATL-100', projectId: P_ATLAS, type: 'E', title: 'Real-time location sharing for teams', status: 'backlog', priority: 'high', assigneeUserId: U['maya@acme.com'], labels: ['q4', 'collaboration'], updated: '2w ago', estimate: 34, children: ['ATL-115', 'ATL-110'] },
+  { key: 'ATL-98',  projectId: P_ATLAS, type: 'T', title: 'Tile server health check endpoint', status: 'done', priority: 'med', assigneeUserId: U['sam@acme.com'], labels: ['ops'], updated: '6d ago', estimate: 2, startDate: '2026-04-14', endDate: '2026-04-21' },
 ];
 
-export const issueById = (id: string) => ISSUES.find((i) => i.id === id);
+export const issueByKey = (key: string) => ISSUES.find((i) => i.key === key);
 
 /**
  * Working week — Mon-Fri only. Saturday and Sunday are non-working
@@ -453,15 +509,6 @@ export function dependsOnWouldCycle(
 }
 
 // ---------------------------------------------------------------------------
-// Current user
-// ---------------------------------------------------------------------------
-
-export const CURRENT_USER = {
-  name: 'Jordan Lee',
-  email: 'jordan@acme.com',
-};
-
-// ---------------------------------------------------------------------------
 // Tenants + Workspaces
 // ---------------------------------------------------------------------------
 //
@@ -480,43 +527,27 @@ export type Role = 'admin' | 'write' | 'read';
 export type TenantRole = Role;
 
 export interface Tenant {
+  /** UUID — present on API-sourced tenants; optional on legacy fixtures. */
+  id?: string;
   /** URL slug. Lowercase a-z, 0-9, dashes. Globally unique. */
   slug: string;
   name: string;
   letter: string;
   color: string;
   bg: string;
-  /** Counts shown on the picker — hardcoded in the prototype. */
-  workspaceCount: number;
-  memberCount: number;
-  /** Effective tenant role of the current user. */
-  role: TenantRole;
-  /** Active/deactivated lifecycle state. Optional — absent on fixture seeds. */
+  /** Active/deactivated lifecycle state. */
   status?: 'active' | 'deactivated';
+  /**
+   * Per-user fields below — not present on the public picker response.
+   * Resolved post-login via the workspace/membership APIs.
+   */
+  workspaceCount?: number;
+  memberCount?: number;
+  role?: TenantRole;
 }
 
-export const TENANTS: Tenant[] = [
-  {
-    slug: 'dreamstreet',
-    name: 'DreamStreet',
-    letter: 'D',
-    color: '#4f46e5',
-    bg: '#e0e7ff',
-    workspaceCount: 0,
-    memberCount: 1,
-    role: 'admin',
-  },
-  {
-    slug: 'acme-corp',
-    name: 'Acme Corp',
-    letter: 'A',
-    color: '#0891b2',
-    bg: '#cffafe',
-    workspaceCount: 3,
-    memberCount: 6,
-    role: 'admin',
-  },
-];
+/** @deprecated Tenants are loaded from `GET /api/tenants` via `useTenants()`. Kept for typing only. */
+export const TENANTS: Tenant[] = [];
 
 export const RESERVED_TENANT_SLUGS = new Set<string>([
   'login', 'setup', 'invite', 'tenants', 'workspaces', 'design-canvas', 'profile',
@@ -593,6 +624,8 @@ export const RESERVED_WORKSPACE_SLUGS = new Set<string>([
 // derived (see `workspaceMembersDerived`), not stored.
 
 export interface TenantMember {
+  /** Stable UUID — primary identity matching the BE. Never rendered. */
+  id: string;
   email: string;
   name: string;
   tenantRole: TenantRole;
@@ -600,18 +633,28 @@ export interface TenantMember {
   status: 'active' | 'invited' | 'deactivated';
 }
 
-/** Tenant-keyed roster. Single source of truth for who exists in a tenant. */
+/**
+ * Tenant-keyed roster.
+ *
+ * @deprecated Workspace user directory is sourced from the API as of slice
+ * 13 FE (2026-05-06) — see `useUsers()` in `src/state/users.tsx`, which now
+ * fetches from `GET /api/tenants/:t/workspaces/:w/members`. This fixture is
+ * still consumed by the design canvas (reference UI) and by
+ * `projectEffectiveMembers` (workspace-members fixture path, separately
+ * deprecated by slice 2 FE). Don't import it from new code; resolve user
+ * ids via `useUsers().getUser(uuid)` instead.
+ */
 export const TENANT_MEMBERS: Record<string, TenantMember[]> = {
   'dreamstreet': [
-    { email: 'admin@dreamstreet.io', name: 'Dream Admin', tenantRole: 'admin', lastSeen: 'just now', status: 'active' },
+    { id: SEED_USER_IDS['admin@dreamstreet.io'], email: 'admin@dreamstreet.io', name: 'Dream Admin', tenantRole: 'admin', lastSeen: 'just now', status: 'active' },
   ],
   'acme-corp': [
-    { email: 'jordan@acme.com', name: 'Jordan Lee',  tenantRole: 'admin', lastSeen: 'just now',    status: 'active' },
-    { email: 'maya@acme.com',   name: 'Maya Chen',   tenantRole: 'write', lastSeen: '12 min ago',  status: 'active' },
-    { email: 'sam@acme.com',    name: 'Sam Park',    tenantRole: 'write', lastSeen: '3h ago',      status: 'active' },
-    { email: 'priya@acme.com',  name: 'Priya Rao',   tenantRole: 'write', lastSeen: 'yesterday',   status: 'active' },
-    { email: 'riley@acme.com',  name: 'Riley Singh', tenantRole: 'write', lastSeen: 'pending',     status: 'invited' },
-    { email: 'avery@acme.com',  name: 'Avery Kim',   tenantRole: 'read',  lastSeen: '4 weeks ago', status: 'deactivated' },
+    { id: SEED_USER_IDS['jordan@acme.com'], email: 'jordan@acme.com', name: 'Jordan Lee',  tenantRole: 'admin', lastSeen: 'just now',    status: 'active' },
+    { id: SEED_USER_IDS['maya@acme.com'],   email: 'maya@acme.com',   name: 'Maya Chen',   tenantRole: 'write', lastSeen: '12 min ago',  status: 'active' },
+    { id: SEED_USER_IDS['sam@acme.com'],    email: 'sam@acme.com',    name: 'Sam Park',    tenantRole: 'write', lastSeen: '3h ago',      status: 'active' },
+    { id: SEED_USER_IDS['priya@acme.com'],  email: 'priya@acme.com',  name: 'Priya Rao',   tenantRole: 'write', lastSeen: 'yesterday',   status: 'active' },
+    { id: SEED_USER_IDS['riley@acme.com'],  email: 'riley@acme.com',  name: 'Riley Singh', tenantRole: 'write', lastSeen: 'pending',     status: 'invited' },
+    { id: SEED_USER_IDS['avery@acme.com'],  email: 'avery@acme.com',  name: 'Avery Kim',   tenantRole: 'read',  lastSeen: '4 weeks ago', status: 'deactivated' },
   ],
 };
 
@@ -627,6 +670,11 @@ export interface WorkspaceMemberAccess {
  * tenant -> workspace -> explicit access list. Tenant admins are NOT listed
  * here (they inherit admin everywhere). Users in this list have explicit
  * grants regardless of their tenant role.
+ *
+ * @deprecated Workspace membership is sourced from the API as of slice 2 FE
+ * (2026-05-05). Use `useWorkspaceMembers()` from
+ * `web/src/state/workspace-members.tsx`. Kept only for the design canvas and
+ * the legacy `workspaceMembersDerived()` helper which is itself deprecated.
  */
 export const WORKSPACE_ACCESS: Record<string, Record<string, WorkspaceMemberAccess[]>> = {
   'acme-corp': {
@@ -656,7 +704,14 @@ export type WorkspaceMemberProvenance =
   | { kind: 'explicit' }
   | { kind: 'project'; projectSlugs: string[] };
 
-/** Derived row shape for the workspace-level Members view. */
+/**
+ * Derived row shape for the workspace-level Members view.
+ *
+ * @deprecated Use `WorkspaceMember` from
+ * `web/src/api/adapters/workspaceMember.adapter.ts` (the API-backed entity
+ * surfaced via `useWorkspaceMembers()`). Kept only for the legacy
+ * `workspaceMembersDerived()` helper which is itself deprecated.
+ */
 export interface WorkspaceMemberView {
   email: string;
   name: string;
@@ -666,6 +721,14 @@ export interface WorkspaceMemberView {
   status: 'active' | 'invited' | 'deactivated';
 }
 
+/**
+ * @deprecated Slice 3 FE (2026-05-05) — teams ship from the API as of this
+ * slice. Use `Team` from `web/src/api/adapters/team.adapter.ts` and the
+ * `useTeams()` hook from `web/src/state/teams.tsx`. Kept for the design
+ * canvas and the slice-4-pending project-access surfaces
+ * (`project-members.tsx`, `member-profile.tsx`) which still read the
+ * fixture roster + `memberEmails`.
+ */
 export interface Team {
   /** Used in URLs and sidebar items (lowercase). */
   slug: string;
@@ -676,6 +739,11 @@ export interface Team {
   memberEmails: string[];
 }
 
+/**
+ * @deprecated Slice 3 FE (2026-05-05) — use `useTeams()` from
+ * `web/src/state/teams.tsx`. Project-access surfaces still read this
+ * directly until slice 4 retires them.
+ */
 export const TEAMS: Team[] = [
   {
     slug: 'backend', name: 'Backend',
@@ -697,9 +765,21 @@ export const TEAMS: Team[] = [
   },
 ];
 
+/** @deprecated Slice 3 FE — use `useTeams().getTeam(slug)` from `web/src/state/teams.tsx`. */
 export const teamBySlug = (slug: string) => TEAMS.find((t) => t.slug === slug);
 
-/** Effective members of a project (deduped union of team members + explicit users). */
+/**
+ * Effective members of a project (deduped union of team members + explicit users).
+ *
+ * @deprecated Slice 4 FE (2026-05-05) — project access ships from the API.
+ * Consume `useProjectAccess().effective` instead (provider in
+ * `web/src/state/project-access.tsx`). The BE owns the precedence rule
+ * (`explicit-user > tenant-admin > workspace-admin > team`); this fixture
+ * helper only knows about the team-union + explicit-user shape and silently
+ * drops admin precedence — don't add new readers. Runtime is preserved for
+ * the design canvas + remaining fixture-driven screens (board, projects)
+ * until they're rewired in their own slices.
+ */
 export function projectEffectiveMembers(project: Project, tenant: string): TenantMember[] {
   const emails = new Set<string>(project.userEmails);
   for (const slug of project.teamSlugs) {
@@ -724,6 +804,11 @@ export function projectEffectiveMembers(project: Project, tenant: string): Tenan
  *
  * The caller passes the workspace's projects (from `useProjects()`) so this
  * function stays a pure read over fixtures + the user-mutable project list.
+ *
+ * @deprecated Slice 2 FE (2026-05-05) — workspace membership ships from the
+ * API; effective role is computed BE-side and surfaced via
+ * `WorkspaceMember.effectiveRole` from `useWorkspaceMembers()`. Don't add
+ * new readers; remove the helper once the design canvas is reworked.
  */
 export function effectiveWorkspaceRole(
   tenant: string,
@@ -760,6 +845,10 @@ export function effectiveWorkspaceRole(
  * Order: inherited (tenant admins) first, then explicit grants, then implicit
  * project-only members. Within each group, ordered by tenant member insertion
  * order.
+ *
+ * @deprecated Slice 2 FE (2026-05-05) — Settings → Members reads from the
+ * API via `useWorkspaceMembers()`. Kept only for callers that haven't been
+ * migrated yet (e.g. the design canvas). Don't add new readers.
  */
 export function workspaceMembersDerived(
   tenant: string,
@@ -791,14 +880,22 @@ export function workspaceMembersDerived(
 }
 
 // ---------------------------------------------------------------------------
-// Workflows
+// Workflows  ── @deprecated as of slice 8 (2026-05-05)
 // ---------------------------------------------------------------------------
 //
 // Workflows are first-class. Each (project, issue_type) pair selects exactly
 // one workflow id. Two projects can share a workflow or each pick a different
 // one. The fixture below intentionally gives Epic two flavors so the editor
 // shows different graphs for Comet/Orbit vs Atlas.
+//
+// **Slice 8 (2026-05-05)** — workflow surfaces switched to API. The fixture
+// stays only for the design-canvas variants (which reference graph shapes
+// inline). Runtime callers MUST go through `useWorkflows()` /
+// `useProjectWorkflows()` from `web/src/state/workflows.tsx`. Don't add
+// new readers of `WORKFLOWS` or `DEFAULT_PROJECT_WORKFLOWS` outside the
+// design canvas.
 
+/** @deprecated Slice 8 — use `WorkflowNode` from `web/src/api/adapters/workflow.adapter.ts`. */
 export interface WorkflowNode {
   id: string;
   statusId: string;
@@ -810,6 +907,7 @@ export interface WorkflowNode {
   terminal?: boolean;
 }
 
+/** @deprecated Slice 8 — use `WorkflowEdge` from `web/src/api/adapters/workflow.adapter.ts`. */
 export interface WorkflowEdge {
   id: string;
   from: string;
@@ -818,6 +916,7 @@ export interface WorkflowEdge {
   dashed?: boolean;
 }
 
+/** @deprecated Slice 8 — use `Workflow` from `web/src/api/adapters/workflow.adapter.ts`. */
 export interface WorkflowDef {
   id: string;
   name: string;
@@ -826,6 +925,7 @@ export interface WorkflowDef {
   edges: WorkflowEdge[];
 }
 
+/** @deprecated Slice 8 — use `useWorkflows()` from `web/src/state/workflows.tsx`. */
 export const WORKFLOWS: Record<string, WorkflowDef> = {
   default: {
     id: 'default',
@@ -891,6 +991,11 @@ export const WORKFLOWS: Record<string, WorkflowDef> = {
 /**
  * Default workflow assignment for a brand-new project. Tasks/Bugs/Stories
  * use the standard six-state flow; Epics use the loose three-state flow.
+ *
+ * @deprecated Slice 8 — the BE seeds defaults at project create-time and
+ * `useProjectWorkflows()` is the read surface. This map is kept only as
+ * a placeholder for the FE create-project form (which doesn't push
+ * workflow picks to the API yet).
  */
 export const DEFAULT_PROJECT_WORKFLOWS: Record<IssueTypeLetter, string> = {
   T: 'default', B: 'default', S: 'default', E: 'epic-coarse',

@@ -1,4 +1,5 @@
 import { required, toISO } from './utils.js';
+import { EntityError } from '../lib/errors.js';
 
 const ENTITY = 'Comment';
 
@@ -37,7 +38,7 @@ export class Comment {
     required(row.createdAt, ENTITY, 'createdAt');
 
     if (!row.body || row.body.length === 0) {
-      throw new Error(`${ENTITY}.body must be non-empty`);
+      throw new EntityError(`${ENTITY}.body must be non-empty`, ENTITY, 'body');
     }
 
     this.id = row.id;

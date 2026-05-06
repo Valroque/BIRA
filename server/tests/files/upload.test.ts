@@ -47,9 +47,11 @@ describe('POST /api/tenants/:t/workspaces/:w/files', () => {
     expect(data.sha256).toMatch(/^[0-9a-f]{64}$/);
     expect(data.uploaderUserId).toBeTruthy();
     expect(data.createdAt).toBeTruthy();
-    // readUrl must point at the canonical download endpoint
-    expect(data.readUrl).toBe(
-      `/api/tenants/${tenant.slug}/workspaces/${ws.slug}/files/${data.id}`
+    // readUrl is the signed-URL form served by the public files route
+    // (powers `<img src>` cross-origin loads — see `feedback_xorigin_asset_checklist.md`).
+    // Shape: <PUBLIC_API_URL>/api/files/<id>?sig=<hex>&exp=<unix-seconds>.
+    expect(data.readUrl).toMatch(
+      new RegExp(`^https?://[^/]+/api/files/${data.id}\\?sig=[0-9a-f]+&exp=\\d+$`)
     );
   });
 

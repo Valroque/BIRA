@@ -4,11 +4,12 @@ import { Fragment } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { Icon } from './icons';
 import { NotificationsButton, UserMenu } from './topbar-menus';
-import { ISSUES, CURRENT_USER, TEAMS } from '../fixtures';
 import { useProjects } from '../state/projects';
 import { useWorkspaces } from '../state/workspaces';
 import { useTenants } from '../state/tenants';
 import { useIssues } from '../state/issues';
+import { useAuth } from '../state/auth';
+import { useTeams } from '../state/teams';
 
 /**
  * Read tenant + workspace + project from the URL. Empty-string fallback when
@@ -183,8 +184,8 @@ export const Sidebar = ({ collapsed = false, active = '' }: SidebarProps) => {
   const { tenant, workspace } = useTenantContext();
   const { projects } = useProjects();
   const { issues } = useIssues();
-  const { getWorkspace } = useWorkspaces();
-  const ws = getWorkspace(workspace);
+  const { user } = useAuth();
+  const { teams } = useTeams();
   // Active projects render in the sidebar; archived ones are reachable via
   // the All-projects page only. Sub-items (Board / Issues / Workflow) expand
   // under whichever project the URL is currently scoped to.
@@ -192,8 +193,8 @@ export const Sidebar = ({ collapsed = false, active = '' }: SidebarProps) => {
   // Issues belonging to projects that exist in this workspace. Drives the
   // counts on the My-issues / All-issues sidebar items so a fresh workspace
   // shows 0 instead of the global fixture total.
-  const projectSlugs = new Set(projects.map((p) => p.slug));
-  const workspaceIssues = issues.filter((i) => projectSlugs.has(i.project));
+  const projectIds = new Set(projects.map((p) => p.id));
+  const workspaceIssues = issues.filter((i) => projectIds.has(i.projectId));
 
   /**
    * Sidebar Item.
@@ -266,50 +267,13 @@ export const Sidebar = ({ collapsed = false, active = '' }: SidebarProps) => {
       width: w, background: 'var(--bg-subtle)', borderRight: '1px solid var(--border-muted)',
       display: 'flex', flexDirection: 'column', flexShrink: 0, transition: 'width .2s ease',
     }}>
-      {/* Workspace header — clicking returns to the workspace picker.
-          Tenant identity is intentionally NOT surfaced here: once you're
-          signed in, the URL + breadcrumbs already establish which tenant
-          you're in. Tenant chips live on anonymous surfaces (tenant picker,
-          login). Bottom-of-sidebar "Tenant settings" item is the in-app
-          path to tenant-level management. */}
-      <Link
-        to={`/${tenant}/workspaces`}
-        title={collapsed ? `${ws?.name ?? workspace} — Switch workspace` : undefined}
-        data-tip={!collapsed ? 'Switch workspace' : undefined}
-        style={{
-          height: 44, padding: collapsed ? 0 : '0 10px',
-          display: 'flex', alignItems: 'center', justifyContent: collapsed ? 'center' : 'flex-start',
-          gap: 8, borderBottom: '1px solid var(--border-muted)',
-          textDecoration: 'none', color: 'inherit',
-        }}
-      >
-        <div style={{
-          width: 26, height: 26, borderRadius: 6,
-          background: ws?.bg ?? 'linear-gradient(135deg, var(--accent), #6366f1)',
-          color: ws?.color ?? '#fff',
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-          fontWeight: 700, fontSize: 12, letterSpacing: -0.5, flexShrink: 0,
-        }}>{ws?.letter ?? 'B'}</div>
-        {!collapsed && (
-          <>
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <div style={{ fontSize: 13, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                {ws?.name ?? workspace}
-              </div>
-              <div style={{ fontSize: 11, color: 'var(--fg-faint)', fontFamily: 'var(--font-mono)' }}>bira/{tenant}/{workspace}</div>
-            </div>
-            <Icon name="chevronsLeft" size={14} color="var(--fg-faint)" />
-          </>
-        )}
-      </Link>
-
-      <div className="scroll" style={{ flex: 1, overflow: 'auto', padding: '8px 0' }}>
+      <div className="scroll" style={{ flex: 1, overflow: 'auto', padding: '12px 0' }}>
         {/* Counts are derived from issues whose project belongs to the
             current workspace — so a fresh workspace with no projects shows
             "0", not the global fixture total. */}
         <Item id="inbox"      icon="inbox" label="Inbox"      to={`/${tenant}/${workspace}/inbox`} count={3} />
         <Item id="my-issues"  icon="user"  label="My issues"  to={`/${tenant}/${workspace}/my-issues`}
-              count={workspaceIssues.filter((i) => i.assignee === CURRENT_USER.name).length} />
+              count={user ? workspaceIssues.filter((i) => i.assigneeUserId === user.id).length : 0} />
         <Item id="all-issues" icon="list"  label="All issues" to={`/${tenant}/${workspace}/all-issues`}
               count={workspaceIssues.length} />
 
@@ -352,7 +316,7 @@ export const Sidebar = ({ collapsed = false, active = '' }: SidebarProps) => {
 
         <Section label="Teams">
           <Item id="all-teams" icon="users" label="All teams" to={`/${tenant}/${workspace}/teams`} />
-          {TEAMS.map((t) => (
+          {teams.map((t) => (
             <Item
               key={t.slug}
               id={`team-${t.slug}`}
@@ -451,17 +415,17 @@ export const Chip = ({ children, onX, dim, style }: ChipProps) => (
 
 /**
  * Standard `to` URLs for the project tabs. Re-exported so screens don't
- * each invent their own paths. The Issues count defaults to the live
- * fixture count for `project`; pass `opts.issueCount` to override (e.g.
- * to show a filtered count).
+ * each invent their own paths. The Issues count is best-effort — pass
+ * `opts.issueCount` if the caller already has the real number; otherwise
+ * the badge is omitted (rather than synthesised from a fixture, which
+ * would lie now that issues come from the API).
  */
 export function projectTabs(tenant: string, workspace: string, project: string, opts?: { issueCount?: number }): Tab[] {
-  const issueCount = opts?.issueCount ?? ISSUES.filter((i) => i.project === project).length;
   const base = `/${tenant}/${workspace}/${project}`;
   return [
     { id: 'overview', label: 'Overview', icon: 'eye',      to: base },
     { id: 'board',    label: 'Board',    icon: 'board',    to: `${base}/board` },
-    { id: 'issues',   label: 'Issues',   icon: 'list',     to: `${base}/list`, count: issueCount },
+    { id: 'issues',   label: 'Issues',   icon: 'list',     to: `${base}/list`, count: opts?.issueCount },
     { id: 'workflow', label: 'Workflow', icon: 'workflow', to: `${base}/workflow` },
     { id: 'members',  label: 'Members',  icon: 'users',    to: `${base}/members` },
     { id: 'settings', label: 'Settings', icon: 'settings', to: `${base}/settings` },

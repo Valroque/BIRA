@@ -2,10 +2,26 @@ import { createHash, randomUUID } from 'node:crypto';
 import type { Knex } from 'knex';
 import { db } from '../../db/knex.js';
 import { AppError } from '../../lib/errors.js';
+import { signFileId } from '../../lib/fileSignature.js';
 import type { FileStore, PutInput, PutResult, ReadUrlInput } from './types.js';
 
 interface BlobRow {
   bytes: Buffer;
+}
+
+/**
+ * Public origin used to build absolute read URLs. Stripped of any trailing
+ * slash so callers can `${base}/api/...` without doubling slashes.
+ *
+ * Resolution order:
+ *   1. `PUBLIC_API_URL` env var (e.g. `https://api.example.com`)
+ *   2. `http://localhost:<PORT>` — dev fallback so a fresh clone Just Works.
+ */
+function getPublicApiBase(): string {
+  const fromEnv = process.env.PUBLIC_API_URL;
+  if (fromEnv && fromEnv.length > 0) return fromEnv.replace(/\/+$/, '');
+  const port = process.env.PORT ?? '5001';
+  return `http://localhost:${port}`;
 }
 
 export class PgFileStore implements FileStore {
@@ -47,12 +63,27 @@ export class PgFileStore implements FileStore {
   }
 
   /**
-   * Returns the public download URL for the given file.
-   * For the PG driver this is an internal API path; the route handler
-   * streams the bytes back from the database.
+   * Returns a signed, time-limited, **absolute** read URL for the given file.
+   *
+   * Absolute (not relative) so `<img src>` works regardless of where the FE
+   * is served from — the BE and FE typically live on different origins
+   * (e.g. localhost:5001 vs localhost:5173 in dev). S3 presigned URLs are
+   * also absolute, so this matches the S3 driver's eventual behaviour.
+   *
+   * The URL points at the public file route (`server/src/routes/publicFiles.ts`)
+   * which sits outside the authenticated `/api/tenants` chain, so plain
+   * `<img src>` requests that can't carry a Bearer token still work. The
+   * `sig` query param is an HMAC over `<fileId>.<exp>` — see
+   * `server/src/lib/fileSignature.ts` for the verification path.
+   *
+   * The base URL is taken from `PUBLIC_API_URL` (e.g. `https://api.example.com`)
+   * with a `http://localhost:<PORT>` dev fallback. `tenantSlug` /
+   * `workspaceSlug` are part of the `ReadUrlInput` contract for the S3
+   * driver's bucket layout — the PG driver doesn't need them.
    */
-  getReadUrl({ id, tenantSlug, workspaceSlug }: ReadUrlInput): string {
-    return `/api/tenants/${tenantSlug}/workspaces/${workspaceSlug}/files/${id}`;
+  getReadUrl({ id }: ReadUrlInput): string {
+    const { sig, exp } = signFileId(id);
+    return `${getPublicApiBase()}/api/files/${id}?sig=${sig}&exp=${exp}`;
   }
 
   /**

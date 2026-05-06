@@ -3,8 +3,10 @@
 import { TopBar, useTenantBreadcrumbs } from '../components/shell';
 import { IssuesTable, type IssueGroupKey } from '../components/issues-table';
 import { type Filter } from '../components/issue-filters';
-import { CURRENT_USER } from '../fixtures';
 import { useIssues } from '../state/issues';
+import { useAuth } from '../state/auth';
+import { ErrorState } from '../components/states';
+import { Icon } from '../components/icons';
 import type { Crumb } from '../components/shell';
 
 interface WorkspaceIssuesViewProps {
@@ -12,7 +14,11 @@ interface WorkspaceIssuesViewProps {
   pageDescription: string;
   /** Last segment of the breadcrumb (e.g. "My issues"). The workspace name is prepended automatically. */
   trailingCrumb: string;
-  /** Initial filter chips. Use `locked: true` for filters that define the page (e.g. "Assignee: Me"). */
+  /**
+   * Initial filter chips. Use `locked: true` for filters that define the page
+   * (e.g. "Assignee: Me"). Constructed lazily from `useAuth()` for pages that
+   * need the current user's UUID.
+   */
   initialFilters: Filter[];
   defaultGroup: IssueGroupKey;
   persistKey: string;
@@ -20,12 +26,29 @@ interface WorkspaceIssuesViewProps {
 
 function WorkspaceIssuesView(props: WorkspaceIssuesViewProps) {
   const { tenant, workspace, tenantName, workspaceName } = useTenantBreadcrumbs();
-  const { issues } = useIssues();
+  const { issues, loading, error, refresh } = useIssues();
   const breadcrumbs: Crumb[] = [
     { label: tenantName, to: `/${tenant}/workspaces` },
     { label: workspaceName, to: `/${tenant}/${workspace}/projects` },
     props.trailingCrumb,
   ];
+  if (error && !loading) {
+    return (
+      <div className="bira" style={{ height: '100%', display: 'flex', flexDirection: 'column', background: 'var(--bg)' }}>
+        <TopBar breadcrumbs={breadcrumbs} />
+        <ErrorState
+          code="LOAD_ISSUES"
+          title="Couldn’t load issues"
+          description={error}
+          action={
+            <button type="button" onClick={() => { void refresh(); }} className="btn btn-primary btn-sm">
+              <Icon name="refresh" size={13} />Retry
+            </button>
+          }
+        />
+      </div>
+    );
+  }
   return (
     <div className="bira" style={{ height: '100%', display: 'flex', flexDirection: 'column', background: 'var(--bg)' }}>
       <TopBar breadcrumbs={breadcrumbs} />
@@ -42,6 +65,13 @@ function WorkspaceIssuesView(props: WorkspaceIssuesViewProps) {
 }
 
 export function MyIssuesPage() {
+  const { user } = useAuth();
+  // Locked "Assignee: Me" — defines the page; user can layer more filters on
+  // top. Empty values when there's no user (e.g. brief auth-loading flash);
+  // the page still renders, just unscoped, until the user resolves.
+  const initialFilters: Filter[] = [{
+    id: 'me', type: 'assignee', values: user ? [user.id] : [], locked: true,
+  }];
   return (
     <WorkspaceIssuesView
       trailingCrumb="My issues"
@@ -49,10 +79,7 @@ export function MyIssuesPage() {
       pageDescription="Issues assigned to you across every project in this workspace."
       defaultGroup="status"
       persistKey="my-issues"
-      // Locked "Assignee: Me" — defines the page; user can layer more filters on top.
-      initialFilters={[{
-        id: 'me', type: 'assignee', values: [CURRENT_USER.name], locked: true,
-      }]}
+      initialFilters={initialFilters}
     />
   );
 }

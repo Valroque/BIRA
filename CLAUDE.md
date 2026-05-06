@@ -10,29 +10,26 @@ For the **decision log** explaining *why* the rules below are what they
 are, see [`docs/decisions.md`](docs/decisions.md). The hard rules
 themselves live at [`.claude/rules/v1-constraints.md`](.claude/rules/v1-constraints.md).
 
-> **In-flight refactor (2026-04):** Tenant level is being added above
-> Workspace. URL shape is now `/:tenant/:workspace/...`. See
-> `memory/project_tenant_refactor.md` for the current scope and which
-> phases have landed. The full TL;DR + rules below will be reconciled
-> when Phase 5 lands.
->
-> **Backend phase started (2026-05-04):** Design-first gate has been
-> lifted. Backend code lives in `server/` (Node + TS + Express + Knex
-> + Postgres); FE moved to `web/`; root is an npm workspace. Initial
-> scope: tenants, workspaces, users, login. Issues / workflows still
-> fixture-only — wiring those up is a later phase.
-> The FE has **not** been rewired to call the API yet; that's a
-> separate phase once endpoints stabilise. See `memory/project_backend_phase.md`.
+> **Backend phase (started 2026-05-04, ongoing):** Backend code lives in
+> `server/` (Node + TS + Express + Knex + Postgres); FE moved to `web/`;
+> root is an npm workspace. Tenants / workspaces / projects / users /
+> auth, plus issues + hierarchy + schedules + links + workflows +
+> comments + files + mentionables, are all wired in `server/` with test
+> coverage on the early surfaces. The FE has **not** been rewired to
+> call the API yet; that's a separate phase once endpoints stabilise.
+> See `memory/project_backend_phase.md` and `server/README.md` for the
+> live endpoint list.
 
 ---
 
 ## TL;DR — if you only read this
 
-1. **Backend phase has started** (lifted 2026-05-04). FE under `web/`
-   is still fixture-driven for issues/workflows; backend under `server/`
-   is being built up incrementally (tenants → workspaces → users →
-   login first). Don't add API calls from the FE until told to —
-   endpoints are still moving.
+1. **Backend phase is active** (started 2026-05-04). FE under `web/`
+   is still fixture-driven; backend under `server/` covers tenants,
+   workspaces, projects, users, auth, issues + hierarchy + schedules +
+   links, workflows + transition guard, comments, files,
+   mentionables. Don't add API calls from the FE until told to —
+   endpoints are still moving and FE wiring is a later phase.
 2. **Stack**: Vite + React 18 + TypeScript + `react-router-dom` v7. Plain CSS
    with design tokens in `src/index.css`. No Tailwind, no UI library,
    self-hosted Geist fonts.
@@ -80,25 +77,43 @@ themselves live at [`.claude/rules/v1-constraints.md`](.claude/rules/v1-constrai
    `bira:projects:<tenant>:<workspace>`
    (per-workspace project list — only the demo `acme-corp/acme` workspace
    gets `SEED_PROJECTS` seeded), `bira:board-columns:<tenant>:<workspace>:<project>`
-   (per-project board config), and `bira:issue-overrides:<tenant>:<workspace>`
-   (per-workspace `Partial<Issue>` patches against the `ISSUES` fixture —
-   gantt date drag, gantt assignee picker, inspector date / estimate edits all
-   write here; `IssuesProvider` merges seeds with overrides on read).
+   (per-project board config), and `bira:issue-overrides:v2:<tenant>:<workspace>`
+   (per-workspace `Partial<Issue>` patches — slice 5 (2026-05-05) flipped
+   `IssuesProvider` to fetch live from the BE on mount and treat this
+   localStorage layer as the **planning-gantt seed** per the
+   planning-vs-reality-gantt design call: writes here are ephemeral,
+   client-only, and never hit the API. Reality-gantt writes (slice 6)
+   will route through PATCH while inspector / planning-gantt edits keep
+   using this path. The `v2` prefix was bumped on 2026-05-05 when
+   `Issue.id`/`project`/`assignee` were renamed to
+   `key`/`projectId` (uuid)/`assigneeUserId` (uuid|null) — pre-bump blobs
+   are silently ignored).
    Tenant + workspace + project come from the URL via
    `useTenantContext()` in `shell.tsx` — never hardcode `/acme-corp/acme/comet/`.
    Read tenant data via `useTenants()` from `src/state/tenants.tsx`, workspace data via
    `useWorkspaces()` from `src/state/workspaces.tsx`, project data via `useProjects()`
-   from `src/state/projects.tsx`, and issues via `useIssues()` from
-   `src/state/issues.tsx` — never from stale `WORKSPACES`/`TENANTS`-direct lookups
-   or `ISSUES`-direct reads (the fixture is the seed; `useIssues()` is the live view).
+   from `src/state/projects.tsx`, users via `useUsers()` from
+   `src/state/users.tsx`, and issues via `useIssues()` from
+   `src/state/issues.tsx` (slice 5: API-backed via
+   `GET /api/tenants/:t/workspaces/:w/issues`; the
+   `bira:issue-overrides:v2:<tenant>:<workspace>` blob layered on top is
+   the planning-gantt seed and is never written back to the API) — never
+   from stale `WORKSPACES`/`TENANTS`-direct lookups or `ISSUES`-direct
+   reads (the fixture is deprecated as of slice 5; only design-canvas
+   reference screens still touch it).
+   **UUIDs never render** — `Issue.projectId` resolves via `useProjects().getProjectById(id)`,
+   `Issue.assigneeUserId` via `useUsers().getUser(id)`. Missing → "Unknown user" /
+   "Unknown project", never the raw uuid.
 9. **Reuse, don't reinvent**: every layout primitive lives in
    `src/components/` (especially `shell.tsx`). Adding a parallel `<button>`
    styled like an existing `Chip` is a defect, not a shortcut.
 10. **Design tokens only**. Use `var(--token)` from `src/index.css`. No raw
     hex codes outside the `/design-canvas` reference page.
 11. **Build gate**: `npm run build` (or `npx tsc --noEmit` for a faster
-    type-only pass). There is **no test infrastructure yet** — don't add
-    Vitest/Jest configs without approval.
+    type-only pass) on `web/`. The backend has its own test suite
+    (`cd server && npm test`, Vitest + supertest against a real
+    Postgres `bira_test` database) — extend it whenever you ship an
+    API change. The FE still has no automated tests.
 
 When work feels like more than a 3-edit task, invoke `/tech-lead` first to
 plan and decompose. The agent personas in `.claude/commands/` know the
@@ -123,15 +138,18 @@ engine and rule-gated transitions.
 
 **Frontend** is feature-complete enough that we've started building the
 backend. FE lives under `web/`; data is still in-memory fixtures
-(`web/src/fixtures.ts`) plus a few `localStorage` keys. Issues and
-workflows will *stay* fixture-driven until their backend phases land.
+(`web/src/fixtures.ts`) plus a few `localStorage` keys. The backend
+endpoints exist for issues / workflows / comments / files but the FE
+hasn't been switched off the fixtures yet — that's a dedicated phase
+once endpoints stop moving.
 
 **Backend** lives under `server/` and is being built incrementally —
 the layering is ported from the ABHA project (Node + Express + Knex +
-Postgres), translated to TypeScript. First slice is tenants /
-workspaces / users / login (no issues yet). See
-`memory/project_backend_phase.md` for current state and
-`server/README.md` for layout conventions.
+Postgres), translated to TypeScript. Live surfaces: tenants /
+workspaces / projects / users / auth, issues + hierarchy + schedules
++ links, workflows + transition guard, comments, files, mentionables.
+See `server/README.md` for the endpoint catalogue + layout
+conventions and `memory/project_backend_phase.md` for current state.
 
 **FE↔BE wiring is intentionally deferred.** Endpoints are still
 moving; do not point the FE at the API until told to.

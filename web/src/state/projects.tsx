@@ -10,13 +10,18 @@ import {
   type ReactNode,
 } from 'react';
 import {
-  SEED_PROJECTS,
+  SEED_PROJECTS, DEFAULT_PROJECT_WORKFLOWS,
   type IssueTypeLetter, type Project,
 } from '../fixtures';
 import {
   listProjects as apiListProjects,
   createProject as apiCreateProject,
 } from '../api/projects';
+import { setProjectWorkflow as apiSetProjectWorkflow } from '../api/workflows';
+import {
+  grantTeamAccess as apiGrantTeamAccess,
+  grantUserAccess as apiGrantUserAccess,
+} from '../api/projectAccess';
 
 /** Fields the create-project form supplies. */
 export interface AddProjectInput {
@@ -27,10 +32,26 @@ export interface AddProjectInput {
   color: string;
   bg: string;
   description: string;
+  /**
+   * Per-issue-type workflow slugs. Only entries that differ from the
+   * workspace default (`DEFAULT_PROJECT_WORKFLOWS`) are PUT to the BE —
+   * the rest fall through to the slug-default chain in
+   * `getProjectWorkflows.ts`.
+   */
   workflows: Record<IssueTypeLetter, string>;
-  teamSlugs: string[];
-  userEmails: string[];
-  createdByEmail: string;
+  /**
+   * Team UUIDs to grant project access to. Each gets the default
+   * `read` role (the modal doesn't expose a role picker; users can
+   * upgrade later from the Members page once that surface lands —
+   * see #21).
+   */
+  teamIds: string[];
+  /**
+   * User UUIDs to grant explicit `write` access to. Must NOT include
+   * the creator — the BE auto-grants the creator `admin` in the same
+   * transaction as the project insert.
+   */
+  userIds: string[];
 }
 
 export interface ProjectsCtxValue {
@@ -38,15 +59,42 @@ export interface ProjectsCtxValue {
   projects: Project[];
   loading: boolean;
   error: string | null;
-  /** Lookup by slug. Returns undefined for unknown slugs. */
+  /**
+   * Lookup by slug — used for resolving URL params (`/:project`) into a
+   * Project. New code that already has a UUID should prefer
+   * `getProjectById`. Returns undefined for unknown slugs.
+   */
   getProject: (slug: string) => Project | undefined;
+  /**
+   * Lookup by UUID — used for resolving `Issue.projectId` and any other
+   * UUID-keyed reference. Returns undefined for unknown ids — callers must
+   * render a placeholder / fall back to slug, never the raw uuid.
+   */
+  getProjectById: (id: string | null | undefined) => Project | undefined;
   /** Create a new project via the API. Returns the newly-created Project. */
   addProject: (input: AddProjectInput) => Promise<Project>;
   /** Patch any field on an existing project (local state only — no API call). */
   updateProject: (slug: string, patch: Partial<Project>) => void;
-  /** Projects where `teamSlug` has been added. */
+  /**
+   * Projects where `teamSlug` has been added.
+   *
+   * @deprecated Slice 4 FE (2026-05-05) — `Project.teamSlugs` is no longer
+   * populated by the API adapter (project list response doesn't include
+   * grants). This now only returns matches for SEED_PROJECTS in the demo
+   * workspace; for API-loaded projects it's always empty.
+   * The team-detail "Projects using this team" surface needs a BE reverse-
+   * lookup endpoint (`GET .../teams/:teamSlug/projects` or similar). Until
+   * that exists this returns empty — flagged as follow-up.
+   */
   projectsForTeam: (teamSlug: string) => Project[];
-  /** All `(project, issue_type)` pairs that map to this workflow id. */
+  /**
+   * All `(project, issue_type)` pairs that map to this workflow id.
+   *
+   * @deprecated Slice 8 — `Project.workflows` is now seeded with the FE's
+   * `DEFAULT_PROJECT_WORKFLOWS` and not refreshed from the BE per project.
+   * Use `getProjectWorkflows` from `web/src/api/workflows.ts` instead — see
+   * `screens/workflows.tsx` for the canonical pattern.
+   */
   projectsUsingWorkflow: (workflowId: string) => { project: Project; type: IssueTypeLetter }[];
 }
 
@@ -91,8 +139,18 @@ export function ProjectsProvider({
     [projects],
   );
 
+  const getProjectById = useCallback(
+    (id: string | null | undefined) => {
+      if (!id) return undefined;
+      return projects.find((p) => p.id === id);
+    },
+    [projects],
+  );
+
   const addProject = useCallback(async (input: AddProjectInput): Promise<Project> => {
-    // Strip FE-only fields before sending to the API.
+    // Step 1 — create the project. The BE atomically grants the creator
+    // admin role on the new project; we never push the creator's id
+    // through `userIds`. If this throws, no downstream writes run.
     const apiInput = {
       slug: input.slug,
       key: input.key,
@@ -103,16 +161,54 @@ export function ProjectsProvider({
       description: input.description,
     };
     const created = await apiCreateProject(tenant, workspace, apiInput);
-    // Override with the richer input values the form supplied (workflows, teamSlugs, etc.)
-    const enriched: Project = {
-      ...created,
-      workflows: input.workflows,
-      teamSlugs: input.teamSlugs,
-      userEmails: input.userEmails,
-      createdByEmail: input.createdByEmail,
-    };
-    setProjects((prev) => [...prev, enriched]);
-    return enriched;
+
+    // Step 2 — workflow assignments. PUT only the deltas: a per-type
+    // pick that matches the workspace default doesn't need a row in
+    // `project_workflows` (the slug-default fallback resolves it).
+    const workflowWrites = (Object.entries(input.workflows) as [IssueTypeLetter, string][])
+      .filter(([type, slug]) => slug && slug !== DEFAULT_PROJECT_WORKFLOWS[type])
+      .map(([type, slug]) =>
+        apiSetProjectWorkflow(tenant, workspace, created.slug, type, slug)
+      );
+
+    // Step 3 — team grants. Default role is `read` (per #21 — RBAC
+    // surfaces are still being designed; safer to start narrow and let
+    // the user upgrade explicitly).
+    const teamWrites = input.teamIds.map((teamId) =>
+      apiGrantTeamAccess(tenant, workspace, created.slug, teamId, 'read')
+    );
+
+    // Step 4 — explicit user grants at `write` (the modal copy reads
+    // "edit access"). Creator is excluded by contract — the BE handled
+    // them at create time.
+    const userWrites = input.userIds.map((userId) =>
+      apiGrantUserAccess(tenant, workspace, created.slug, userId, 'write')
+    );
+
+    // Run grant + workflow writes concurrently; treat each independently
+    // because they're not transactional with the project insert. A
+    // failed grant doesn't roll the project back — the user can re-grant
+    // from the Members page. Surface the error count so the modal can
+    // toast / warn.
+    const settled = await Promise.allSettled([
+      ...workflowWrites,
+      ...teamWrites,
+      ...userWrites,
+    ]);
+    const failures = settled.filter((s) => s.status === 'rejected');
+    if (failures.length > 0) {
+      // Don't block; the project exists and the creator has admin. Log
+      // so a follow-up audit can correlate the partial state.
+      // eslint-disable-next-line no-console
+      console.warn(
+        `Project '${created.slug}' created, but ${failures.length} of ${settled.length} ` +
+        `grant/workflow writes failed:`,
+        failures.map((f) => (f as PromiseRejectedResult).reason)
+      );
+    }
+
+    setProjects((prev) => [...prev, created]);
+    return created;
   }, [tenant, workspace]);
 
   const updateProject = useCallback((slug: string, patch: Partial<Project>) => {
@@ -138,7 +234,7 @@ export function ProjectsProvider({
   );
 
   const value: ProjectsCtxValue = {
-    projects, loading, error, getProject, addProject, updateProject,
+    projects, loading, error, getProject, getProjectById, addProject, updateProject,
     projectsForTeam, projectsUsingWorkflow,
   };
 

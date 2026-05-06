@@ -1,10 +1,12 @@
 // Shared list-row layout. Used by /list, project overview, and the workspace-level
-// My Issues / All Issues views. The link target always reflects `issue.project`
-// so the row works regardless of which page is rendering it.
+// My Issues / All Issues views. The link target always resolves `issue.projectId`
+// to the owning project's slug so the row works regardless of which page is
+// rendering it.
 import { useEffect, useState, type CSSProperties, type MouseEvent, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import type { Issue, Project } from '../fixtures';
 import { useProjects } from '../state/projects';
+import { useUsers, UNKNOWN_USER_LABEL } from '../state/users';
 import { Avatar, Priority as PriorityIcon, StatusDot, STATUSES, TypeChip } from './shell';
 import { ProjectChip } from './project-chip';
 
@@ -172,6 +174,7 @@ function renderCell(
   issue: Issue,
   showProject: boolean,
   project: Project | undefined,
+  assigneeName: string,
 ): ReactNode {
   switch (colId) {
     case 'id': {
@@ -179,7 +182,7 @@ function renderCell(
         <span style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
           <TypeChip type={issue.type} />
           <span className="mono tnum" style={{ fontSize: 11, color: 'var(--fg-subtle)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-            {showProject ? issue.id : issue.id.split('-')[1]}
+            {showProject ? issue.key : issue.key.split('-')[1]}
           </span>
         </span>
       );
@@ -202,9 +205,11 @@ function renderCell(
     }
     case 'project': {
       if (!project) {
+        // Unknown project — render a neutral placeholder rather than the
+        // raw uuid (UUIDs never appear in the UI).
         return (
           <span style={{ fontSize: 11, color: 'var(--fg-faint)', fontStyle: 'italic' }}>
-            {issue.project}
+            Unknown project
           </span>
         );
       }
@@ -264,10 +269,10 @@ function renderCell(
     }
     case 'assignee': {
       return (
-        <span title={issue.assignee} style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
-          <Avatar name={issue.assignee} size={20} />
+        <span title={assigneeName} style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
+          <Avatar name={assigneeName} size={20} />
           <span style={{ fontSize: 12.5, color: 'var(--fg)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-            {issue.assignee}
+            {assigneeName}
           </span>
         </span>
       );
@@ -299,23 +304,29 @@ export function ListRow(props: ListRowProps) {
   const { issue, tenant, workspace, selected, onToggleSelect, showProject, order, visible, columns } = props;
   // Always call the hook; props can override its values.
   const [layout] = useColumnLayout();
-  const { getProject } = useProjects();
-  const project = getProject(issue.project);
+  const { getProjectById } = useProjects();
+  const { getUser } = useUsers();
+  const project = getProjectById(issue.projectId);
+  const assigneeName = getUser(issue.assigneeUserId)?.displayName ?? UNKNOWN_USER_LABEL;
   const effectiveOrder = order ?? layout.order;
   const effectiveVisible = visible ?? layout.visible;
   const effectiveColumns = columns ?? buildRowColumns(layout.widths, effectiveOrder, effectiveVisible, !!showProject);
 
   const visibleOrder = visibleColumns(effectiveOrder, effectiveVisible, !!showProject);
 
+  // Link target uses the project's slug (URL identity) but the issue is
+  // identified by its key — both stay user-readable and stable.
+  const projectSlug = project?.slug ?? '';
+
   const stopAndToggle = (e: MouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
-    onToggleSelect?.(issue.id);
+    onToggleSelect?.(issue.key);
   };
 
   return (
     <Link
-      to={`/${tenant}/${workspace}/${issue.project}/issue/${issue.id}`}
+      to={`/${tenant}/${workspace}/${projectSlug}/issue/${issue.key}`}
       style={{
         display: 'grid',
         gridTemplateColumns: effectiveColumns,
@@ -329,12 +340,12 @@ export function ListRow(props: ListRowProps) {
         type="checkbox"
         className="cb"
         checked={!!selected}
-        onChange={() => onToggleSelect?.(issue.id)}
+        onChange={() => onToggleSelect?.(issue.key)}
         onClick={stopAndToggle}
         readOnly={!onToggleSelect}
       />
       {visibleOrder.map((colId) => (
-        <CellWrapper key={colId}>{renderCell(colId, issue, !!showProject, project)}</CellWrapper>
+        <CellWrapper key={colId}>{renderCell(colId, issue, !!showProject, project, assigneeName)}</CellWrapper>
       ))}
       <span aria-hidden="true" />
     </Link>

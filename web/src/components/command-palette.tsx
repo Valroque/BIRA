@@ -66,10 +66,10 @@ export function CommandPalette() {
     { id: 'go-rules',    group: 'Navigate', label: 'Transition rules',   icon: 'shield',   to: `/${tenant}/${workspace}/${project}/workflow/rules` },
     { id: 'new-issue',   group: 'Create',   label: 'New issue',          icon: 'plus',     to: `/${tenant}/${workspace}/${project}/issue/new`, hint: 'C' },
     ...issues.map((i): Command => ({
-      id: `issue-${i.id}`, group: 'Issues',
-      label: `${i.id} · ${i.title}`,
+      id: `issue-${i.key}`, group: 'Issues',
+      label: `${i.key} · ${i.title}`,
       icon: i.type === 'B' ? 'bug' : i.type === 'E' ? 'layers' : 'tasks',
-      to: `/${tenant}/${workspace}/${project}/issue/${i.id}`,
+      to: `/${tenant}/${workspace}/${project}/issue/${i.key}`,
     })),
   ], [tenant, workspace, project, issues]);
 

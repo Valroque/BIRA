@@ -18,6 +18,7 @@ import type { Comment } from '../../src/entities/Comment.js';
 import type {
   Role,
   WorkspaceStatus,
+  ProjectStatus,
   IssueType,
   StatusId,
   Priority,
@@ -171,13 +172,14 @@ export interface CreateProjectOpts {
   slug?: string;
   key?: string;
   name?: string;
+  status?: ProjectStatus;
 }
 
 export async function createProject(opts: CreateProjectOpts): Promise<Project> {
   const tag = uniq();
   // Use counter directly — timestamp can repeat within the same ms, but counter is always unique.
   const autoKey = `P${counter}`;
-  return projectService.create({
+  const project = await projectService.create({
     workspaceId: opts.workspaceId,
     slug: opts.slug ?? `proj-${tag}`,
     key: opts.key ?? autoKey,
@@ -187,6 +189,12 @@ export async function createProject(opts: CreateProjectOpts): Promise<Project> {
     bg: '#cffafe',
     createdByUserId: opts.createdByUserId,
   });
+  if (opts.status && opts.status !== 'active') {
+    const updated = await projectService.setStatus(project.id, opts.status);
+    if (!updated) throw new Error('createProject: failed to set status');
+    return updated;
+  }
+  return project;
 }
 
 // ── Issue factories ───────────────────────────────────────────────────────

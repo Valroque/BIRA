@@ -1,15 +1,27 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import { Icon } from '../components/icons';
 import { TopBar, Tabs, Toolbar, Chip, StatusDot, TypeChip, STATUSES, projectTabs, useTenantBreadcrumbs } from '../components/shell';
 import { useDismiss } from '../components/use-dismiss';
+import { EmptyState as StateEmptyState, ErrorState, SkeletonRow } from '../components/states';
 import {
-  WORKFLOWS, ISSUE_TYPE_NAMES, DEFAULT_PROJECT_WORKFLOWS,
+  ISSUE_TYPE_NAMES,
   type IssueTypeLetter,
-  type WorkflowNode as GraphNode,
-  type WorkflowEdge as GraphEdge,
 } from '../fixtures';
 import { useProjects } from '../state/projects';
+import {
+  WorkflowsProvider as _WorkflowsProvider,  // re-exported for design canvas if needed; not used here
+  useWorkflows,
+  ProjectWorkflowsProvider,
+  useProjectWorkflows,
+} from '../state/workflows';
+import type {
+  Workflow,
+  WorkflowNode as GraphNode,
+  WorkflowEdge as GraphEdge,
+} from '../api/adapters/workflow.adapter';
+// Suppress unused import warning — we re-export above only as a typing hint.
+void _WorkflowsProvider;
 
 // --- Generic graph renderer used by editor + variants ---
 
@@ -464,35 +476,79 @@ export function WorkflowGraph({
 // --- The full workflow editor screen ---
 
 export function WorkflowPage() {
-  return <WorkflowEditor />;
+  // The editor needs the project's per-issueType workflow assignment to know
+  // which graph to render. Mount the provider here (project-scoped) so the
+  // map fetches once per project and the editor + switcher share a writer.
+  const { tenant, workspace, project } = useTenantBreadcrumbs();
+  return (
+    <ProjectWorkflowsProvider
+      key={`${tenant}/${workspace}/${project}`}
+      tenant={tenant}
+      workspace={workspace}
+      project={project}
+    >
+      <WorkflowEditor />
+    </ProjectWorkflowsProvider>
+  );
 }
 
 export function WorkflowEditor() {
   const { tenant, workspace, project, tenantName, workspaceName } = useTenantBreadcrumbs();
-  const { getProject, projectsUsingWorkflow, updateProject } = useProjects();
+  const { getProject } = useProjects();
   const projectInfo = getProject(project);
-  const workflows = projectInfo?.workflows ?? DEFAULT_PROJECT_WORKFLOWS;
+  const {
+    workflows: catalog,
+    loading: catalogLoading,
+    error: catalogError,
+  } = useWorkflows();
+  const {
+    projectWorkflows,
+    loading: assignmentsLoading,
+    error: assignmentsError,
+    saving,
+    setWorkflowForType,
+  } = useProjectWorkflows();
 
   const [type, setType] = useState<IssueTypeLetter>('T');
   // Reset selection whenever the user switches issue type — the graph just changed.
   const [selected, setSelected] = useState<Selection | null>(null);
   const onSwitchType = (next: IssueTypeLetter) => { setType(next); setSelected(null); };
 
-  const workflowId = workflows[type];
-  const baseWorkflow = WORKFLOWS[workflowId];
-  const usage = projectsUsingWorkflow(workflowId);
+  // Resolve the current workflow by walking from per-project map → catalogue
+  // detail. The catalogue's list response already includes nodes/edges/rules,
+  // so a list-cache hit IS the detail view (no second fetch needed).
+  const summary = projectWorkflows?.[type] ?? null;
+  const baseWorkflow = useMemo<Workflow | undefined>(
+    () => (summary ? catalog.find((w) => w.id === summary.id) : undefined),
+    [catalog, summary],
+  );
+
+  // Cross-project usage — derived from the catalogue + assignment map. We
+  // don't refetch every project's map here; the workflows page does that
+  // and the chip below intentionally only shows whether *the current*
+  // project shares with another type. If the editor needs a true count
+  // we'd have to add a BE projection — defer until product asks for it.
+  const usageCount = useMemo(() => {
+    if (!projectWorkflows || !summary) return 1;
+    let n = 0;
+    for (const t of TYPE_ORDER) {
+      if (projectWorkflows[t]?.id === summary.id) n += 1;
+    }
+    return n;
+  }, [projectWorkflows, summary]);
 
   // Session-local working copy of the current workflow. Edits in the
   // inspector mutate this copy so the graph reflects them immediately —
-  // no persistence beyond the session, matching the rest of the prototype.
-  const [nodes, setNodes] = useState<GraphNode[]>(baseWorkflow.nodes);
-  const [edges, setEdges] = useState<GraphEdge[]>(baseWorkflow.edges);
+  // matches the rest of the prototype, where graph mutations don't yet
+  // round-trip to the BE.
+  const [nodes, setNodes] = useState<GraphNode[]>([]);
+  const [edges, setEdges] = useState<GraphEdge[]>([]);
   // Reset whenever the source workflow changes (issue type switch, project
   // switch). Re-running this on baseWorkflow identity is the right trigger
-  // because WORKFLOWS[id] is stable per id.
+  // because the `Workflow` reference is stable per id within the catalogue.
   useEffect(() => {
-    setNodes(baseWorkflow.nodes);
-    setEdges(baseWorkflow.edges);
+    setNodes(baseWorkflow?.nodes ?? []);
+    setEdges(baseWorkflow?.edges ?? []);
   }, [baseWorkflow]);
 
   const updateNode = (id: string, patch: Partial<GraphNode>) =>
@@ -530,9 +586,24 @@ export function WorkflowEditor() {
     // Reject duplicates of the same direction so the graph stays clean.
     if (edges.some((e) => e.from === fromId && e.to === toId)) return;
     const id = `e${Date.now().toString(36)}`;
-    setEdges((prev) => [...prev, { id, from: fromId, to: toId }]);
+    setEdges((prev) => [...prev, { id, from: fromId, to: toId, rules: [] }]);
     setSelected({ type: 'edge', id });
   };
+
+  const onPickWorkflow = async (slug: string) => {
+    if (!summary || slug === summary.slug) return;
+    try {
+      await setWorkflowForType(type, slug);
+      setSelected(null);
+    } catch (err) {
+      // For now: surface in console + keep the editor in its previous state.
+      // A toast pattern would belong in the global UI shell — out of scope.
+      console.error('Failed to set project workflow', err);
+    }
+  };
+
+  const loading = catalogLoading || assignmentsLoading;
+  const fatalError = catalogError ?? assignmentsError ?? null;
 
   return (
     <div className="bira" style={{ height: '100%', display: 'flex', flexDirection: 'column', background: 'var(--bg)' }}>
@@ -579,18 +650,14 @@ export function WorkflowEditor() {
               })}
             </div>
             <WorkflowSwitcher
-              currentId={workflowId}
-              onPick={(id) => {
-                if (!projectInfo || id === workflowId) return;
-                updateProject(projectInfo.slug, {
-                  workflows: { ...projectInfo.workflows, [type]: id },
-                });
-                setSelected(null);
-              }}
+              catalog={catalog}
+              currentSlug={summary?.slug}
+              disabled={saving || !summary}
+              onPick={onPickWorkflow}
             />
             <Chip dim>
-              Used by <strong style={{ color: 'var(--fg)', marginLeft: 3 }}>{usage.length}</strong>
-              <span style={{ marginLeft: 3 }}>{usage.length === 1 ? 'pair' : 'pairs'}</span>
+              Used by <strong style={{ color: 'var(--fg)', marginLeft: 3 }}>{usageCount}</strong>
+              <span style={{ marginLeft: 3 }}>{usageCount === 1 ? 'pair' : 'pairs'}</span>
             </Chip>
           </div>
 
@@ -604,7 +671,7 @@ export function WorkflowEditor() {
             }
           >
             <span style={{ fontSize: 12, color: 'var(--fg-muted)', maxWidth: 520, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-              {baseWorkflow.description}
+              {baseWorkflow?.description ?? ''}
             </span>
             <span style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--fg-muted)' }}>
               <span style={{ width: 6, height: 6, borderRadius: 3, background: 'var(--in-progress)' }} />
@@ -613,16 +680,42 @@ export function WorkflowEditor() {
           </Toolbar>
 
           <div style={{ flex: 1, padding: 16, overflow: 'hidden', display: 'flex', minHeight: 0 }}>
-            <WorkflowGraph
-              key={baseWorkflow.id}
-              nodes={nodes}
-              edges={edges}
-              selected={selected}
-              onSelect={setSelected}
-              onUpdateNode={updateNode}
-              onAddState={addState}
-              onAddEdge={addEdge}
-            />
+            {fatalError && (
+              <div style={{ flex: 1 }}>
+                <ErrorState
+                  code="500"
+                  title="Couldn't load workflow"
+                  description={fatalError}
+                />
+              </div>
+            )}
+            {!fatalError && loading && (
+              <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 12, padding: 8 }}>
+                <SkeletonRow height={48} />
+                <SkeletonRow height={420} />
+              </div>
+            )}
+            {!fatalError && !loading && !baseWorkflow && (
+              <div style={{ flex: 1 }}>
+                <StateEmptyState
+                  icon="branch"
+                  title="No workflow assigned"
+                  description="This issue type doesn't have a workflow yet. Pick one from the dropdown above to get started."
+                />
+              </div>
+            )}
+            {!fatalError && !loading && baseWorkflow && (
+              <WorkflowGraph
+                key={baseWorkflow.id}
+                nodes={nodes}
+                edges={edges}
+                selected={selected}
+                onSelect={setSelected}
+                onUpdateNode={updateNode}
+                onAddState={addState}
+                onAddEdge={addEdge}
+              />
+            )}
           </div>
         </div>
 
@@ -633,7 +726,7 @@ export function WorkflowEditor() {
           tenant={tenant}
           workspace={workspace}
           project={project}
-          workflowName={baseWorkflow.name}
+          workflowName={baseWorkflow?.name ?? '—'}
           issueTypeName={ISSUE_TYPE_NAMES[type]}
           onUpdateNode={updateNode}
           onUpdateEdge={updateEdge}
@@ -645,21 +738,28 @@ export function WorkflowEditor() {
   );
 }
 
+const TYPE_ORDER: IssueTypeLetter[] = ['T', 'B', 'S', 'E'];
+
 /**
  * Dropdown that lets the user switch which workflow the current
  * (project, issue_type) pair uses. Visually it's a Chip with a chevron;
- * clicking opens a popover listing every workflow id.
+ * clicking opens a popover listing every workflow in the workspace.
+ *
+ * `onPick` receives the workflow's slug (the BE PUT endpoint uses
+ * `workflowSlug`, not id).
  */
 function WorkflowSwitcher({
-  currentId, onPick,
+  catalog, currentSlug, disabled, onPick,
 }: {
-  currentId: string;
-  onPick: (workflowId: string) => void;
+  catalog: Workflow[];
+  currentSlug: string | undefined;
+  disabled?: boolean;
+  onPick: (workflowSlug: string) => void;
 }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
   useDismiss(ref, () => setOpen(false), open);
-  const current = WORKFLOWS[currentId];
+  const current = catalog.find((w) => w.slug === currentSlug);
 
   return (
     <div ref={ref} style={{ position: 'relative' }}>
@@ -667,11 +767,12 @@ function WorkflowSwitcher({
         type="button"
         onClick={() => setOpen((o) => !o)}
         className="btn btn-sm"
+        disabled={disabled}
         data-tip="Switch workflow for this issue type"
         style={{ height: 24, gap: 4, padding: '0 8px' }}
       >
         <Icon name="branch" size={11} color="var(--fg-faint)" />
-        <span style={{ fontSize: 12 }}>{current?.name ?? currentId}</span>
+        <span style={{ fontSize: 12 }}>{current?.name ?? currentSlug ?? 'Pick workflow'}</span>
         <Icon name="chevronDown" size={11} color="var(--fg-faint)" style={{ marginLeft: 2 }} />
       </button>
       {open && (
@@ -686,13 +787,18 @@ function WorkflowSwitcher({
             Use this workflow
           </div>
           <div style={{ padding: 4, maxHeight: 280, overflow: 'auto' }} className="scroll">
-            {Object.values(WORKFLOWS).map((wf) => {
-              const active = wf.id === currentId;
+            {catalog.length === 0 && (
+              <div style={{ padding: '12px 10px', fontSize: 12, color: 'var(--fg-muted)' }}>
+                No workflows in this workspace yet.
+              </div>
+            )}
+            {catalog.map((wf) => {
+              const active = wf.slug === currentSlug;
               return (
                 <button
                   key={wf.id}
                   type="button"
-                  onClick={() => { onPick(wf.id); setOpen(false); }}
+                  onClick={() => { onPick(wf.slug); setOpen(false); }}
                   style={{
                     display: 'flex', alignItems: 'flex-start', gap: 10,
                     width: '100%', padding: '8px 10px', borderRadius: 5,
@@ -1036,13 +1142,13 @@ export function WorkflowVariantBranching() {
     { id: 'n5', statusId: 'done', x: 780, y: 250, count: 312, rules: 1, terminal: true },
   ];
   const edges: GraphEdge[] = [
-    { id: 'e1', from: 'n1', to: 'n2', label: 'plan' },
-    { id: 'e2', from: 'n1', to: 'n2b', label: 'fast-track' },
-    { id: 'e3', from: 'n2', to: 'n3' },
-    { id: 'e4', from: 'n2b', to: 'n3' },
-    { id: 'e5', from: 'n3', to: 'n4' },
-    { id: 'e6', from: 'n4', to: 'n5', dashed: true, label: 'approve' },
-    { id: 'e7', from: 'n4', to: 'n3' },
+    { id: 'e1', from: 'n1', to: 'n2', label: 'plan', rules: [] },
+    { id: 'e2', from: 'n1', to: 'n2b', label: 'fast-track', rules: [] },
+    { id: 'e3', from: 'n2', to: 'n3', rules: [] },
+    { id: 'e4', from: 'n2b', to: 'n3', rules: [] },
+    { id: 'e5', from: 'n3', to: 'n4', rules: [] },
+    { id: 'e6', from: 'n4', to: 'n5', dashed: true, label: 'approve', rules: [] },
+    { id: 'e7', from: 'n4', to: 'n3', rules: [] },
   ];
   return (
     <div className="bira" style={{ height: '100%', display: 'flex', flexDirection: 'column', background: 'var(--bg)' }}>
@@ -1078,11 +1184,11 @@ export function WorkflowVariantKanban() {
     { id: 'n4', statusId: 'done', x: 720, y: 220, count: 89, rules: 0, terminal: true },
   ];
   const edges: GraphEdge[] = [
-    { id: 'e1', from: 'n1', to: 'n2' },
-    { id: 'e2', from: 'n2', to: 'n3' },
-    { id: 'e3', from: 'n3', to: 'n4' },
-    { id: 'e4', from: 'n2', to: 'n1' },
-    { id: 'e5', from: 'n3', to: 'n2' },
+    { id: 'e1', from: 'n1', to: 'n2', rules: [] },
+    { id: 'e2', from: 'n2', to: 'n3', rules: [] },
+    { id: 'e3', from: 'n3', to: 'n4', rules: [] },
+    { id: 'e4', from: 'n2', to: 'n1', rules: [] },
+    { id: 'e5', from: 'n3', to: 'n2', rules: [] },
   ];
   return (
     <div className="bira" style={{ height: '100%', display: 'flex', flexDirection: 'column', background: 'var(--bg)' }}>

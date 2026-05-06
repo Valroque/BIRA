@@ -2,15 +2,29 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { Icon } from '../components/icons';
 import { TopBar, TypeChip, IssueId, StatusDot, Priority, Avatar, STATUSES, useTenantContext, useTenantBreadcrumbs } from '../components/shell';
-import { AttachmentRow, renderRichText, useComposer, type Attachment } from '../components/composer';
+import {
+  AttachmentRow, RenderedAttachmentRow, renderRichText, useComposer,
+  type RenderAttachment,
+} from '../components/composer';
 import { IssuePickerModal } from '../components/issue-picker';
 import { useDismiss } from '../components/use-dismiss';
-import { CURRENT_USER, IDEAL_POINTS_PER_DAY, ISSUES, computeTaskLoad, dependsOnWouldCycle, issueById, type Issue } from '../fixtures';
-import { listComments, createComment, type CommentView } from '../api/comments';
+// `ISSUES` is referenced ONLY for the design-canvas reference render
+// (default-arg fallback below). Live data flows through `useIssues()`.
+import { IDEAL_POINTS_PER_DAY, ISSUES, computeTaskLoad, dependsOnWouldCycle, type Issue } from '../fixtures';
+import {
+  listComments, createComment, updateComment, deleteComment,
+  type Comment,
+} from '../api/comments';
 import { MentionPicker } from '../components/mention-picker';
 import type { MentionableHit } from '../api/mentionables';
+import { CommentBody } from '../components/comment-body';
 import { useProjects } from '../state/projects';
-import { useIssues } from '../state/issues';
+import { useIssues, fetchIssueDetail } from '../state/issues';
+import { useUsers, useResolvedUser, UNKNOWN_USER_LABEL } from '../state/users';
+import { useWorkspaceMembers } from '../state/workspace-members';
+import { useAuth } from '../state/auth';
+import { SkeletonRow } from '../components/states';
+import { Modal, ModalBody, ModalFooter, ModalHeader } from '../components/modal';
 
 const STATUS_LABEL: Record<Issue['status'], string> = {
   backlog: 'Backlog',
@@ -59,11 +73,76 @@ export function IssueDetailPage() {
   const { key } = useParams<{ key: string }>();
   const { tenant, workspace, project, tenantName, workspaceName } = useTenantBreadcrumbs();
   const { getProject } = useProjects();
-  const { getIssue } = useIssues();
+  const { getIssue, loading: listLoading, cacheDetail, getDescriptionAttachments } = useIssues();
   const projectInfo = getProject(project);
-  const issue = key ? getIssue(key) : undefined;
+  const cached = key ? getIssue(key) : undefined;
+  // The list endpoint omits detail-only fields (descriptionAttachments,
+  // anything else added later). `getDescriptionAttachments(key)` returns
+  // `undefined` until the detail endpoint has been fetched at least once
+  // for this issue, regardless of whether the row itself is cached. We
+  // use that as the "needs detail fetch" signal so list→detail navigation
+  // still hydrates attachments.
+  const detailFetched = key ? getDescriptionAttachments(key) !== undefined : false;
+
+  // Detail fetch: runs when the row is missing OR the detail-only sidecar
+  // hasn't been populated yet. Stashes the result in the provider so
+  // subsequent renders (and other consumers) read from cache.
+  const [fallbackIssue, setFallbackIssue] = useState<Issue | undefined>(undefined);
+  const [fallbackLoading, setFallbackLoading] = useState(false);
+  const [fallbackError, setFallbackError] = useState<string | null>(null);
+
+  useEffect(() => {
+    // Skip while the workspace list is still loading; the cache may be
+    // about to populate and we'd double-fetch.
+    if (!key || listLoading) return;
+    if (cached && detailFetched) return;
+    let cancelled = false;
+    setFallbackLoading(true);
+    setFallbackError(null);
+    fetchIssueDetail(tenant, workspace, project, key)
+      .then((res) => {
+        if (cancelled) return;
+        cacheDetail(res.issue, res.descriptionAttachments);
+        setFallbackIssue(res.issue);
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        setFallbackError(err instanceof Error ? err.message : 'Failed to load issue');
+      })
+      .finally(() => {
+        if (!cancelled) setFallbackLoading(false);
+      });
+    return () => { cancelled = true; };
+  }, [tenant, workspace, project, key, cached, detailFetched, listLoading, cacheDetail]);
+
+  const issue = cached ?? fallbackIssue;
+
+  // Loading: workspace list still hydrating OR the deep-link fallback is
+  // in flight. Keep the chrome (TopBar) so the user sees they're on a
+  // valid route, drop a small skeleton in the body area.
+  if (!issue && (listLoading || fallbackLoading)) {
+    return (
+      <div className="bira" style={{ height: '100%', display: 'flex', flexDirection: 'column', background: 'var(--bg)' }}>
+        <TopBar breadcrumbs={[
+          { label: tenantName, to: `/${tenant}/workspaces` },
+          { label: workspaceName, to: `/${tenant}/${workspace}/projects` },
+          { label: projectInfo?.name ?? project, to: `/${tenant}/${workspace}/${project}` },
+          { label: 'Issues', to: `/${tenant}/${workspace}/${project}/list` },
+          key ?? '?',
+        ]} />
+        <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 32 }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8, width: 420 }}>
+            <SkeletonRow width="40%" height={14} />
+            <SkeletonRow width="80%" height={20} />
+            <SkeletonRow width="60%" height={12} />
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   if (!issue) {
+    const isError = !!fallbackError;
     return (
       <div className="bira" style={{ height: '100%', display: 'flex', flexDirection: 'column', background: 'var(--bg)' }}>
         <TopBar breadcrumbs={[
@@ -81,9 +160,17 @@ export function IssueDetailPage() {
             }}>
               <Icon name="alert" size={20} />
             </div>
-            <h2 style={{ fontSize: 17, fontWeight: 600, margin: 0 }}>Issue not found</h2>
+            <h2 style={{ fontSize: 17, fontWeight: 600, margin: 0 }}>
+              {isError ? 'Could not load issue' : 'Issue not found'}
+            </h2>
             <p style={{ fontSize: 13, color: 'var(--fg-muted)', margin: '6px 0 14px' }}>
-              <span className="mono">{key}</span> doesn’t exist in this project. It may have been deleted, or the link is wrong.
+              {isError ? (
+                fallbackError
+              ) : (
+                <>
+                  <span className="mono">{key}</span> doesn’t exist in this project. It may have been deleted, or the link is wrong.
+                </>
+              )}
             </p>
             <Link to={`/${tenant}/${workspace}/${project}/list`} className="btn btn-primary btn-sm" style={{ textDecoration: 'none' }}>
               <Icon name="arrowRight" size={13} />Back to issues
@@ -104,16 +191,47 @@ export function IssueDetailPage() {
  */
 function IssueDetail({ issue = ISSUES[0] }: { issue?: Issue }) {
   const { tenant, workspace, project, tenantName, workspaceName } = useTenantBreadcrumbs();
-  const { getProject } = useProjects();
-  const { updateIssue } = useIssues();
+  const { getProject, getProjectById } = useProjects();
+  const {
+    issues: workspaceIssues, patchIssue, setParent,
+    addRelation, removeRelation, addDependsOn, removeDependsOn,
+    getDescriptionAttachments,
+  } = useIssues();
+  // Description attachments (`attachment:<uuid>` refs expanded by the
+  // detail endpoint) — empty / undefined when the issue was only seen via
+  // the workspace list and the detail fetch hasn't landed yet.
+  const descriptionAttachmentsRaw = getDescriptionAttachments(issue.key) ?? [];
+  // Adapt to the render-side shape consumed by `RenderedAttachmentRow` —
+  // the BE already returns the same fields, just under different names
+  // (filename → name, mime → mimeType). Tolerate both forms (the
+  // `RawIssueAttachment` adapter type accepts either).
+  const descriptionAttachments = useMemo<RenderAttachment[]>(
+    () => descriptionAttachmentsRaw
+      .filter((a) => !!a.id && !!a.readUrl)
+      .map((a) => ({
+        id: a.id,
+        name: a.filename ?? a.name ?? 'attachment',
+        size: typeof a.size === 'number' ? a.size : 0,
+        mimeType: a.mime ?? a.mimeType ?? 'application/octet-stream',
+        readUrl: a.readUrl,
+      })),
+    [descriptionAttachmentsRaw],
+  );
+  const { getUser } = useUsers();
+  const { user: currentUser } = useAuth();
   // Inner detail: drive everything off the issue's owning project rather than
   // the URL slug, so the breadcrumb is right even when this is rendered inside
   // the design-canvas with a default issue.
-  const owningProject = getProject(issue.project) ?? getProject(project);
+  const owningProject = getProjectById(issue.projectId) ?? getProject(project);
+  // Resolve the assignee uuid → display name at the boundary; never render
+  // the uuid. Unassigned issues fall through to a placeholder.
+  const assigneeName = issue.assigneeUserId
+    ? (getUser(issue.assigneeUserId)?.displayName ?? UNKNOWN_USER_LABEL)
+    : 'Unassigned';
   // Reporter isn't on the fixture model — surface the current user as a
   // mock so the profile link goes somewhere real.
-  const reporter = CURRENT_USER.name;
-  const reporterEmail = CURRENT_USER.email;
+  const reporter = currentUser?.displayName ?? UNKNOWN_USER_LABEL;
+  const reporterEmail = currentUser?.email ?? '';
   const blocked = issue.status === 'in-review';
 
   const [inspectorWidth, setInspectorWidth] = useState<number>(loadInspectorWidth);
@@ -121,46 +239,77 @@ function IssueDetail({ issue = ISSUES[0] }: { issue?: Issue }) {
     try { localStorage.setItem(INSPECTOR_KEY, String(inspectorWidth)); } catch { /* ignore */ }
   }, [inspectorWidth]);
 
-  // Session-only relations the user adds via the inspector buttons. Refresh
-  // (or navigating to another issue) clears them — there's no issues
-  // provider with mutation today, and the prototype's other interactions
-  // (board reorders, comment composer) behave the same way.
+  // Children stay session-only for now — slice 6 wired up parent edits via
+  // `setParent`, but the inspector's "link existing issue as child" flow
+  // hasn't been moved to the BE yet (it would set the *target's* parent
+  // to this issue, which the BE supports but the UX is its own follow-up).
   const navigate = useNavigate();
   const [addedChildren, setAddedChildren] = useState<string[]>([]);
-  const [addedRelated, setAddedRelated] = useState<string[]>([]);
-  // undefined = no override, fall through to issue.parent;
-  // string     = user picked a new parent;
-  // null       = user explicitly cleared the parent.
-  const [parentOverride, setParentOverride] = useState<string | null | undefined>(undefined);
   // Picker mode is null when closed; set to 'child', 'related', 'parent', or
   // 'depends-on'. Depends-on is Task-only and validated against the existing
   // graph to keep it acyclic.
   const [pickerMode, setPickerMode] = useState<null | 'child' | 'related' | 'parent' | 'depends-on'>(null);
-  // Date + estimate edits flow through the IssuesProvider so they survive a
-  // refresh and stay in sync with the gantt. Local state mirrors the live
-  // value so the EditableDate / EditableEstimate controls keep their existing
-  // controlled-input shape.
+  // Date + estimate edits round-trip through the BE (slice 6). Local state
+  // mirrors the live value so the EditableDate / EditableEstimate controls
+  // keep their existing controlled-input shape; a failed PATCH triggers a
+  // state resync from the issue snapshot AND surfaces an inline message.
   const [startDate, setStartDateLocal] = useState<string | undefined>(issue.startDate);
   const [endDate, setEndDateLocal] = useState<string | undefined>(issue.endDate);
-  const setStartDate = (next: string | undefined) => {
+  // Per-control inline error messages — keyed by a short code so a fresh
+  // success in one field doesn't dismiss an unrelated error. Cleared on
+  // the next successful patch for the same key. Slice 7 adds `related` /
+  // `dependsOn` for link-mutation feedback (cycle / Task-only / etc.).
+  const [errors, setErrors] = useState<Partial<Record<
+    'status' | 'priority' | 'assignee' | 'startDate' | 'endDate' | 'estimate'
+    | 'parent' | 'related' | 'dependsOn', string
+  >>>({});
+  const clearError = (k: keyof typeof errors) => setErrors((p) => {
+    if (!(k in p)) return p;
+    const next = { ...p };
+    delete next[k];
+    return next;
+  });
+  const setError = (k: keyof typeof errors, message: string) =>
+    setErrors((p) => ({ ...p, [k]: message }));
+
+  const setStartDate = async (next: string | undefined) => {
+    const prev = startDate;
     setStartDateLocal(next);
-    updateIssue(issue.id, { startDate: next });
+    const result = await patchIssue(issue.key, { startDate: next ?? null });
+    if (!result.ok) {
+      setStartDateLocal(prev);
+      setError('startDate', result.message);
+    } else {
+      clearError('startDate');
+    }
   };
-  const setEndDate = (next: string | undefined) => {
+  const setEndDate = async (next: string | undefined) => {
+    const prev = endDate;
     setEndDateLocal(next);
-    updateIssue(issue.id, { endDate: next });
+    const result = await patchIssue(issue.key, { endDate: next ?? null });
+    if (!result.ok) {
+      setEndDateLocal(prev);
+      setError('endDate', result.message);
+    } else {
+      clearError('endDate');
+    }
   };
-  // Depends-on (predecessors). Editable in-session — both add and remove —
-  // because the cycle check needs a single coherent view of "this Task's
-  // current dependencies", not "fixture + additions" as a layered overlay.
-  // Persistence for relation edits is deferred (depends-on / parent /
-  // related need symmetric writes on both ends).
-  const [dependsOn, setDependsOn] = useState<string[]>(issue.dependsOn ?? []);
+  // Depends-on (predecessors) and Related links read directly off the
+  // BE-backed `issue` — slice 7 wired both into `useIssues()` so optimistic
+  // mutations show up here without a local mirror. The cycle check still
+  // runs against the workspace cache (see `dependencyGraph` below).
   // Effort estimate. Mandatory on Tasks (the unit of scheduled work).
   const [estimate, setEstimateLocal] = useState<number | undefined>(issue.estimate);
-  const setEstimate = (next: number | undefined) => {
+  const setEstimate = async (next: number | undefined) => {
+    const prev = estimate;
     setEstimateLocal(next);
-    updateIssue(issue.id, { estimate: next });
+    const result = await patchIssue(issue.key, { estimate: next ?? null });
+    if (!result.ok) {
+      setEstimateLocal(prev);
+      setError('estimate', result.message);
+    } else {
+      clearError('estimate');
+    }
   };
 
   // Resync local-state mirrors when navigating to a different issue OR when
@@ -170,18 +319,19 @@ function IssueDetail({ issue = ISSUES[0] }: { issue?: Issue }) {
   // into itself.
   useEffect(() => {
     setAddedChildren([]);
-    setAddedRelated([]);
-    setParentOverride(undefined);
     setPickerMode(null);
     setStartDateLocal(issue.startDate);
     setEndDateLocal(issue.endDate);
-    setDependsOn(issue.dependsOn ?? []);
     setEstimateLocal(issue.estimate);
-  }, [issue.id, issue.startDate, issue.endDate, issue.dependsOn, issue.estimate]);
+    setErrors({});
+  }, [issue.key, issue.startDate, issue.endDate, issue.estimate]);
 
   const allChildren = [...(issue.children ?? []), ...addedChildren];
-  const allRelated = [...(issue.relatedTo ?? []), ...addedRelated];
-  const effectiveParent = parentOverride === undefined ? (issue.parent ?? null) : parentOverride;
+  const allRelated = issue.relatedTo ?? [];
+  const dependsOn = issue.dependsOn ?? [];
+  // Parent reads through to the BE-backed issue (post-write the cache is
+  // updated, so this auto-refreshes when `setParent` returns success).
+  const effectiveParent = issue.parent ?? null;
 
   // Valid child types per the v1 hierarchy:
   //   Epic   → Story / Task / Bug
@@ -201,33 +351,70 @@ function IssueDetail({ issue = ISSUES[0] }: { issue?: Issue }) {
         : [];
 
   const goCreateChild = () => {
-    navigate(`/${tenant}/${workspace}/${project}/issue/new?parent=${issue.id}`);
+    navigate(`/${tenant}/${workspace}/${project}/issue/new?parent=${issue.key}`);
   };
   const openChildPicker = () => setPickerMode('child');
   const openRelatedPicker = () => setPickerMode('related');
   const openParentPicker = () => setPickerMode('parent');
   const openDependencyPicker = () => setPickerMode('depends-on');
-  const clearParent = () => setParentOverride(null);
-  const removeDependency = (id: string) =>
-    setDependsOn((prev) => prev.filter((d) => d !== id));
-
-  const handlePickerSelect = (target: Issue) => {
-    if (pickerMode === 'child') setAddedChildren((prev) => [...prev, target.id]);
-    else if (pickerMode === 'related') setAddedRelated((prev) => [...prev, target.id]);
-    else if (pickerMode === 'parent') setParentOverride(target.id);
-    else if (pickerMode === 'depends-on') setDependsOn((prev) => [...prev, target.id]);
-    setPickerMode(null);
+  const clearParent = async () => {
+    const result = await setParent(issue.key, null);
+    if (!result.ok) setError('parent', result.message);
+    else clearError('parent');
+  };
+  // Slice 7 — link mutations. Each path optimistically updates BOTH ends
+  // of the symmetric edge in the workspace cache, then PATCHes the BE.
+  // The picker is closed before the await so the UX feels snappy; failures
+  // surface as inline errors under the relevant section without re-opening
+  // the picker.
+  const removeDependency = async (blockerKey: string) => {
+    const result = await removeDependsOn(issue.key, blockerKey);
+    if (!result.ok) setError('dependsOn', result.message);
+    else clearError('dependsOn');
+  };
+  const removeBlocked = async (dependentKey: string) => {
+    // Removing from the OTHER end — `dependentKey` depends on `issue.key`,
+    // so the call passes the dependent's key first.
+    const result = await removeDependsOn(dependentKey, issue.key);
+    if (!result.ok) setError('dependsOn', result.message);
+    else clearError('dependsOn');
+  };
+  const removeRelatedLink = async (otherKey: string) => {
+    const result = await removeRelation(issue.key, otherKey);
+    if (!result.ok) setError('related', result.message);
+    else clearError('related');
   };
 
-  // Predecessors map for the depends-on cycle check: fixture state for every
-  // issue, with this issue's row swapped for the live session value so the
-  // picker reflects what the user has staged.
+  const handlePickerSelect = async (target: Issue) => {
+    const mode = pickerMode;
+    setPickerMode(null);
+    if (mode === 'child') setAddedChildren((prev) => [...prev, target.key]);
+    else if (mode === 'related') {
+      const result = await addRelation(issue.key, target.key);
+      if (!result.ok) setError('related', result.message);
+      else clearError('related');
+    }
+    else if (mode === 'parent') {
+      const result = await setParent(issue.key, target.key);
+      if (!result.ok) setError('parent', result.message);
+      else clearError('parent');
+    }
+    else if (mode === 'depends-on') {
+      const result = await addDependsOn(issue.key, target.key);
+      if (!result.ok) setError('dependsOn', result.message);
+      else clearError('dependsOn');
+    }
+  };
+
+  // Predecessors map for the depends-on cycle check. Reads directly off the
+  // workspace cache — `dependsOn` for `issue.key` is already up to date here
+  // because optimistic mutations from `addDependsOn` write through to the
+  // cache before the await resolves.
   const dependencyGraph = useMemo(() => {
     const m = new Map<string, string[]>();
-    for (const i of ISSUES) m.set(i.id, [...(i.dependsOn ?? [])]);
-    m.set(issue.id, dependsOn);
+    for (const i of workspaceIssues) m.set(i.key, [...(i.dependsOn ?? [])]);
     return m;
-  }, [issue.id, dependsOn]);
+  }, [workspaceIssues]);
 
   const startInspectorResize = (e: React.MouseEvent) => {
     e.preventDefault();
@@ -260,7 +447,7 @@ function IssueDetail({ issue = ISSUES[0] }: { issue?: Issue }) {
         { label: workspaceName, to: `/${tenant}/${workspace}/projects` },
         { label: owningProject?.name ?? project, to: `/${tenant}/${workspace}/${project}` },
         { label: 'Issues', to: `/${tenant}/${workspace}/${project}/list` },
-        issue.id,
+        issue.key,
       ]} />
 
       <div style={{ display: 'flex', flex: 1, minHeight: 0 }}>
@@ -268,9 +455,9 @@ function IssueDetail({ issue = ISSUES[0] }: { issue?: Issue }) {
           <div style={{ maxWidth: 760, padding: '24px 32px' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
               <TypeChip type={issue.type} />
-              <IssueId id={issue.id} />
+              <IssueId id={issue.key} />
               <CopyLinkButton
-                url={`${window.location.origin}/${tenant}/${workspace}/${issue.project}/issue/${issue.id}`}
+                url={`${window.location.origin}/${tenant}/${workspace}/${owningProject?.slug ?? project}/issue/${issue.key}`}
               />
               <span style={{ fontSize: 11, color: 'var(--fg-faint)' }}>·</span>
               <span style={{ fontSize: 11, color: 'var(--fg-muted)' }}>
@@ -320,7 +507,7 @@ function IssueDetail({ issue = ISSUES[0] }: { issue?: Issue }) {
                     ruleType="role"
                     status="fail"
                     title="Only admins can move to Done"
-                    detail={<>You are signed in as <strong>{issue.assignee}</strong> (member). Required role: <strong>admin</strong>.</>}
+                    detail={<>You are signed in as <strong>{assigneeName}</strong> (member). Required role: <strong>admin</strong>.</>}
                   />
                   <BlockedRule
                     ruleType="required_fields"
@@ -363,9 +550,13 @@ function IssueDetail({ issue = ISSUES[0] }: { issue?: Issue }) {
               Description is editable in-session: the textarea writes back to
               local component state but not to the fixture, matching the
               prototype's other UI-only mutations (board reorders, addedChildren).
-              `key={issue.id}` resets the editor when navigating between issues.
+              `key={issue.key}` resets the editor when navigating between issues.
             */}
-            <EditableDescription key={issue.id} initial={issue.description ?? ''} />
+            <EditableDescription
+              key={issue.key}
+              initial={issue.description ?? ''}
+              attachments={descriptionAttachments}
+            />
 
             {/*
               Linked issues — sits between the description and activity so child
@@ -379,11 +570,15 @@ function IssueDetail({ issue = ISSUES[0] }: { issue?: Issue }) {
               relatedIds={allRelated}
               dependsOnIds={dependsOn}
               dependedOnByIds={issue.dependedOnBy ?? []}
+              relatedError={errors.related}
+              dependsOnError={errors.dependsOn}
               onCreateChild={goCreateChild}
               onLinkChild={openChildPicker}
               onLinkRelated={openRelatedPicker}
               onLinkDependency={openDependencyPicker}
+              onRemoveRelated={removeRelatedLink}
               onRemoveDependency={removeDependency}
+              onRemoveBlocked={removeBlocked}
             />
 
             {/* Activity */}
@@ -406,7 +601,7 @@ function IssueDetail({ issue = ISSUES[0] }: { issue?: Issue }) {
             }}
           />
           <div className="scroll" style={{ height: '100%', overflow: 'auto', padding: 16 }}>
-          <Meta label="Status">
+          <Meta label="Status" error={errors.status}>
             <button className="btn btn-sm" style={{
               width: '100%', justifyContent: 'flex-start',
               background: `var(--${issue.status}-bg)`,
@@ -416,7 +611,10 @@ function IssueDetail({ issue = ISSUES[0] }: { issue?: Issue }) {
               <StatusDot status={issue.status} size={11} /> {STATUS_LABEL[issue.status]}
               <Icon name="chevronDown" size={12} style={{ marginLeft: 'auto', opacity: 0.6 }} />
             </button>
-            {/* Mini transition picker preview */}
+            {/* Mini transition picker — clicking a row PATCHes status. The
+                BE workflow guard (slice 5 on the BE) returns 403 with a
+                human-readable reason on rejection; the optimistic write
+                rolls back and the message renders below the chip. */}
             <div style={{
               marginTop: 6, border: '1px solid var(--border)', borderRadius: 6,
               background: 'var(--bg)', overflow: 'hidden',
@@ -436,6 +634,11 @@ function IssueDetail({ issue = ISSUES[0] }: { issue?: Issue }) {
                     blocked={blockedHere}
                     reason={blockedHere ? '2 rules failing' : undefined}
                     available={!blockedHere}
+                    onClick={async () => {
+                      const result = await patchIssue(issue.key, { status: s.id });
+                      if (!result.ok) setError('status', result.message);
+                      else clearError('status');
+                    }}
                   />
                 );
               })}
@@ -448,7 +651,7 @@ function IssueDetail({ issue = ISSUES[0] }: { issue?: Issue }) {
           </Meta>
           <Meta label="Assignee">
             <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-              <Avatar name={issue.assignee} size={20} /><span>{issue.assignee}</span>
+              <Avatar name={assigneeName} size={20} /><span>{assigneeName}</span>
             </span>
           </Meta>
           <Meta label="Reporter">
@@ -467,7 +670,7 @@ function IssueDetail({ issue = ISSUES[0] }: { issue?: Issue }) {
           <Meta label="Project">
             <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
               <Icon name="folder" size={13} color="var(--fg-muted)" />
-              {owningProject?.name ?? issue.project}
+              {owningProject?.name ?? 'Unknown project'}
             </span>
           </Meta>
           {/* Effort. Required on Tasks (the unit of scheduled work);
@@ -477,7 +680,7 @@ function IssueDetail({ issue = ISSUES[0] }: { issue?: Issue }) {
               For Tasks with both dates set we also surface the actual
               points-per-day load — anything above 1× ideal is flagged. */}
           {(issue.type === 'T' || issue.type === 'B') && (
-            <Meta label={issue.type === 'T' ? 'Effort (required)' : 'Effort'}>
+            <Meta label={issue.type === 'T' ? 'Effort (required)' : 'Effort'} error={errors.estimate}>
               <EditableEstimate
                 value={estimate}
                 onChange={setEstimate}
@@ -505,12 +708,14 @@ function IssueDetail({ issue = ISSUES[0] }: { issue?: Issue }) {
             <>
               <Meta
                 label="Start date"
+                error={errors.startDate}
                 extras={startDate ? <ClearDateButton onClear={() => setStartDate(undefined)} label="Clear start date" /> : undefined}
               >
                 <EditableDate value={startDate} max={endDate} onChange={setStartDate} />
               </Meta>
               <Meta
                 label="End date"
+                error={errors.endDate}
                 extras={endDate ? <ClearDateButton onClear={() => setEndDate(undefined)} label="Clear end date" /> : undefined}
               >
                 <EditableDate value={endDate} min={startDate} onChange={setEndDate} />
@@ -529,6 +734,7 @@ function IssueDetail({ issue = ISSUES[0] }: { issue?: Issue }) {
           {issue.type !== 'E' && (
             <Meta
               label={issue.type === 'S' ? 'Parent (required)' : 'Parent'}
+              error={errors.parent}
               extras={
                 <button
                   type="button"
@@ -596,19 +802,19 @@ function IssueDetail({ issue = ISSUES[0] }: { issue?: Issue }) {
           }
           subtitle={
             pickerMode === 'child'
-              ? `Pick an issue to link as a child of ${issue.id}. ${
+              ? `Pick an issue to link as a child of ${issue.key}. ${
                   issue.type === 'E' ? 'Stories, Tasks, and Bugs are valid.' : 'Only Tasks and Bugs are valid children of a Story.'
                 }`
               : pickerMode === 'related'
                 ? 'Pick any issue to mark as related. Relates is symmetric.'
                 : pickerMode === 'depends-on'
-                  ? `Pick a Task that ${issue.id} should wait on. Only other Tasks are valid; candidates that would close a cycle are filtered out.`
-                  : `Pick the parent of ${issue.id}. ${
+                  ? `Pick a Task that ${issue.key} should wait on. Only other Tasks are valid; candidates that would close a cycle are filtered out.`
+                  : `Pick the parent of ${issue.key}. ${
                       issue.type === 'S' ? 'Only Epics are valid parents of a Story.' : 'Epics and Stories are valid parents of a Task or Bug.'
                     }`
           }
           excludeIds={[
-            issue.id,
+            issue.key,
             ...allChildren,
             ...allRelated,
             ...(effectiveParent ? [effectiveParent] : []),
@@ -620,7 +826,7 @@ function IssueDetail({ issue = ISSUES[0] }: { issue?: Issue }) {
               : pickerMode === 'parent'
                 ? (i) => allowedParentTypes.includes(i.type)
                 : pickerMode === 'depends-on'
-                  ? (i) => i.type === 'T' && !dependsOnWouldCycle(issue.id, i.id, dependencyGraph)
+                  ? (i) => i.type === 'T' && !dependsOnWouldCycle(issue.key, i.key, dependencyGraph)
                   : undefined
           }
           onSelect={handlePickerSelect}
@@ -690,15 +896,16 @@ interface TransOptionProps {
   available?: boolean;
   blocked?: boolean;
   reason?: string;
+  /**
+   * Slice 6 — fires when the row is clicked and the transition isn't
+   * locally blocked. Awaits the BE PATCH; the host is responsible for
+   * rolling back / surfacing errors.
+   */
+  onClick?: () => void;
 }
-function TransOption({ status, label, trigger, blocked, reason }: TransOptionProps) {
-  return (
-    <div style={{
-      display: 'flex', alignItems: 'center', gap: 8, padding: '6px 8px',
-      cursor: blocked ? 'not-allowed' : 'pointer',
-      opacity: blocked ? 0.6 : 1,
-      borderTop: '1px solid var(--border-muted)',
-    }}>
+function TransOption({ status, label, trigger, blocked, reason, onClick }: TransOptionProps) {
+  const inner = (
+    <>
       <StatusDot status={status} size={10} />
       <span style={{ fontSize: 12, fontWeight: 500 }}>{label}</span>
       {trigger && (
@@ -713,11 +920,47 @@ function TransOption({ status, label, trigger, blocked, reason }: TransOptionPro
           <Icon name="lock" size={11} /><span>{reason}</span>
         </span>
       )}
+    </>
+  );
+  if (onClick && !blocked) {
+    return (
+      <button
+        type="button"
+        onClick={onClick}
+        style={{
+          display: 'flex', alignItems: 'center', gap: 8, padding: '6px 8px',
+          width: '100%', textAlign: 'left',
+          cursor: 'pointer',
+          background: 'transparent', border: 'none',
+          borderTop: '1px solid var(--border-muted)',
+          color: 'inherit', font: 'inherit',
+        }}
+        onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--bg-subtle)'; }}
+        onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
+      >
+        {inner}
+      </button>
+    );
+  }
+  return (
+    <div style={{
+      display: 'flex', alignItems: 'center', gap: 8, padding: '6px 8px',
+      cursor: blocked ? 'not-allowed' : 'pointer',
+      opacity: blocked ? 0.6 : 1,
+      borderTop: '1px solid var(--border-muted)',
+    }}>
+      {inner}
     </div>
   );
 }
 
-function Meta({ label, extras, children }: { label: string; extras?: ReactNode; children: ReactNode }) {
+function Meta({ label, extras, error, children }: {
+  label: string;
+  extras?: ReactNode;
+  /** Inline error message rendered below the value — used for failed PATCH feedback. */
+  error?: string;
+  children: ReactNode;
+}) {
   return (
     <div style={{ marginBottom: 14 }}>
       <div style={{ display: 'flex', alignItems: 'center', minHeight: 18, marginBottom: 6 }}>
@@ -725,6 +968,17 @@ function Meta({ label, extras, children }: { label: string; extras?: ReactNode; 
         {extras && <><div style={{ flex: 1 }} />{extras}</>}
       </div>
       <div style={{ fontSize: 12.5, color: 'var(--fg)' }}>{children}</div>
+      {error && (
+        <div
+          role="alert"
+          style={{
+            marginTop: 4, fontSize: 11.5, color: 'var(--blocked)',
+            display: 'inline-flex', alignItems: 'center', gap: 4,
+          }}
+        >
+          <Icon name="alert" size={11} />{error}
+        </div>
+      )}
     </div>
   );
 }
@@ -1027,10 +1281,16 @@ function MemberLink({ tenant, workspace, name, email }: { tenant: string; worksp
  * affordance. Edit mode is a textarea with Save / Cancel + ⌘+Enter / Esc.
  *
  * State is local to this mount — saving updates what the user sees but does
- * not write back to the fixture. The parent passes `key={issue.id}` so
+ * not write back to the fixture. The parent passes `key={issue.key}` so
  * navigating to a different issue resets the editor cleanly.
  */
-function EditableDescription({ initial }: { initial: string }) {
+function EditableDescription({
+  initial,
+  attachments = [],
+}: {
+  initial: string;
+  attachments?: RenderAttachment[];
+}) {
   const [value, setValue] = useState(initial);
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState('');
@@ -1254,9 +1514,19 @@ function EditableDescription({ initial }: { initial: string }) {
           </div>
         </>
       ) : value.trim() ? (
-        <div style={{ fontSize: 14, color: 'var(--fg)', lineHeight: 1.65 }}>
-          {renderRichText(value)}
-        </div>
+        <>
+          <div style={{ fontSize: 14, color: 'var(--fg)', lineHeight: 1.65 }}>
+            {renderRichText(value)}
+          </div>
+          {attachments.length > 0 && (
+            <RenderedAttachmentRow attachments={attachments} />
+          )}
+        </>
+      ) : attachments.length > 0 ? (
+        // Description body is empty but attachments were uploaded with the
+        // issue — surface them so the files are still reachable, with an
+        // edit affordance for adding prose later.
+        <RenderedAttachmentRow attachments={attachments} />
       ) : (
         <button
           type="button"
@@ -1388,26 +1658,29 @@ function CopyLinkButton({ url }: { url: string }) {
 }
 
 /**
- * A single issue rendered as a Link with type chip + id + title. Falls back
- * to plain text if the referenced issue isn't in the fixture (would only
- * happen if a relation went stale).
+ * A single issue rendered as a Link with type chip + key + title. Falls back
+ * to plain text if the referenced issue isn't in the workspace cache (would
+ * only happen if a relation went stale or the cache hasn't yet hydrated).
  */
 function IssueLink({ id }: { id: string }) {
   const { tenant, workspace } = useTenantContext();
-  const target = issueById(id);
+  const { getProjectById } = useProjects();
+  const { getIssue } = useIssues();
+  const target = getIssue(id);
   if (!target) {
     return <span className="mono" style={{ fontSize: 11.5, color: 'var(--fg-muted)' }}>{id}</span>;
   }
+  const projectSlug = getProjectById(target.projectId)?.slug ?? '';
   return (
     <Link
-      to={`/${tenant}/${workspace}/${target.project}/issue/${target.id}`}
+      to={`/${tenant}/${workspace}/${projectSlug}/issue/${target.key}`}
       style={{
         display: 'flex', alignItems: 'center', gap: 6, minWidth: 0,
         color: 'var(--fg)', fontSize: 12, textDecoration: 'none',
       }}
     >
       <TypeChip type={target.type} />
-      <span className="mono" style={{ color: 'var(--fg-muted)', flexShrink: 0 }}>{target.id}</span>
+      <span className="mono" style={{ color: 'var(--fg-muted)', flexShrink: 0 }}>{target.key}</span>
       <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
         {target.title}
       </span>
@@ -1495,22 +1768,33 @@ function LinkedIssuesPanel({
   relatedIds,
   dependsOnIds,
   dependedOnByIds,
+  relatedError,
+  dependsOnError,
   onCreateChild,
   onLinkChild,
   onLinkRelated,
   onLinkDependency,
+  onRemoveRelated,
   onRemoveDependency,
+  onRemoveBlocked,
 }: {
   issue: Issue;
   childIds: string[];
   relatedIds: string[];
   dependsOnIds: string[];
   dependedOnByIds: string[];
+  /** Inline error for the relates section — failed add/remove. */
+  relatedError?: string;
+  /** Inline error covering both "Depends on" + "Blocks" (same edge type). */
+  dependsOnError?: string;
   onCreateChild: () => void;
   onLinkChild: () => void;
   onLinkRelated: () => void;
   onLinkDependency: () => void;
+  onRemoveRelated: (id: string) => void;
   onRemoveDependency: (id: string) => void;
+  /** Remove a successor from the OTHER end (the dependent's row). */
+  onRemoveBlocked: (id: string) => void;
 }) {
   const showChildren = issue.type === 'E' || issue.type === 'S';
   const childEmpty = issue.type === 'E'
@@ -1537,6 +1821,7 @@ function LinkedIssuesPanel({
           count={dependsOnIds.length}
           ids={dependsOnIds}
           emptyText="Nothing blocking — this task is ready to start once scheduled."
+          error={dependsOnError}
           onRemove={onRemoveDependency}
           action={
             <button
@@ -1556,6 +1841,11 @@ function LinkedIssuesPanel({
           count={dependedOnByIds.length}
           ids={dependedOnByIds}
           emptyText=""
+          // Same error key — Depends-on and Blocks both surface
+          // dependency-mutation failures, but only one section renders an
+          // error at a time (the one most recently mutated). Keying off
+          // a single `dependsOnError` keeps the contract simple.
+          onRemove={onRemoveBlocked}
         />
       )}
       <LinkedSection
@@ -1563,6 +1853,8 @@ function LinkedIssuesPanel({
         count={relatedIds.length}
         ids={relatedIds}
         emptyText="No related issues linked yet."
+        error={relatedError}
+        onRemove={onRemoveRelated}
         action={
           <button
             type="button"
@@ -1584,6 +1876,7 @@ function LinkedSection({
   ids,
   emptyText,
   action,
+  error,
   onRemove,
 }: {
   label: string;
@@ -1591,6 +1884,8 @@ function LinkedSection({
   ids: string[];
   emptyText: string;
   action?: ReactNode;
+  /** Inline error rendered beneath the action row — covers add + remove failures. */
+  error?: string;
   /** When provided, each card shows a × that calls this with the id. */
   onRemove?: (id: string) => void;
 }) {
@@ -1614,6 +1909,17 @@ function LinkedSection({
         <div style={{ flex: 1 }} />
         {action}
       </div>
+      {error && (
+        <div
+          role="alert"
+          style={{
+            marginBottom: 8, fontSize: 11.5, color: 'var(--blocked)',
+            display: 'inline-flex', alignItems: 'center', gap: 4,
+          }}
+        >
+          <Icon name="alert" size={11} />{error}
+        </div>
+      )}
       {ids.length === 0 ? (
         emptyText ? (
           <div style={{
@@ -1639,7 +1945,10 @@ function LinkedSection({
 
 function LinkedIssueCard({ id, onRemove }: { id: string; onRemove?: () => void }) {
   const { tenant, workspace } = useTenantContext();
-  const target = issueById(id);
+  const { getProjectById } = useProjects();
+  const { getUser } = useUsers();
+  const { getIssue } = useIssues();
+  const target = getIssue(id);
   if (!target) {
     return (
       <div style={{
@@ -1651,6 +1960,10 @@ function LinkedIssueCard({ id, onRemove }: { id: string; onRemove?: () => void }
       </div>
     );
   }
+  const projectSlug = getProjectById(target.projectId)?.slug ?? '';
+  const targetAssigneeName = target.assigneeUserId
+    ? (getUser(target.assigneeUserId)?.displayName ?? UNKNOWN_USER_LABEL)
+    : '';
   // Card is a div with the body content wrapped in a Link; the optional ×
   // sits as a sibling of the link so a click on it doesn't navigate.
   return (
@@ -1671,7 +1984,7 @@ function LinkedIssueCard({ id, onRemove }: { id: string; onRemove?: () => void }
       }}
     >
       <Link
-        to={`/${tenant}/${workspace}/${target.project}/issue/${target.id}`}
+        to={`/${tenant}/${workspace}/${projectSlug}/issue/${target.key}`}
         style={{
           flex: 1, display: 'flex', alignItems: 'center', gap: 10, minWidth: 0,
           padding: '8px 10px', color: 'var(--fg)', textDecoration: 'none',
@@ -1679,18 +1992,18 @@ function LinkedIssueCard({ id, onRemove }: { id: string; onRemove?: () => void }
       >
         <StatusDot status={target.status} size={10} />
         <TypeChip type={target.type} />
-        <span className="mono" style={{ color: 'var(--fg-muted)', flexShrink: 0, fontSize: 12 }}>{target.id}</span>
+        <span className="mono" style={{ color: 'var(--fg-muted)', flexShrink: 0, fontSize: 12 }}>{target.key}</span>
         <span style={{
           flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
           fontSize: 13,
         }}>{target.title}</span>
-        <Avatar name={target.assignee} size={20} />
+        {targetAssigneeName && <Avatar name={targetAssigneeName} size={20} />}
       </Link>
       {onRemove && (
         <button
           type="button"
           onClick={onRemove}
-          aria-label={`Remove ${target.id}`}
+          aria-label={`Remove ${target.key}`}
           data-tip="Remove"
           style={{
             display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
@@ -1729,108 +2042,93 @@ function ChildMenuItem({ icon, onClick, children }: { icon: string; onClick: () 
 }
 
 // --- Activity feed with All / Comments tab filter (JIRA-style) ---
+//
+// Comments come from the BE — list/create/update/delete via `/api/comments`.
+// Events (status changes, label edits, etc.) are still fixture flavour for
+// now; the audit-log slice will replace them. The two streams are merged
+// in the All tab; the Comments tab shows only the API-backed list.
+//
+// Comment cache lives in component state, keyed implicitly by the issue
+// (the parent re-keys on `:key`). Mutations call the API, then patch the
+// local cache; failures roll back. When the user navigates away the cache
+// is dropped and a fresh fetch runs on re-entry — matches the
+// per-issue-ephemeral pattern used elsewhere on this screen.
 
 type FeedItem =
-  | { kind: 'comment'; who: string; when: string; body: ReactNode; edited?: boolean; editedWhen?: string }
+  | { kind: 'comment'; comment: Comment }
   | { kind: 'event'; who: string; when: string; verb: string; from?: string; to?: string; detail?: ReactNode; icon?: string };
 
-// Tiny inline SVG used as a demo screenshot in the seeded comment, so the
-// attached-image affordance is visible without uploading anything.
-const DEMO_SCREENSHOT =
-  'data:image/svg+xml;utf8,' +
-  encodeURIComponent(
-    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 360 200">
-      <rect width="360" height="200" fill="#0f172a"/>
-      <rect x="0" y="0" width="360" height="22" fill="#1e293b"/>
-      <circle cx="12" cy="11" r="3.5" fill="#64748b"/>
-      <circle cx="24" cy="11" r="3.5" fill="#64748b"/>
-      <circle cx="36" cy="11" r="3.5" fill="#64748b"/>
-      <rect x="60" y="6" width="120" height="11" rx="2" fill="#334155"/>
-      <rect x="20" y="40" width="90" height="10" rx="2" fill="#a78bfa"/>
-      <rect x="20" y="58" width="220" height="6" rx="2" fill="#cbd5e1"/>
-      <rect x="20" y="70" width="180" height="6" rx="2" fill="#94a3b8"/>
-      <rect x="20" y="82" width="140" height="6" rx="2" fill="#94a3b8"/>
-      <rect x="20" y="106" width="60" height="10" rx="2" fill="#fbbf24"/>
-      <rect x="20" y="124" width="200" height="6" rx="2" fill="#cbd5e1"/>
-      <rect x="20" y="136" width="160" height="6" rx="2" fill="#94a3b8"/>
-      <rect x="20" y="148" width="240" height="6" rx="2" fill="#94a3b8"/>
-      <rect x="20" y="170" width="80" height="14" rx="3" fill="#6366f1"/>
-    </svg>`,
-  );
+// Best-effort relative timestamp. Caps at "1w ago" then falls back to a
+// short date. Mirrors the language used by the fixture stream so the
+// Comments + All tabs read consistently.
+function formatRelative(iso: string): string {
+  if (!iso) return '';
+  const ts = Date.parse(iso);
+  if (Number.isNaN(ts)) return iso;
+  const diffMs = Date.now() - ts;
+  const sec = Math.max(0, Math.floor(diffMs / 1000));
+  if (sec < 60) return 'just now';
+  const min = Math.floor(sec / 60);
+  if (min < 60) return `${min}m ago`;
+  const hr = Math.floor(min / 60);
+  if (hr < 24) return `${hr}h ago`;
+  const day = Math.floor(hr / 24);
+  if (day === 1) return 'yesterday';
+  if (day < 7) return `${day}d ago`;
+  if (day < 14) return '1w ago';
+  // For older comments fall through to a short date.
+  const d = new Date(ts);
+  return `${MONTHS_SHORT[d.getMonth()]} ${d.getDate()}, ${d.getFullYear()}`;
+}
 
-const DEMO_ATTACHMENTS: Attachment[] = [
-  { id: 'demo-att-1', name: 'workflow-filter-bug.png', dataUrl: DEMO_SCREENSHOT, size: 0 },
-];
-
-const FEED_ITEMS: FeedItem[] = [
-  {
-    kind: 'comment', who: 'Maya Chen', when: '2h ago',
-    edited: true, editedWhen: '1h ago',
-    body: (
-      <div style={{ fontSize: 13, color: 'var(--fg)', lineHeight: 1.55 }}>
-        Pushed a fix that gates persistence on the unfiltered set. Want a second pair of eyes on the
-        migration path for existing dirty state.
-        {renderRichText(`\nThe write-through path now looks like:\n\n\`\`\`ts\nconst persist = debounce((view) => {\n  // Drift fix: reorder over the *full* set, not the filtered subset.\n  const next = mergeOrder(allNodes, view.visibleOrder);\n  storage.set('workflow:order', next);\n}, 250);\n\`\`\``)}
-        <AttachmentRow attachments={DEMO_ATTACHMENTS} bordered={false} />
-      </div>
-    ),
-  },
-  {
-    kind: 'comment', who: CURRENT_USER.name, when: '2h ago',
-    body: (
-      <div style={{ fontSize: 13, color: 'var(--fg)', lineHeight: 1.55 }}>
-        Looks right. I'll take another pass on the migration once the staging deploy lands —
-        if any in-flight workflows still have orphaned slot orders we should null them out
-        rather than reconstruct.
-      </div>
-    ),
-  },
+// Fixture events kept as flavour until the audit-log slice replaces them.
+// Comment items used to live here too; they've moved to the BE-backed list.
+const FIXTURE_EVENTS: FeedItem[] = [
   { kind: 'event', who: 'Jordan Lee', when: '3h ago', verb: 'moved this from', from: 'In Progress', to: 'In Review' },
   {
     kind: 'event', who: 'Sam Park', when: 'yesterday', verb: 'added the label', icon: 'tag',
     detail: <span className="pill" style={{ background: '#fee2e2', color: '#991b1b', marginLeft: 4 }}>regression</span>,
   },
-  {
-    kind: 'comment', who: 'Sam Park', when: 'yesterday',
-    body: (
-      <div style={{ fontSize: 13, color: 'var(--fg)', lineHeight: 1.55 }}>
-        Confirmed repro on staging. Marking as urgent — this drops nodes silently which is hard for users to notice.
-      </div>
-    ),
-  },
 ];
 
 type FeedTab = 'all' | 'comments';
 
-function ActivityFeed({ onNewComment }: { onNewComment?: (c: CommentView) => void }) {
+function ActivityFeed() {
   const { tenant, workspace, project } = useTenantContext();
   const { key } = useParams<{ key: string }>();
   const [tab, setTab] = useState<FeedTab>('comments');
-  const [apiComments, setApiComments] = useState<CommentView[]>([]);
+  const [comments, setComments] = useState<Comment[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
+  // Fetch on (tenant, workspace, project, key) — when the user navigates
+  // to a different issue the cache is dropped and a fresh fetch runs. The
+  // `cancelled` flag prevents stale responses from racing a newer fetch.
   useEffect(() => {
     if (!key) return;
+    let cancelled = false;
+    setLoading(true);
+    setError(null);
     listComments(tenant, workspace, project, key)
-      .then(setApiComments)
-      .catch(() => {}); // silent fallback — fixture events still visible
+      .then((items) => { if (!cancelled) setComments(items); })
+      .catch((err) => {
+        if (cancelled) return;
+        setError(err instanceof Error ? err.message : 'Failed to load comments');
+      })
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
   }, [tenant, workspace, project, key]);
 
-  // Fixture events only — strip the hardcoded comment items
-  const FIXTURE_EVENTS = FEED_ITEMS.filter((i) => i.kind === 'event');
+  // Optimistic update helpers used by row-level edit / delete + composer.
+  const handleCreated = (c: Comment) => setComments((prev) => [...prev, c]);
+  const handleUpdated = (c: Comment) =>
+    setComments((prev) => prev.map((x) => (x.id === c.id ? c : x)));
+  const handleDeleted = (id: string) =>
+    setComments((prev) => prev.filter((x) => x.id !== id));
 
-  const commentItems: FeedItem[] = apiComments.map((c) => ({
-    kind: 'comment' as const,
-    who: c.authorUserId ?? 'Unknown',
-    when: new Date(c.createdAt).toLocaleDateString(),
-    edited: c.updatedAt !== null,
-    editedWhen: c.updatedAt ? new Date(c.updatedAt).toLocaleDateString() : undefined,
-    body: (
-      <div style={{ fontSize: 13, color: 'var(--fg)', lineHeight: 1.55 }}>
-        {c.body}
-      </div>
-    ),
+  const commentItems: FeedItem[] = comments.map((c) => ({
+    kind: 'comment' as const, comment: c,
   }));
-
   const feedItems: FeedItem[] = [...commentItems, ...FIXTURE_EVENTS];
 
   const counts = {
@@ -1862,7 +2160,25 @@ function ActivityFeed({ onNewComment }: { onNewComment?: (c: CommentView) => voi
         <span style={{ fontSize: 11.5, color: 'var(--fg-faint)' }}>Newest first</span>
       </div>
 
-      {filtered.length === 0 && (
+      {loading && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 14 }}>
+          <SkeletonRow width="80%" height={36} />
+          <SkeletonRow width="60%" height={36} />
+        </div>
+      )}
+
+      {!loading && error && (
+        <div style={{
+          padding: '12px 14px', marginBottom: 14,
+          fontSize: 12.5, color: 'var(--canceled)',
+          border: '1px solid var(--canceled-muted, var(--border-muted))',
+          borderRadius: 6, background: 'var(--bg-subtle)',
+        }}>
+          Couldn’t load comments: {error}
+        </div>
+      )}
+
+      {!loading && !error && filtered.length === 0 && (
         <div style={{
           padding: '20px 12px', textAlign: 'center',
           fontSize: 12.5, color: 'var(--fg-muted)',
@@ -1872,18 +2188,17 @@ function ActivityFeed({ onNewComment }: { onNewComment?: (c: CommentView) => voi
         </div>
       )}
 
-      {filtered.map((item, i) =>
+      {!loading && !error && filtered.map((item, i) =>
         item.kind === 'comment' ? (
-          <Activity
-            key={i}
-            who={item.who}
-            when={item.when}
-            edited={item.edited}
-            editedWhen={item.editedWhen}
-          >{item.body}</Activity>
+          <CommentRow
+            key={item.comment.id}
+            comment={item.comment}
+            onUpdated={handleUpdated}
+            onDeleted={handleDeleted}
+          />
         ) : (
           <ActivityEvent
-            key={i}
+            key={`event-${i}`}
             who={item.who}
             when={item.when}
             verb={item.verb}
@@ -1895,28 +2210,402 @@ function ActivityFeed({ onNewComment }: { onNewComment?: (c: CommentView) => voi
         )
       )}
 
-      <CommentComposer onSubmit={(c) => { setApiComments((prev) => [...prev, c]); onNewComment?.(c); }} />
+      <CommentComposer onCreated={handleCreated} />
     </div>
   );
 }
 
-function CommentComposer({ onSubmit }: { onSubmit: (c: CommentView) => void }) {
-  const c = useComposer();
+// Single comment row. Renders the resolved author (UUID → display name),
+// the relative timestamp, the body via `CommentBody` (so mention tokens
+// turn into chips), and inline edit/delete affordances when the viewer
+// is the author or a workspace admin (mirrors the BE authorisation rule).
+function CommentRow({
+  comment, onUpdated, onDeleted,
+}: {
+  comment: Comment;
+  onUpdated: (c: Comment) => void;
+  onDeleted: (id: string) => void;
+}) {
+  const { tenant, workspace } = useTenantContext();
+  const { user: currentUser } = useAuth();
+  const { getMemberByUserId } = useWorkspaceMembers();
+
+  // Author may not be in the workspace directory (former member, never
+  // joined this workspace). `useResolvedUser` falls back to the tenant-
+  // scoped fetch so historical content stays readable.
+  const author = useResolvedUser(comment.authorUserId);
+  const authorName = author?.displayName ?? UNKNOWN_USER_LABEL;
+  const isSelf = !!currentUser && comment.authorUserId === currentUser.id;
+
+  // Effective role drives the admin override for delete. The BE will
+  // re-check on the wire; this is a UX gate so non-admin viewers don't
+  // see actions they can't take.
+  const role = currentUser
+    ? getMemberByUserId(currentUser.id)?.effectiveRole
+    : undefined;
+  const isAdmin = role === 'admin';
+  const canEdit = isSelf;
+  const canDelete = isSelf || isAdmin;
+
+  const when = formatRelative(comment.createdAt);
+  const editedWhen = comment.updatedAt ? formatRelative(comment.updatedAt) : undefined;
+  const edited = !!comment.updatedAt;
+
+  const [editing, setEditing] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+
+  // Inline edit form. Lives entirely inside the row — no portal, no
+  // floating panel — so it composes with the existing list layout.
+  // The composer hook owns body + attachments; we seed it from the saved
+  // comment on `beginEdit` and reset on `cancelEdit`.
+  const editComposer = useComposer({ tenantSlug: tenant, workspaceSlug: workspace });
+  const [editMentionQuery, setEditMentionQuery] = useState<string | null>(null);
+  const [savingEdit, setSavingEdit] = useState(false);
+  const [editError, setEditError] = useState<string | null>(null);
+
+  // Original attachment ids + body — used to detect "no-op edit" (skip the
+  // PATCH) and to seed the composer when entering edit mode.
+  const originalIdsKey = comment.attachmentIds.join('|');
+
+  const beginEdit = () => {
+    editComposer.reset({
+      value: comment.body,
+      existing: comment.attachments,
+    });
+    setEditError(null);
+    setEditing(true);
+  };
+  const cancelEdit = () => {
+    setEditing(false);
+    setEditMentionQuery(null);
+    setEditError(null);
+    // Drop the draft state so we don't keep stale uploads referenced.
+    editComposer.reset();
+  };
+  const saveEdit = async () => {
+    const draft = editComposer.value;
+    if (!draft.trim() || savingEdit) return;
+    if (editComposer.hasInflight) return;
+    const nextIdsKey = editComposer.attachmentIds.join('|');
+    const bodyUnchanged = draft === comment.body;
+    const attachmentsUnchanged = nextIdsKey === originalIdsKey;
+    if (bodyUnchanged && attachmentsUnchanged) { cancelEdit(); return; }
+    setSavingEdit(true);
+    setEditError(null);
+    try {
+      const updated = await updateComment(tenant, workspace, comment.id, {
+        // Only send what changed so the BE's "at least one field" guard
+        // matches the surface the user actually edited.
+        ...(bodyUnchanged ? {} : { body: draft }),
+        ...(attachmentsUnchanged ? {} : { attachmentIds: editComposer.attachmentIds }),
+      });
+      onUpdated(updated);
+      setEditing(false);
+      setEditMentionQuery(null);
+      editComposer.reset();
+    } catch (err) {
+      setEditError(err instanceof Error ? err.message : 'Failed to update comment');
+    } finally {
+      setSavingEdit(false);
+    }
+  };
+
+  const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+  const performDelete = async () => {
+    if (deleting) return;
+    setDeleting(true);
+    setDeleteError(null);
+    try {
+      await deleteComment(tenant, workspace, comment.id);
+      onDeleted(comment.id);
+      setConfirmDelete(false);
+    } catch (err) {
+      setDeleteError(err instanceof Error ? err.message : 'Failed to delete comment');
+    } finally {
+      setDeleting(false);
+    }
+  };
+
+  return (
+    <div style={{ display: 'flex', gap: 10, marginBottom: 14, alignItems: 'flex-start' }}>
+      <Avatar name={authorName} size={24} />
+      <div style={{
+        flex: 1,
+        border: `1px solid ${isSelf ? 'var(--accent-muted)' : 'var(--border-muted)'}`,
+        borderRadius: 8, overflow: 'hidden',
+      }}>
+        <div style={{
+          padding: '6px 12px',
+          background: isSelf ? 'var(--accent-muted)' : 'var(--bg-subtle)',
+          borderBottom: `1px solid ${isSelf ? 'var(--accent-muted)' : 'var(--border-muted)'}`,
+          display: 'flex', alignItems: 'center', gap: 6, fontSize: 12,
+        }}>
+          <strong style={{ color: isSelf ? 'var(--accent-active)' : 'var(--fg)' }}>{authorName}</strong>
+          {isSelf && (
+            <span className="pill" style={{
+              background: 'var(--bg)', color: 'var(--accent-active)',
+              fontSize: 10, padding: '1px 5px', fontWeight: 600,
+              border: '1px solid var(--accent-muted)',
+            }}>You</span>
+          )}
+          <span style={{ color: isSelf ? 'var(--accent-active)' : 'var(--fg-muted)', opacity: isSelf ? 0.75 : 1 }}>· {when}</span>
+          {edited && (
+            <span
+              className="pill"
+              data-tip={editedWhen ? `Edited ${editedWhen}` : 'This comment was edited'}
+              style={{
+                background: 'var(--bg-muted)', color: 'var(--fg-muted)',
+                fontSize: 10, padding: '1px 5px', fontWeight: 500,
+                fontStyle: 'italic', letterSpacing: 0.1,
+              }}
+            >edited</span>
+          )}
+          {(canEdit || canDelete) && !editing && (
+            <>
+              <div style={{ flex: 1 }} />
+              {canEdit && (
+                <button
+                  type="button"
+                  className="btn btn-ghost btn-sm"
+                  data-tip="Edit"
+                  onClick={beginEdit}
+                  style={{
+                    width: 22, height: 22, padding: 0,
+                    color: isSelf ? 'var(--accent-active)' : 'var(--fg-muted)',
+                    background: 'transparent', borderColor: 'transparent',
+                  }}
+                >
+                  <Icon name="edit" size={12} />
+                </button>
+              )}
+              {canDelete && (
+                <button
+                  type="button"
+                  className="btn btn-ghost btn-sm"
+                  data-tip="Delete"
+                  onClick={() => setConfirmDelete(true)}
+                  style={{
+                    width: 22, height: 22, padding: 0,
+                    color: isSelf ? 'var(--accent-active)' : 'var(--fg-muted)',
+                    background: 'transparent', borderColor: 'transparent',
+                  }}
+                >
+                  <Icon name="trash" size={12} />
+                </button>
+              )}
+            </>
+          )}
+        </div>
+        <div style={{ padding: '10px 12px' }}>
+          {editing ? (
+            <div style={{ position: 'relative' }}>
+              {editMentionQuery !== null && (
+                <div style={{ position: 'absolute', top: '100%', left: 0, zIndex: 100 }}>
+                  <MentionPicker
+                    query={editMentionQuery}
+                    onSelect={(hit: MentionableHit) => {
+                      const ta = editComposer.textareaRef.current;
+                      const draftValue = editComposer.value;
+                      const cursor = ta?.selectionStart ?? draftValue.length;
+                      const before = draftValue.slice(0, cursor);
+                      const after = draftValue.slice(cursor);
+                      const replaced = before.replace(/@([^\s@]*)$/, `@[${hit.type}:${hit.id}]`);
+                      editComposer.setValue(replaced + after);
+                      setEditMentionQuery(null);
+                      ta?.focus();
+                    }}
+                    onDismiss={() => setEditMentionQuery(null)}
+                  />
+                </div>
+              )}
+              <div
+                onDragOver={editComposer.handleDragOver}
+                onDragLeave={editComposer.handleDragLeave}
+                onDrop={editComposer.handleDrop}
+                style={{
+                  border: `1px solid ${editComposer.dragOver ? 'var(--accent)' : 'var(--border)'}`,
+                  borderRadius: 6,
+                  background: 'var(--bg)',
+                  boxShadow: editComposer.dragOver ? '0 0 0 3px var(--accent-muted)' : 'none',
+                }}
+              >
+                <textarea
+                  ref={editComposer.textareaRef}
+                  value={editComposer.value}
+                  onChange={(e) => {
+                    editComposer.setValue(e.target.value);
+                    const cursor = e.target.selectionStart ?? e.target.value.length;
+                    const before = e.target.value.slice(0, cursor);
+                    const m = before.match(/@([^\s@]*)$/);
+                    setEditMentionQuery(m ? m[1] : null);
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Escape') { e.preventDefault(); cancelEdit(); }
+                    if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
+                      e.preventDefault();
+                      void saveEdit();
+                    }
+                  }}
+                  onPaste={editComposer.handlePaste}
+                  rows={3}
+                  autoFocus
+                  style={{
+                    width: '100%', display: 'block',
+                    border: 'none', outline: 'none', resize: 'vertical',
+                    padding: '8px 10px', minHeight: 60,
+                    fontSize: 13, color: 'var(--fg)', background: 'transparent',
+                    fontFamily: 'var(--font-sans)', lineHeight: 1.55,
+                    boxSizing: 'border-box',
+                  }}
+                />
+                <AttachmentRow
+                  attachments={editComposer.attachments}
+                  onRemove={editComposer.removeAttachment}
+                  onRetry={editComposer.retry}
+                />
+                <div style={{
+                  padding: '4px 6px', borderTop: '1px solid var(--border-muted)',
+                  display: 'flex', alignItems: 'center', gap: 2,
+                }}>
+                  <button
+                    type="button"
+                    onClick={editComposer.openFilePicker}
+                    className="btn btn-ghost btn-sm"
+                    style={{ width: 24, padding: 0 }}
+                    data-tip="Attach file"
+                  >
+                    <Icon name="paperclip" size={12} />
+                  </button>
+                  <input
+                    ref={editComposer.fileInputRef}
+                    type="file"
+                    multiple
+                    hidden
+                    onChange={editComposer.handleFileChange}
+                  />
+                  {editComposer.hasInflight && (
+                    <span style={{ marginLeft: 6, fontSize: 11, color: 'var(--fg-muted)' }}>
+                      Uploading…
+                    </span>
+                  )}
+                </div>
+              </div>
+              {editError && (
+                <div style={{ marginTop: 6, fontSize: 12, color: 'var(--canceled)' }}>
+                  {editError}
+                </div>
+              )}
+              <div style={{ marginTop: 8, display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
+                <button
+                  type="button"
+                  className="btn btn-ghost btn-sm"
+                  onClick={cancelEdit}
+                  disabled={savingEdit}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-sm"
+                  onClick={saveEdit}
+                  disabled={
+                    savingEdit
+                    || !editComposer.value.trim()
+                    || editComposer.hasInflight
+                    || (editComposer.value === comment.body
+                      && editComposer.attachmentIds.join('|') === originalIdsKey)
+                  }
+                  data-tip={editComposer.hasInflight ? 'Wait for uploads to finish' : undefined}
+                >
+                  {savingEdit ? 'Saving…' : 'Save'}
+                </button>
+              </div>
+            </div>
+          ) : (
+            <div style={{ fontSize: 13, color: 'var(--fg)', lineHeight: 1.55 }}>
+              <CommentBody body={comment.body} />
+              {comment.attachments.length > 0 && (
+                <RenderedAttachmentRow
+                  attachments={comment.attachments as RenderAttachment[]}
+                />
+              )}
+            </div>
+          )}
+        </div>
+      </div>
+
+      {confirmDelete && (
+        <Modal
+          onClose={() => { if (!deleting) { setConfirmDelete(false); setDeleteError(null); } }}
+          maxWidth={400}
+          label="Delete comment"
+        >
+          <ModalHeader title="Delete comment?" onClose={() => { if (!deleting) { setConfirmDelete(false); setDeleteError(null); } }} />
+          <ModalBody>
+            <p style={{ margin: 0, fontSize: 13, color: 'var(--fg)', lineHeight: 1.55 }}>
+              This comment will be permanently removed. You can’t undo this.
+            </p>
+            {deleteError && (
+              <p style={{ margin: '8px 0 0', fontSize: 12, color: 'var(--canceled)' }}>
+                {deleteError}
+              </p>
+            )}
+          </ModalBody>
+          <ModalFooter>
+            <div style={{ flex: 1 }} />
+            <button
+              type="button"
+              className="btn btn-ghost btn-sm"
+              onClick={() => { setConfirmDelete(false); setDeleteError(null); }}
+              disabled={deleting}
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              className="btn btn-sm"
+              onClick={performDelete}
+              disabled={deleting}
+              style={{ background: 'var(--canceled)', color: 'var(--bg)', borderColor: 'var(--canceled)' }}
+            >
+              {deleting ? 'Deleting…' : 'Delete'}
+            </button>
+          </ModalFooter>
+        </Modal>
+      )}
+    </div>
+  );
+}
+
+function CommentComposer({ onCreated }: { onCreated: (c: Comment) => void }) {
   const { tenant, workspace, project } = useTenantContext();
+  const c = useComposer({ tenantSlug: tenant, workspaceSlug: workspace });
   const { key } = useParams<{ key: string }>();
   const [submitting, setSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
   const [mentionQuery, setMentionQuery] = useState<string | null>(null);
 
+  // Submit is gated on `hasInflight` so the BE never sees an attachmentIds
+  // list missing one of the user's still-uploading files. Failed uploads
+  // are visible inline; the user can retry or remove before sending.
   const handleSubmit = async () => {
     if (!c.value.trim() || submitting || !key) return;
+    if (c.hasInflight) return;
     setSubmitting(true);
+    setSubmitError(null);
     try {
-      const comment = await createComment(tenant, workspace, project, key, { body: c.value });
-      onSubmit(comment);
+      const comment = await createComment(tenant, workspace, project, key, {
+        body: c.value,
+        attachmentIds: c.attachmentIds.length ? c.attachmentIds : undefined,
+      });
+      onCreated(comment);
       c.setValue('');
+      // Drop the attachments — fresh composer for the next comment.
+      for (const a of c.attachments) c.removeAttachment(a.localId);
       setMentionQuery(null);
-    } catch {
-      // silent — toast system is a later slice
+    } catch (err) {
+      setSubmitError(err instanceof Error ? err.message : 'Failed to post comment');
     } finally {
       setSubmitting(false);
     }
@@ -1963,6 +2652,14 @@ function CommentComposer({ onSubmit }: { onSubmit: (c: CommentView) => void }) {
             const m = before.match(/@([^\s@]*)$/);
             setMentionQuery(m ? m[1] : null);
           }}
+          onKeyDown={(e) => {
+            // Cmd/Ctrl+Enter submits; Shift+Enter is the textarea default
+            // (newline). The picker swallows its own keys via useDismiss.
+            if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
+              e.preventDefault();
+              void handleSubmit();
+            }
+          }}
           onPaste={c.handlePaste}
           placeholder="Leave a comment… paste or drop an image, or use the code button to add a snippet"
           rows={3}
@@ -1975,7 +2672,11 @@ function CommentComposer({ onSubmit }: { onSubmit: (c: CommentView) => void }) {
             boxSizing: 'border-box',
           }}
         />
-        <AttachmentRow attachments={c.attachments} onRemove={c.removeAttachment} />
+        <AttachmentRow
+          attachments={c.attachments}
+          onRemove={c.removeAttachment}
+          onRetry={c.retry}
+        />
         <div style={{
           padding: '6px 8px', borderTop: '1px solid var(--border-muted)',
           display: 'flex', alignItems: 'center', gap: 2,
@@ -1983,21 +2684,31 @@ function CommentComposer({ onSubmit }: { onSubmit: (c: CommentView) => void }) {
           <button type="button" className="btn btn-ghost btn-sm" style={{ width: 26, padding: 0 }} data-tip="Bold"><Icon name="bold" size={13} /></button>
           <button type="button" className="btn btn-ghost btn-sm" style={{ width: 26, padding: 0 }} data-tip="Italic"><Icon name="italic" size={13} /></button>
           <button type="button" onClick={c.insertCodeBlock} className="btn btn-ghost btn-sm" style={{ width: 26, padding: 0 }} data-tip="Code block"><Icon name="code" size={13} /></button>
-          <button type="button" onClick={c.openFilePicker} className="btn btn-ghost btn-sm" style={{ width: 26, padding: 0 }} data-tip="Attach image"><Icon name="paperclip" size={13} /></button>
+          <button type="button" onClick={c.openFilePicker} className="btn btn-ghost btn-sm" style={{ width: 26, padding: 0 }} data-tip="Attach file"><Icon name="paperclip" size={13} /></button>
           <input
             ref={c.fileInputRef}
             type="file"
-            accept="image/*"
             multiple
             hidden
             onChange={c.handleFileChange}
           />
           <div style={{ flex: 1 }} />
+          {c.hasInflight && (
+            <span style={{ fontSize: 11.5, color: 'var(--fg-muted)', marginRight: 8 }}>
+              Uploading…
+            </span>
+          )}
+          {submitError && (
+            <span style={{ fontSize: 12, color: 'var(--canceled)', marginRight: 8 }}>
+              {submitError}
+            </span>
+          )}
           <button
             type="button"
             className="btn btn-sm"
             onClick={handleSubmit}
-            disabled={submitting || !c.value.trim()}
+            disabled={submitting || !c.value.trim() || c.hasInflight}
+            data-tip={c.hasInflight ? 'Wait for uploads to finish' : undefined}
           >
             {submitting ? 'Posting…' : 'Comment'}
           </button>
@@ -2040,74 +2751,6 @@ function FeedCount({ n, active }: { n: number; active: boolean }) {
         color: active ? 'var(--accent-active)' : 'var(--fg-muted)',
       }}
     >{n}</span>
-  );
-}
-
-function Activity({
-  who, when, edited, editedWhen, children,
-}: {
-  who: string;
-  when: string;
-  edited?: boolean;
-  editedWhen?: string;
-  children: ReactNode;
-}) {
-  const isSelf = who === CURRENT_USER.name;
-  return (
-    <div style={{ display: 'flex', gap: 10, marginBottom: 14, alignItems: 'flex-start' }}>
-      <Avatar name={who} size={24} />
-      <div style={{
-        flex: 1,
-        border: `1px solid ${isSelf ? 'var(--accent-muted)' : 'var(--border-muted)'}`,
-        borderRadius: 8, overflow: 'hidden',
-      }}>
-        <div style={{
-          padding: '6px 12px',
-          background: isSelf ? 'var(--accent-muted)' : 'var(--bg-subtle)',
-          borderBottom: `1px solid ${isSelf ? 'var(--accent-muted)' : 'var(--border-muted)'}`,
-          display: 'flex', alignItems: 'center', gap: 6, fontSize: 12,
-        }}>
-          <strong style={{ color: isSelf ? 'var(--accent-active)' : 'var(--fg)' }}>{who}</strong>
-          {isSelf && (
-            <span className="pill" style={{
-              background: 'var(--bg)', color: 'var(--accent-active)',
-              fontSize: 10, padding: '1px 5px', fontWeight: 600,
-              border: '1px solid var(--accent-muted)',
-            }}>You</span>
-          )}
-          <span style={{ color: isSelf ? 'var(--accent-active)' : 'var(--fg-muted)', opacity: isSelf ? 0.75 : 1 }}>· {when}</span>
-          {edited && (
-            <span
-              className="pill"
-              data-tip={editedWhen ? `Edited ${editedWhen}` : 'This comment was edited'}
-              style={{
-                background: 'var(--bg-muted)', color: 'var(--fg-muted)',
-                fontSize: 10, padding: '1px 5px', fontWeight: 500,
-                fontStyle: 'italic', letterSpacing: 0.1,
-              }}
-            >edited</span>
-          )}
-          {isSelf && (
-            <>
-              <div style={{ flex: 1 }} />
-              <button type="button" className="btn btn-ghost btn-sm" data-tip="Edit" style={{
-                width: 22, height: 22, padding: 0, color: 'var(--accent-active)',
-                background: 'transparent', borderColor: 'transparent',
-              }}>
-                <Icon name="edit" size={12} />
-              </button>
-              <button type="button" className="btn btn-ghost btn-sm" data-tip="Delete" style={{
-                width: 22, height: 22, padding: 0, color: 'var(--accent-active)',
-                background: 'transparent', borderColor: 'transparent',
-              }}>
-                <Icon name="trash" size={12} />
-              </button>
-            </>
-          )}
-        </div>
-        <div style={{ padding: '10px 12px' }}>{children}</div>
-      </div>
-    </div>
   );
 }
 

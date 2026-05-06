@@ -1,20 +1,22 @@
 // Settings: workspace-level (general, members) + user profile.
 // Sections live as nested routes so each is deep-linkable.
-import { useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { Icon } from '../components/icons';
 import { TopBar, Avatar, useTenantBreadcrumbs, useTenantContext } from '../components/shell';
 import { Modal, ModalHeader, ModalBody, ModalFooter } from '../components/modal';
 import { Field, Hint, DangerRow } from '../components/forms';
 import { Section } from '../components/section';
-import {
-  workspaceMembersDerived,
-  type WorkspaceMemberView, type WorkspaceMemberProvenance, type WorkspaceRole,
-} from '../fixtures';
-import { useProjects } from '../state/projects';
+import { EmptyState } from '../components/states';
+import { useDismiss } from '../components/use-dismiss';
+import type { Role } from '../fixtures';
 import { useWorkspaces } from '../state/workspaces';
 import { useAuth } from '../state/auth';
+import { useUsers } from '../state/users';
+import { useWorkspaceMembers } from '../state/workspace-members';
+import type { WorkspaceMember } from '../api/adapters/workspaceMember.adapter';
 import { updateProfile, changePassword } from '../api/auth';
+import { adminResetPassword, deactivateUser, reactivateUser } from '../api/userAdmin';
 
 // --- Outer layout (header + secondary tab strip + outlet) ---
 
@@ -165,24 +167,118 @@ export function GeneralSettings() {
 
 export function MembersSettings() {
   const { tenant, workspace } = useTenantContext();
-  const { projects, getProject } = useProjects();
+  const { getWorkspace } = useWorkspaces();
+  const { user: currentUser } = useAuth();
+  const { members, loading, error, refresh, invite, setRole, remove } = useWorkspaceMembers();
+  const { users } = useUsers();
+
+  const ws = getWorkspace(workspace);
+  // Effective role of the acting user in this workspace. Drives gating for
+  // the "admin actions" dropdown — only workspace admins (or tenant admins
+  // who inherit) see destructive controls.
+  const isAdmin = ws?.role === 'admin';
+
   const [filter, setFilter] = useState('');
   const [showInvite, setShowInvite] = useState(false);
-  const [inviteEmail, setInviteEmail] = useState('');
-  const [inviteRole, setInviteRole] = useState<WorkspaceRole>('write');
+  const [rowError, setRowError] = useState<{ membershipId: string; msg: string } | null>(null);
+  const [resetResult, setResetResult] = useState<{ name: string; password: string } | null>(null);
 
-  const members = workspaceMembersDerived(tenant, workspace, projects);
-  const filtered = members.filter((m) => {
-    if (!filter) return true;
+  const filtered = useMemo(() => {
+    if (!filter) return members;
     const f = filter.toLowerCase();
-    return m.name.toLowerCase().includes(f) || m.email.toLowerCase().includes(f);
-  });
+    return members.filter(
+      (m) => m.displayName.toLowerCase().includes(f) || m.email.toLowerCase().includes(f),
+    );
+  }, [members, filter]);
+
+  // Candidates for invite: tenant users not yet in the workspace.
+  const inviteCandidates = useMemo(() => {
+    const existing = new Set(members.map((m) => m.userId));
+    return users.filter((u) => !existing.has(u.id));
+  }, [users, members]);
+
+  const handleSetRole = async (m: WorkspaceMember, role: Role) => {
+    setRowError(null);
+    try {
+      await setRole(m.membershipId, role);
+    } catch (err) {
+      setRowError({
+        membershipId: m.membershipId,
+        msg: err instanceof Error ? err.message : 'Failed to update role',
+      });
+    }
+  };
+
+  const handleRemove = async (m: WorkspaceMember) => {
+    if (!window.confirm(
+      `Remove ${m.displayName} from this workspace? They'll lose access immediately.`,
+    )) return;
+    setRowError(null);
+    try {
+      await remove(m.membershipId);
+    } catch (err) {
+      setRowError({
+        membershipId: m.membershipId,
+        msg: err instanceof Error ? err.message : 'Failed to remove member',
+      });
+    }
+  };
+
+  const handleAdminReset = async (m: WorkspaceMember) => {
+    if (!window.confirm(
+      `Reset password for ${m.displayName}? A temporary password will be generated and shown to you once.`,
+    )) return;
+    setRowError(null);
+    try {
+      const result = await adminResetPassword(tenant, m.userId);
+      setResetResult({ name: m.displayName, password: result.temporaryPassword });
+    } catch (err) {
+      setRowError({
+        membershipId: m.membershipId,
+        msg: err instanceof Error ? err.message : 'Failed to reset password',
+      });
+    }
+  };
+
+  const handleDeactivate = async (m: WorkspaceMember) => {
+    if (!window.confirm(
+      `Deactivate ${m.displayName}? They will be signed out and unable to log in to any tenant until reactivated.`,
+    )) return;
+    setRowError(null);
+    try {
+      await deactivateUser(tenant, m.userId);
+      await refresh();
+    } catch (err) {
+      setRowError({
+        membershipId: m.membershipId,
+        msg: err instanceof Error ? err.message : 'Failed to deactivate user',
+      });
+    }
+  };
+
+  const handleReactivate = async (m: WorkspaceMember) => {
+    setRowError(null);
+    try {
+      await reactivateUser(tenant, m.userId);
+      await refresh();
+    } catch (err) {
+      setRowError({
+        membershipId: m.membershipId,
+        msg: err instanceof Error ? err.message : 'Failed to reactivate user',
+      });
+    }
+  };
+
+  const handleInvite = async (userId: string, role: Role) => {
+    await invite({ userId, role });
+    setShowInvite(false);
+  };
 
   return (
     <>
       <Section
-        title={`Members · ${members.length}`}
-        subtitle="Anyone with access to this workspace — direct grants, via project membership, or inherited from tenant admins."
+        title={`Members${loading ? '' : ` · ${members.length}`}`}
+        subtitle="Anyone with direct access to this workspace. Tenant admins are admin in every workspace."
         card
       >
         <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 12 }}>
@@ -198,121 +294,197 @@ export function MembersSettings() {
               style={{ paddingLeft: 28 }}
             />
           </div>
-          <button onClick={() => setShowInvite(true)} className="btn btn-primary btn-sm">
-            <Icon name="plus" size={13} />Invite member
+          <button
+            onClick={() => setShowInvite(true)}
+            disabled={!isAdmin}
+            data-tip={!isAdmin ? 'Only workspace admins can add members.' : undefined}
+            className="btn btn-primary btn-sm"
+          >
+            <Icon name="plus" size={13} />Add member
           </button>
         </div>
 
-        <div className="card" style={{ padding: 0 }}>
-          {filtered.map((m: WorkspaceMemberView, i) => (
-            <div
-              key={m.email}
-              style={{
-                display: 'grid',
-                gridTemplateColumns: '32px 1fr 96px 96px 28px',
-                gap: 12, alignItems: 'center',
-                padding: '10px 14px',
-                borderTop: i === 0 ? 'none' : '1px solid var(--border-muted)',
-                opacity: m.status === 'deactivated' ? 0.55 : 1,
-              }}
-            >
-              <Avatar name={m.name} size={28} />
-              <div style={{ minWidth: 0 }}>
-                <div style={{ fontSize: 13, fontWeight: 500 }}>{m.name}</div>
-                <div style={{ fontSize: 11.5, color: 'var(--fg-muted)' }}>{m.email}</div>
-                <ProvenanceLine
-                  provenance={m.provenance}
-                  resolveProjectName={(slug) => getProject(slug)?.name ?? slug}
-                />
-              </div>
-              <RoleSelect
-                value={m.effectiveRole}
-                provenance={m.provenance}
-                deactivated={m.status === 'deactivated'}
+        {loading && (
+          <div style={{ padding: 24, textAlign: 'center', color: 'var(--fg-muted)', fontSize: 13 }}>
+            Loading members…
+          </div>
+        )}
+
+        {error && !loading && (
+          <div style={{
+            padding: '7px 10px', borderRadius: 6, fontSize: 12, marginBottom: 12,
+            background: 'color-mix(in srgb, var(--blocked) 10%, var(--bg))',
+            border: '1px solid color-mix(in srgb, var(--blocked) 30%, transparent)',
+            color: 'var(--blocked)',
+            display: 'flex', alignItems: 'center', gap: 8,
+          }}>
+            <span style={{ flex: 1 }}>{error}</span>
+            <button onClick={() => void refresh()} className="btn btn-sm">Retry</button>
+          </div>
+        )}
+
+        {!loading && !error && members.length === 0 && (
+          <EmptyState
+            size="inline"
+            icon="users"
+            title="No members yet"
+            description="Add a tenant member to grant them direct access to this workspace."
+          />
+        )}
+
+        {!loading && filtered.length > 0 && (
+          <div className="card" style={{ padding: 0 }}>
+            {filtered.map((m, i) => (
+              <MemberRow
+                key={m.membershipId}
+                member={m}
+                first={i === 0}
+                isAdmin={isAdmin}
+                isSelf={currentUser?.id === m.userId}
+                rowError={rowError?.membershipId === m.membershipId ? rowError.msg : null}
+                onSetRole={(role) => handleSetRole(m, role)}
+                onRemove={() => handleRemove(m)}
+                onAdminReset={() => handleAdminReset(m)}
+                onDeactivate={() => handleDeactivate(m)}
+                onReactivate={() => handleReactivate(m)}
               />
-              <span style={{ fontSize: 11.5, color: 'var(--fg-faint)' }}>
-                {m.status === 'invited' ? <span style={{ color: 'var(--in-progress)' }}>Invite pending</span>
-                : m.status === 'deactivated' ? 'Deactivated'
-                : m.lastSeen}
-              </span>
-              {m.provenance.kind === 'explicit' ? (
-                <button className="btn btn-ghost btn-sm" style={{ width: 24, padding: 0 }} data-tip="Member actions">
-                  <Icon name="moreV" size={13} color="var(--fg-muted)" />
-                </button>
-              ) : (
-                <span />
-              )}
-            </div>
-          ))}
-          {filtered.length === 0 && (
-            <div style={{ padding: 24, textAlign: 'center', color: 'var(--fg-muted)', fontSize: 13 }}>
-              No members match "{filter}".
-            </div>
-          )}
-        </div>
+            ))}
+          </div>
+        )}
+
+        {!loading && !error && members.length > 0 && filtered.length === 0 && (
+          <div style={{ padding: 24, textAlign: 'center', color: 'var(--fg-muted)', fontSize: 13 }}>
+            No members match "{filter}".
+          </div>
+        )}
       </Section>
 
       {showInvite && (
         <InviteModal
-          email={inviteEmail}
-          role={inviteRole}
-          onEmail={setInviteEmail}
-          onRole={setInviteRole}
-          onSend={() => { setShowInvite(false); setInviteEmail(''); setInviteRole('write'); }}
+          candidates={inviteCandidates}
+          onSend={handleInvite}
           onClose={() => setShowInvite(false)}
+        />
+      )}
+
+      {resetResult && (
+        <ResetPasswordResultModal
+          name={resetResult.name}
+          password={resetResult.password}
+          onClose={() => setResetResult(null)}
         />
       )}
     </>
   );
 }
 
-function ProvenanceLine({
-  provenance, resolveProjectName,
-}: {
-  provenance: WorkspaceMemberProvenance;
-  resolveProjectName: (slug: string) => string;
-}) {
-  if (provenance.kind === 'explicit') return null;
-  if (provenance.kind === 'inherited') {
-    return (
-      <div style={{ fontSize: 11, color: 'var(--accent-active)', marginTop: 2 }}>
-        Inherited from tenant admin
-      </div>
-    );
-  }
-  // project
-  const names = provenance.projectSlugs.map(resolveProjectName);
-  const text = names.length === 1
-    ? `Via project: ${names[0]}`
-    : `Via ${names.length} projects: ${names.join(', ')}`;
+interface MemberRowProps {
+  member: WorkspaceMember;
+  first: boolean;
+  isAdmin: boolean;
+  isSelf: boolean;
+  rowError: string | null;
+  onSetRole: (role: Role) => void;
+  onRemove: () => void;
+  onAdminReset: () => void;
+  onDeactivate: () => void;
+  onReactivate: () => void;
+}
+function MemberRow({
+  member, first, isAdmin, isSelf, rowError,
+  onSetRole, onRemove, onAdminReset, onDeactivate, onReactivate,
+}: MemberRowProps) {
+  const m = member;
+  const deactivated = !m.userIsActive || m.status === 'deactivated';
+  // Tenant admins are admin in every workspace by virtue of their tenant role
+  // — the workspace membership row stores their original role, but the
+  // effective role is locked to admin and we surface that here. We also
+  // disable role editing for them: the admin grant comes from the tenant
+  // level and changing the workspace row would be misleading.
+  const roleSelectDisabled = !isAdmin || deactivated || m.tenantAdmin;
+
   return (
-    <div style={{ fontSize: 11, color: 'var(--fg-faint)', marginTop: 2 }}>
-      {text}
+    <div
+      style={{
+        display: 'grid',
+        gridTemplateColumns: '32px 1fr 110px 110px 32px',
+        gap: 12, alignItems: 'center',
+        padding: '10px 14px',
+        borderTop: first ? 'none' : '1px solid var(--border-muted)',
+        opacity: deactivated ? 0.55 : 1,
+      }}
+    >
+      <Avatar name={m.displayName} size={28} />
+      <div style={{ minWidth: 0 }}>
+        <div style={{ fontSize: 13, fontWeight: 500, display: 'flex', alignItems: 'center', gap: 6 }}>
+          <span>{m.displayName}</span>
+          {isSelf && (
+            <span style={{
+              fontSize: 10, fontWeight: 600, letterSpacing: 0.4, textTransform: 'uppercase',
+              color: 'var(--fg-muted)', background: 'var(--bg-subtle)',
+              padding: '1px 5px', borderRadius: 3,
+            }}>You</span>
+          )}
+        </div>
+        <div style={{ fontSize: 11.5, color: 'var(--fg-muted)' }}>{m.email}</div>
+        {m.tenantAdmin && (
+          <div style={{ fontSize: 11, color: 'var(--accent-active)', marginTop: 2 }}>
+            Tenant admin — admin in every workspace
+          </div>
+        )}
+        {rowError && (
+          <div style={{ fontSize: 11, color: 'var(--blocked)', marginTop: 2 }}>
+            {rowError}
+          </div>
+        )}
+      </div>
+      <RoleSelect
+        value={m.effectiveRole}
+        disabled={roleSelectDisabled}
+        // Tenant admins keep showing 'admin' regardless of the underlying row.
+        tip={
+          !isAdmin ? 'Only workspace admins can change roles.'
+          : m.tenantAdmin ? 'Tenant admins are admin everywhere. Change their role at the tenant level.'
+          : deactivated ? 'Reactivate the user before changing their role.'
+          : undefined
+        }
+        onChange={onSetRole}
+      />
+      <span style={{ fontSize: 11.5, color: 'var(--fg-faint)' }}>
+        {m.status === 'invited' ? <span style={{ color: 'var(--in-progress)' }}>Invite pending</span>
+        : deactivated ? 'Deactivated'
+        : (m.lastSeenAt ?? '—')}
+      </span>
+      {isAdmin && !isSelf ? (
+        <RowActionsMenu
+          deactivated={deactivated}
+          tenantAdmin={m.tenantAdmin}
+          onRemove={onRemove}
+          onAdminReset={onAdminReset}
+          onDeactivate={onDeactivate}
+          onReactivate={onReactivate}
+        />
+      ) : (
+        <span />
+      )}
     </div>
   );
 }
 
-function RoleSelect({
-  value, provenance, deactivated,
-}: {
-  value: WorkspaceRole;
-  provenance: WorkspaceMemberProvenance;
-  deactivated?: boolean;
-}) {
-  // inherited / project rows are read-only because their role isn't stored on
-  // the workspace itself — it's resolved from the tenant or from project
-  // membership. Editing them in this surface would be misleading.
-  const disabled = deactivated || provenance.kind !== 'explicit';
-  const tip =
-    provenance.kind === 'inherited' ? 'Tenant admins are admin in every workspace.'
-    : provenance.kind === 'project' ? 'Project access grants implicit workspace read. Add a direct grant to change role.'
-    : undefined;
+interface RoleSelectProps {
+  value: Role;
+  disabled?: boolean;
+  tip?: string;
+  onChange: (role: Role) => void;
+}
+function RoleSelect({ value, disabled, tip, onChange }: RoleSelectProps) {
   return (
     <select
-      defaultValue={value}
+      value={value}
       disabled={disabled}
       className="input input-sm"
       data-tip={tip}
+      onChange={(e) => onChange(e.target.value as Role)}
       style={{ width: 'auto', padding: '0 6px' }}
     >
       <option value="admin">admin</option>
@@ -322,53 +494,291 @@ function RoleSelect({
   );
 }
 
+interface RowActionsMenuProps {
+  deactivated: boolean;
+  tenantAdmin: boolean;
+  onRemove: () => void;
+  onAdminReset: () => void;
+  onDeactivate: () => void;
+  onReactivate: () => void;
+}
+function RowActionsMenu({
+  deactivated, tenantAdmin, onRemove, onAdminReset, onDeactivate, onReactivate,
+}: RowActionsMenuProps) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  useDismiss(ref, () => setOpen(false), open);
+
+  const close = () => setOpen(false);
+  const click = (fn: () => void) => () => { close(); fn(); };
+
+  return (
+    <div ref={ref} style={{ position: 'relative' }}>
+      <button
+        className="btn btn-ghost btn-sm"
+        style={{ width: 28, padding: 0 }}
+        data-tip="Member actions"
+        onClick={() => setOpen((o) => !o)}
+        aria-haspopup="menu"
+        aria-expanded={open}
+      >
+        <Icon name="moreV" size={13} color="var(--fg-muted)" />
+      </button>
+      {open && (
+        <div
+          role="menu"
+          style={{
+            position: 'absolute', top: '100%', right: 0, marginTop: 6,
+            width: 220, background: 'var(--bg)',
+            border: '1px solid var(--border)', borderRadius: 8,
+            boxShadow: 'var(--shadow-lg)', zIndex: 50, overflow: 'hidden',
+            padding: 4,
+          }}
+        >
+          <ActionMenuRow
+            icon="rotate"
+            label="Reset password…"
+            onClick={click(onAdminReset)}
+            disabled={deactivated}
+            tip={deactivated ? 'Reactivate the user first.' : undefined}
+          />
+          {!deactivated && (
+            <ActionMenuRow
+              icon="lock"
+              label="Deactivate user…"
+              onClick={click(onDeactivate)}
+              danger
+              disabled={tenantAdmin}
+              tip={tenantAdmin ? 'Demote at the tenant level before deactivating.' : undefined}
+            />
+          )}
+          {deactivated && (
+            <ActionMenuRow
+              icon="unlock"
+              label="Reactivate user"
+              onClick={click(onReactivate)}
+            />
+          )}
+          <div style={{ height: 1, background: 'var(--border-muted)', margin: '4px 0' }} />
+          <ActionMenuRow
+            icon="trash"
+            label="Remove from workspace…"
+            onClick={click(onRemove)}
+            danger
+            disabled={tenantAdmin}
+            tip={tenantAdmin ? "Tenant admins can't be removed from a single workspace." : undefined}
+          />
+        </div>
+      )}
+    </div>
+  );
+}
+
+interface ActionMenuRowProps {
+  icon: string;
+  label: string;
+  onClick: () => void;
+  danger?: boolean;
+  disabled?: boolean;
+  tip?: string;
+}
+function ActionMenuRow({ icon, label, onClick, danger, disabled, tip }: ActionMenuRowProps) {
+  return (
+    <button
+      role="menuitem"
+      onClick={onClick}
+      disabled={disabled}
+      data-tip={tip}
+      style={{
+        display: 'flex', alignItems: 'center', gap: 8, padding: '6px 10px',
+        width: '100%', borderRadius: 5, border: 'none', background: 'transparent',
+        cursor: disabled ? 'not-allowed' : 'pointer',
+        textAlign: 'left', fontSize: 13,
+        color: danger ? 'var(--blocked)' : disabled ? 'var(--fg-faint)' : 'var(--fg)',
+        opacity: disabled ? 0.65 : 1,
+      }}
+      onMouseEnter={(e) => { if (!disabled) e.currentTarget.style.background = 'var(--bg-subtle)'; }}
+      onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
+    >
+      <Icon name={icon} size={13} color={danger ? 'var(--blocked)' : 'var(--fg-muted)'} />
+      <span style={{ flex: 1 }}>{label}</span>
+    </button>
+  );
+}
+
 interface InviteModalProps {
-  email: string;
-  role: WorkspaceRole;
-  onEmail: (v: string) => void;
-  onRole: (v: WorkspaceRole) => void;
-  onSend: () => void;
+  candidates: { id: string; displayName: string; email: string }[];
+  onSend: (userId: string, role: Role) => Promise<void>;
   onClose: () => void;
 }
-function InviteModal({ email, role, onEmail, onRole, onSend, onClose }: InviteModalProps) {
+function InviteModal({ candidates, onSend, onClose }: InviteModalProps) {
+  const [query, setQuery] = useState('');
+  const [userId, setUserId] = useState<string | null>(null);
+  const [role, setRole] = useState<Role>('write');
+  const [submitting, setSubmitting] = useState(false);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return candidates.slice(0, 20);
+    return candidates
+      .filter((u) =>
+        u.displayName.toLowerCase().includes(q) || u.email.toLowerCase().includes(q),
+      )
+      .slice(0, 20);
+  }, [candidates, query]);
+
+  const submit = async () => {
+    if (!userId) return;
+    setErrorMsg(null);
+    setSubmitting(true);
+    try {
+      await onSend(userId, role);
+    } catch (err) {
+      setErrorMsg(err instanceof Error ? err.message : 'Failed to add member');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
   return (
     <Modal
       onClose={onClose}
-      onSubmit={(e) => { e.preventDefault(); onSend(); }}
-      label="Invite a new member"
+      onSubmit={(e) => { e.preventDefault(); void submit(); }}
+      label="Add a workspace member"
     >
-      <ModalHeader title="Invite a new member" onClose={onClose} />
+      <ModalHeader title="Add a workspace member" onClose={onClose} />
       <ModalBody>
-        <Field label="Email">
+        <Field label="Tenant member">
           <input
             autoFocus
-            type="email"
+            type="search"
             className="input"
-            value={email}
-            onChange={(e) => onEmail(e.target.value)}
-            placeholder="them@example.com"
-            required
+            value={query}
+            onChange={(e) => { setQuery(e.target.value); setUserId(null); }}
+            placeholder="Search by name or email"
           />
         </Field>
+        <div style={{
+          maxHeight: 220, overflow: 'auto',
+          border: '1px solid var(--border)', borderRadius: 6,
+          marginBottom: 12,
+        }}>
+          {filtered.length === 0 ? (
+            <div style={{ padding: 16, textAlign: 'center', color: 'var(--fg-muted)', fontSize: 12 }}>
+              {candidates.length === 0
+                ? 'Every active tenant member is already in this workspace.'
+                : `No matches for "${query}".`}
+            </div>
+          ) : (
+            filtered.map((u) => {
+              const selected = userId === u.id;
+              return (
+                <button
+                  key={u.id}
+                  type="button"
+                  onClick={() => setUserId(u.id)}
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: 10,
+                    width: '100%', padding: '8px 10px', textAlign: 'left',
+                    border: 'none', background: selected ? 'var(--bg-subtle)' : 'transparent',
+                    cursor: 'pointer', fontSize: 13, color: 'var(--fg)',
+                  }}
+                  onMouseEnter={(e) => { if (!selected) e.currentTarget.style.background = 'var(--bg-subtle)'; }}
+                  onMouseLeave={(e) => { if (!selected) e.currentTarget.style.background = 'transparent'; }}
+                >
+                  <Avatar name={u.displayName} size={26} />
+                  <div style={{ minWidth: 0, flex: 1 }}>
+                    <div style={{ fontSize: 13, fontWeight: 500 }}>{u.displayName}</div>
+                    <div style={{ fontSize: 11, color: 'var(--fg-muted)' }}>{u.email}</div>
+                  </div>
+                  {selected && <Icon name="check" size={14} color="var(--accent-active)" />}
+                </button>
+              );
+            })
+          )}
+        </div>
         <Field label="Role">
           <select
             className="input"
             value={role}
-            onChange={(e) => onRole(e.target.value as WorkspaceRole)}
+            onChange={(e) => setRole(e.target.value as Role)}
           >
             <option value="read">read — view-only access</option>
             <option value="write">write — view and edit issues, projects, workflows</option>
             <option value="admin">admin — also manage settings, members, and roles</option>
           </select>
         </Field>
-        <Hint>An invite link will be emailed; in this prototype it isn't actually sent.</Hint>
+        <Hint>
+          Members must already exist in the tenant. To create a brand-new user, use the Tenant settings → Members tab.
+        </Hint>
+        {errorMsg && (
+          <div style={{
+            padding: '7px 10px', borderRadius: 6, fontSize: 12, marginTop: 8,
+            background: 'color-mix(in srgb, var(--blocked) 10%, var(--bg))',
+            border: '1px solid color-mix(in srgb, var(--blocked) 30%, transparent)',
+            color: 'var(--blocked)',
+          }}>
+            {errorMsg}
+          </div>
+        )}
       </ModalBody>
       <ModalFooter>
         <div style={{ flex: 1 }} />
         <button type="button" onClick={onClose} className="btn btn-sm">Cancel</button>
-        <button type="submit" disabled={!email} className="btn btn-primary btn-sm">
-          <Icon name="send" size={13} />Send invite
+        <button type="submit" disabled={!userId || submitting} className="btn btn-primary btn-sm">
+          <Icon name="plus" size={13} />
+          {submitting ? 'Adding…' : 'Add member'}
         </button>
+      </ModalFooter>
+    </Modal>
+  );
+}
+
+interface ResetPasswordResultProps {
+  name: string;
+  password: string;
+  onClose: () => void;
+}
+function ResetPasswordResultModal({ name, password, onClose }: ResetPasswordResultProps) {
+  const [copied, setCopied] = useState(false);
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(password);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      // Clipboard might be unavailable (e.g. http context); fall back to selection prompt.
+      setCopied(false);
+    }
+  };
+  return (
+    <Modal onClose={onClose} label="Temporary password">
+      <ModalHeader title="Temporary password" onClose={onClose} />
+      <ModalBody>
+        <p style={{ fontSize: 13, color: 'var(--fg)', margin: '0 0 12px' }}>
+          Share this password with <strong>{name}</strong> over a secure channel. They'll be required to set a new password on next login. This password will not be shown again.
+        </p>
+        <div style={{
+          display: 'flex', alignItems: 'center', gap: 8,
+          padding: '8px 10px', borderRadius: 6,
+          border: '1px solid var(--border)', background: 'var(--bg-subtle)',
+        }}>
+          <code style={{
+            flex: 1, fontFamily: 'var(--font-mono)', fontSize: 13,
+            wordBreak: 'break-all',
+          }}>
+            {password}
+          </code>
+          <button onClick={copy} className="btn btn-sm">
+            <Icon name="copy" size={13} />{copied ? 'Copied' : 'Copy'}
+          </button>
+        </div>
+        <Hint warning>Store it briefly and discard. BIRA never logs the temporary password.</Hint>
+      </ModalBody>
+      <ModalFooter>
+        <div style={{ flex: 1 }} />
+        <button type="button" onClick={onClose} className="btn btn-primary btn-sm">Done</button>
       </ModalFooter>
     </Modal>
   );

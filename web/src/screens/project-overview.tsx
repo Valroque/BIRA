@@ -69,9 +69,12 @@ export function ProjectOverviewPage() {
           <div style={{ padding: '12px 16px', borderBottom: '1px solid var(--border-muted)', fontSize: 13, fontWeight: 600 }}>
             Recently updated
           </div>
-          {issues.filter((i) => i.project === project).slice(0, 5).map((i) => (
-            <ListRow key={i.id} issue={i} tenant={tenant} workspace={workspace} />
-          ))}
+          {issues
+            .filter((i) => projectInfo && i.projectId === projectInfo.id)
+            .slice(0, 5)
+            .map((i) => (
+              <ListRow key={i.key} issue={i} tenant={tenant} workspace={workspace} />
+            ))}
         </div>
       </div>
     </div>

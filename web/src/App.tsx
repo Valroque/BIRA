@@ -4,6 +4,10 @@ import { ErrorState } from './components/states';
 import { ProjectsProvider, useProjects } from './state/projects';
 import { WorkspacesProvider } from './state/workspaces';
 import { IssuesProvider } from './state/issues';
+import { UsersProvider } from './state/users';
+import { WorkflowsProvider } from './state/workflows';
+import { WorkspaceMembersProvider } from './state/workspace-members';
+import { TeamsProvider } from './state/teams';
 import { useAuth } from './state/auth';
 import { LoginPage } from './screens/login';
 import { TenantsPage } from './screens/tenants';
@@ -78,15 +82,25 @@ function WorkspaceLayout() {
     else sidebarActive = project;
   }
 
-  // ProjectsProvider is mounted per (tenant, workspace). The `key` prop forces
-  // a fresh instance whenever the user navigates across pairs.
+  // ProjectsProvider, IssuesProvider, UsersProvider, and WorkflowsProvider
+  // are mounted per (tenant, workspace). The `key` prop forces a fresh
+  // instance whenever the user navigates across pairs so per-workspace
+  // state doesn't bleed.
   return (
     <ProjectsProvider key={`${tenant}/${workspace}`} tenant={tenant} workspace={workspace ?? ''}>
-      <IssuesProvider tenant={tenant} workspace={workspace ?? ''}>
-        <AppShell sidebarActive={sidebarActive}>
-          <Outlet />
-        </AppShell>
-      </IssuesProvider>
+      <UsersProvider tenant={tenant} workspace={workspace ?? ''}>
+        <IssuesProvider tenant={tenant} workspace={workspace ?? ''}>
+          <WorkflowsProvider tenant={tenant} workspace={workspace ?? ''}>
+            <WorkspaceMembersProvider tenant={tenant} workspace={workspace ?? ''}>
+              <TeamsProvider tenant={tenant} workspace={workspace ?? ''}>
+                <AppShell sidebarActive={sidebarActive}>
+                  <Outlet />
+                </AppShell>
+              </TeamsProvider>
+            </WorkspaceMembersProvider>
+          </WorkflowsProvider>
+        </IssuesProvider>
+      </UsersProvider>
     </ProjectsProvider>
   );
 }
