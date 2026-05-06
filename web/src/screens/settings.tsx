@@ -1,5 +1,7 @@
-// Settings: workspace-level (general, members) + user profile.
-// Sections live as nested routes so each is deep-linkable.
+// Settings: workspace-level (general, members) + tenant-level (general,
+// members) + user profile, all hosted under one /settings tree so users
+// only ever click "Settings" to find any of these surfaces. Sections live
+// as nested routes so each is deep-linkable.
 import { useMemo, useRef, useState } from 'react';
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { Icon } from '../components/icons';
@@ -18,16 +20,44 @@ import type { WorkspaceMember } from '../api/adapters/workspaceMember.adapter';
 import { updateProfile, changePassword } from '../api/auth';
 import { adminResetPassword, deactivateUser, reactivateUser } from '../api/userAdmin';
 
-// --- Outer layout (header + secondary tab strip + outlet) ---
+// --- Outer layout (header + grouped left-nav + outlet) ---
+
+interface SettingsNavItem {
+  id: string;
+  to: string;
+  label: string;
+  icon: string;
+}
+interface SettingsNavGroup {
+  label: string;
+  items: SettingsNavItem[];
+}
 
 export function SettingsLayout() {
   const { tenant, workspace, tenantName, workspaceName } = useTenantBreadcrumbs();
   const { pathname } = useLocation();
   const base = `/${tenant}/${workspace}/settings`;
-  const sections = [
-    { id: 'general', to: `${base}/general`, label: 'General', icon: 'settings' },
-    { id: 'members', to: `${base}/members`, label: 'Members', icon: 'users' },
-    { id: 'profile', to: `${base}/profile`, label: 'Profile',  icon: 'user' },
+  const groups: SettingsNavGroup[] = [
+    {
+      label: 'Workspace',
+      items: [
+        { id: 'general', to: `${base}/general`, label: 'General', icon: 'settings' },
+        { id: 'members', to: `${base}/members`, label: 'Members', icon: 'users' },
+      ],
+    },
+    {
+      label: 'Tenant',
+      items: [
+        { id: 'tenant-general', to: `${base}/tenant/general`, label: 'General', icon: 'building' },
+        { id: 'tenant-members', to: `${base}/tenant/members`, label: 'Members', icon: 'users' },
+      ],
+    },
+    {
+      label: 'Account',
+      items: [
+        { id: 'profile', to: `${base}/profile`, label: 'Profile', icon: 'user' },
+      ],
+    },
   ];
 
   return (
@@ -38,37 +68,54 @@ export function SettingsLayout() {
         'Settings',
       ]} />
       <div style={{
-        padding: '20px 28px 0', borderBottom: '1px solid var(--border-muted)',
+        padding: '20px 28px 16px', borderBottom: '1px solid var(--border-muted)',
       }}>
         <h1 style={{ fontSize: 22, fontWeight: 600, letterSpacing: -0.4, margin: 0 }}>Settings</h1>
-        <p style={{ fontSize: 13, color: 'var(--fg-muted)', margin: '4px 0 14px' }}>
-          Configure your workspace and account preferences.
+        <p style={{ fontSize: 13, color: 'var(--fg-muted)', margin: '4px 0 0' }}>
+          Workspace, tenant, and account preferences in one place.
         </p>
-        <div style={{ display: 'flex', gap: 2 }}>
-          {sections.map((s) => {
-            const active = pathname === s.to || pathname.startsWith(s.to + '/');
-            return (
-              <NavLink
-                key={s.id}
-                to={s.to}
-                style={{
-                  padding: '8px 14px', fontSize: 13, fontWeight: 500,
-                  color: active ? 'var(--fg)' : 'var(--fg-muted)',
-                  borderBottom: active ? '2px solid var(--accent)' : '2px solid transparent',
-                  marginBottom: -1, display: 'flex', alignItems: 'center', gap: 6,
-                  textDecoration: 'none',
-                }}
-              >
-                <Icon name={s.icon} size={14} />
-                {s.label}
-              </NavLink>
-            );
-          })}
-        </div>
       </div>
-      <div className="scroll" style={{ flex: 1, overflow: 'auto', padding: '24px 28px' }}>
-        <div style={{ maxWidth: 720 }}>
-          <Outlet />
+      <div style={{ flex: 1, display: 'flex', minHeight: 0 }}>
+        <nav
+          className="scroll"
+          style={{
+            width: 220, flexShrink: 0, borderRight: '1px solid var(--border-muted)',
+            overflow: 'auto', padding: '18px 12px',
+          }}
+        >
+          {groups.map((g) => (
+            <div key={g.label} style={{ marginBottom: 14 }}>
+              <div style={{
+                fontSize: 11, fontWeight: 600, textTransform: 'uppercase', letterSpacing: 0.5,
+                color: 'var(--fg-faint)', padding: '0 10px 6px',
+              }}>{g.label}</div>
+              {g.items.map((s) => {
+                const active = pathname === s.to || pathname.startsWith(s.to + '/');
+                return (
+                  <NavLink
+                    key={s.id}
+                    to={s.to}
+                    style={{
+                      display: 'flex', alignItems: 'center', gap: 8,
+                      height: 30, padding: '0 10px', borderRadius: 6,
+                      fontSize: 13, fontWeight: active ? 600 : 500,
+                      color: active ? 'var(--accent-active)' : 'var(--fg-muted)',
+                      background: active ? 'var(--accent-subtle)' : 'transparent',
+                      textDecoration: 'none',
+                    }}
+                  >
+                    <Icon name={s.icon} size={14} />
+                    {s.label}
+                  </NavLink>
+                );
+              })}
+            </div>
+          ))}
+        </nav>
+        <div className="scroll" style={{ flex: 1, overflow: 'auto', padding: '24px 28px' }}>
+          <div style={{ maxWidth: 720 }}>
+            <Outlet />
+          </div>
         </div>
       </div>
     </div>
@@ -278,7 +325,7 @@ export function MembersSettings() {
     <>
       <Section
         title={`Members${loading ? '' : ` · ${members.length}`}`}
-        subtitle="Anyone with direct access to this workspace. Tenant admins are admin in every workspace."
+        subtitle="Anyone with direct access to this workspace. Tenant admins automatically have manager access in every workspace."
         card
       >
         <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 12 }}>
@@ -297,7 +344,7 @@ export function MembersSettings() {
           <button
             onClick={() => setShowInvite(true)}
             disabled={!isAdmin}
-            data-tip={!isAdmin ? 'Only workspace admins can add members.' : undefined}
+            data-tip={!isAdmin ? 'Only workspace managers can add members.' : undefined}
             className="btn btn-primary btn-sm"
           >
             <Icon name="plus" size={13} />Add member
@@ -396,18 +443,16 @@ function MemberRow({
 }: MemberRowProps) {
   const m = member;
   const deactivated = !m.userIsActive || m.status === 'deactivated';
-  // Tenant admins are admin in every workspace by virtue of their tenant role
-  // — the workspace membership row stores their original role, but the
-  // effective role is locked to admin and we surface that here. We also
-  // disable role editing for them: the admin grant comes from the tenant
-  // level and changing the workspace row would be misleading.
-  const roleSelectDisabled = !isAdmin || deactivated || m.tenantAdmin;
+  const roleSelectDisabled = !isAdmin || deactivated;
 
   return (
     <div
       style={{
         display: 'grid',
-        gridTemplateColumns: '32px 1fr 110px 110px 32px',
+        // Fixed widths on the source/role columns so pills + selects line
+        // up vertically across rows — `auto` would size each row's grid
+        // independently and the column would shift per row.
+        gridTemplateColumns: '32px 1fr 140px 80px 110px 32px',
         gap: 12, alignItems: 'center',
         padding: '10px 14px',
         borderTop: first ? 'none' : '1px solid var(--border-muted)',
@@ -427,29 +472,31 @@ function MemberRow({
           )}
         </div>
         <div style={{ fontSize: 11.5, color: 'var(--fg-muted)' }}>{m.email}</div>
-        {m.tenantAdmin && (
-          <div style={{ fontSize: 11, color: 'var(--accent-active)', marginTop: 2 }}>
-            Tenant admin — admin in every workspace
-          </div>
-        )}
         {rowError && (
           <div style={{ fontSize: 11, color: 'var(--blocked)', marginTop: 2 }}>
             {rowError}
           </div>
         )}
       </div>
-      <RoleSelect
-        value={m.effectiveRole}
-        disabled={roleSelectDisabled}
-        // Tenant admins keep showing 'admin' regardless of the underlying row.
-        tip={
-          !isAdmin ? 'Only workspace admins can change roles.'
-          : m.tenantAdmin ? 'Tenant admins are admin everywhere. Change their role at the tenant level.'
-          : deactivated ? 'Reactivate the user before changing their role.'
-          : undefined
-        }
-        onChange={onSetRole}
-      />
+      <SourcePill tenantAdmin={m.tenantAdmin} />
+      {m.tenantAdmin ? (
+        // Tenant admins are admin in every workspace by virtue of their
+        // tenant role — the workspace row's stored role is irrelevant, so we
+        // render a non-editable pill instead of a disabled select. Demote at
+        // the tenant level to change this.
+        <RolePill role="admin" />
+      ) : (
+        <RoleSelect
+          value={m.effectiveRole}
+          disabled={roleSelectDisabled}
+          tip={
+            !isAdmin ? 'Only workspace managers can change roles.'
+            : deactivated ? 'Reactivate the user before changing their role.'
+            : undefined
+          }
+          onChange={onSetRole}
+        />
+      )}
       <span style={{ fontSize: 11.5, color: 'var(--fg-faint)' }}>
         {m.status === 'invited' ? <span style={{ color: 'var(--in-progress)' }}>Invite pending</span>
         : deactivated ? 'Deactivated'
@@ -471,6 +518,40 @@ function MemberRow({
   );
 }
 
+function SourcePill({ tenantAdmin }: { tenantAdmin: boolean }) {
+  return (
+    <span
+      style={{
+        fontSize: 11, padding: '2px 7px', borderRadius: 10,
+        background: 'var(--bg-subtle)', border: '1px solid var(--border-muted)',
+        color: 'var(--fg-muted)', whiteSpace: 'nowrap',
+      }}
+      data-tip={
+        tenantAdmin
+          ? 'Implicit admin via tenant-membership role — manager in every workspace.'
+          : 'Direct workspace membership — role applies to this workspace only.'
+      }
+    >
+      {tenantAdmin ? 'Tenant admin' : 'Workspace member'}
+    </span>
+  );
+}
+
+function RolePill({ role }: { role: Role }) {
+  return (
+    <span className="pill" style={{
+      background:
+        role === 'admin' ? 'var(--accent-muted)' :
+        role === 'write' ? 'var(--done-bg)' :
+        'var(--bg-muted)',
+      color:
+        role === 'admin' ? 'var(--accent-active)' :
+        role === 'write' ? 'var(--done)' :
+        'var(--fg-muted)',
+    }}>{role === 'admin' ? 'manager' : role}</span>
+  );
+}
+
 interface RoleSelectProps {
   value: Role;
   disabled?: boolean;
@@ -487,7 +568,9 @@ function RoleSelect({ value, disabled, tip, onChange }: RoleSelectProps) {
       onChange={(e) => onChange(e.target.value as Role)}
       style={{ width: 'auto', padding: '0 6px' }}
     >
-      <option value="admin">admin</option>
+      {/* Workspace top role displays as "manager" to disambiguate from
+          tenant-level admin. DB enum stays `admin`. */}
+      <option value="admin">manager</option>
       <option value="write">write</option>
       <option value="read">read</option>
     </select>
@@ -706,7 +789,7 @@ function InviteModal({ candidates, onSend, onClose }: InviteModalProps) {
           >
             <option value="read">read — view-only access</option>
             <option value="write">write — view and edit issues, projects, workflows</option>
-            <option value="admin">admin — also manage settings, members, and roles</option>
+            <option value="admin">manager — also manage settings, members, and roles</option>
           </select>
         </Field>
         <Hint>

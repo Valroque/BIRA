@@ -1,9 +1,9 @@
 // Shared UI atoms — sidebar, top bar, chips, etc.
 import type { CSSProperties, ReactNode } from 'react';
 import { Fragment } from 'react';
-import { Link, useParams } from 'react-router-dom';
+import { Link, useNavigate, useParams } from 'react-router-dom';
 import { Icon } from './icons';
-import { NotificationsButton, UserMenu } from './topbar-menus';
+import { NotificationsButton } from './topbar-menus';
 import { useProjects } from '../state/projects';
 import { useWorkspaces } from '../state/workspaces';
 import { useTenants } from '../state/tenants';
@@ -93,12 +93,10 @@ export type Crumb = string | { label: string; to: string };
 interface TopBarProps {
   breadcrumbs?: Crumb[];
   showSearch?: boolean;
-  /** The "New issue" button needs a project; hide it on workspace-less screens (e.g. /workspaces). */
-  showNewIssue?: boolean;
   /** Hide on pre-auth screens (e.g. tenant picker) where the user hasn't signed in yet. */
-  showUserMenu?: boolean;
+  showNotifications?: boolean;
 }
-export const TopBar = ({ breadcrumbs = [], showSearch = true, showNewIssue = true, showUserMenu = true }: TopBarProps) => (
+export const TopBar = ({ breadcrumbs = [], showSearch = true, showNotifications = true }: TopBarProps) => (
   <div style={{
     height: 44, borderBottom: '1px solid var(--border-muted)', background: 'var(--bg)',
     display: 'flex', alignItems: 'center', padding: '0 12px 0 8px', gap: 8, flexShrink: 0,
@@ -153,25 +151,9 @@ export const TopBar = ({ breadcrumbs = [], showSearch = true, showNewIssue = tru
         <KBD k="⌘K" />
       </button>
     )}
-    {showUserMenu && <NotificationsButton />}
-    {showNewIssue && <NewIssueButton />}
-    {showUserMenu && <UserMenu />}
+    {showNotifications && <NotificationsButton />}
   </div>
 );
-
-/** TopBar's "New issue" button — project-aware via URL params. */
-function NewIssueButton() {
-  const { tenant, workspace, project } = useTenantContext();
-  return (
-    <Link
-      to={`/${tenant}/${workspace}/${project}/issue/new`}
-      className="btn btn-primary btn-sm"
-      style={{ textDecoration: 'none' }}
-    >
-      <Icon name="plus" size={14} />New issue
-    </Link>
-  );
-}
 
 // --- Sidebar ---
 interface SidebarProps {
@@ -267,6 +249,7 @@ export const Sidebar = ({ collapsed = false, active = '' }: SidebarProps) => {
       width: w, background: 'var(--bg-subtle)', borderRight: '1px solid var(--border-muted)',
       display: 'flex', flexDirection: 'column', flexShrink: 0, transition: 'width .2s ease',
     }}>
+      <BiraBrand collapsed={collapsed} />
       <div className="scroll" style={{ flex: 1, overflow: 'auto', padding: '12px 0' }}>
         {/* Counts are derived from issues whose project belongs to the
             current workspace — so a fresh workspace with no projects shows
@@ -329,13 +312,106 @@ export const Sidebar = ({ collapsed = false, active = '' }: SidebarProps) => {
       </div>
 
       <div style={{ borderTop: '1px solid var(--border-muted)', padding: '8px 0' }}>
-        <Item id="tenant-settings" icon="building" label="Tenant settings" to={`/${tenant}/${workspace}/tenant-settings`} />
-        <Item id="settings"        icon="settings" label="Settings"        to={`/${tenant}/${workspace}/settings`} />
-        <Item id="help"            icon="question" label="Help" />
+        <Item id="settings" icon="settings" label="Settings" to={`/${tenant}/${workspace}/settings`} />
+        <Item id="help"     icon="question" label="Help" />
+        <SidebarUserBlock collapsed={collapsed} />
       </div>
     </div>
   );
 };
+
+/**
+ * BIRA wordmark used across sidebars (workspace shell + tenant picker shell).
+ * Collapsed mode hides the wordmark and centres the chip so it tucks into the
+ * narrow rail.
+ */
+export function BiraBrand({ collapsed = false }: { collapsed?: boolean }) {
+  return (
+    <div style={{
+      display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0,
+      padding: collapsed ? '12px 0' : '14px 16px',
+      justifyContent: collapsed ? 'center' : 'flex-start',
+    }}>
+      <div style={{
+        width: 28, height: 28, borderRadius: 6, flexShrink: 0,
+        background: 'linear-gradient(135deg, var(--accent), #6366f1)',
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        color: '#fff', fontWeight: 700, fontSize: 14,
+        fontFamily: 'var(--font-mono)', letterSpacing: -0.5,
+      }}>B</div>
+      {!collapsed && (
+        <span style={{ fontSize: 16, fontWeight: 700, letterSpacing: -0.5 }}>BIRA</span>
+      )}
+    </div>
+  );
+}
+
+/**
+ * Sidebar-foot user block — replaces the older `SidebarUserMenu` dropdown with
+ * a flat "signed in as" panel + a single Sign out button. Same shape across
+ * the workspace shell and the tenant picker shell so the chrome reads
+ * consistently. In collapsed mode the avatar + power icon stack vertically.
+ */
+export function SidebarUserBlock({ collapsed }: { collapsed: boolean }) {
+  const { user, logout } = useAuth();
+  const navigate = useNavigate();
+  const signOut = () => { logout(); navigate('/tenants'); };
+  const displayName = user?.displayName ?? 'Account';
+  const email = user?.email ?? '';
+
+  if (collapsed) {
+    return (
+      <div style={{
+        marginTop: 6, paddingTop: 8,
+        borderTop: '1px solid var(--border-muted)',
+        display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6,
+      }}>
+        <Avatar name={displayName} size={24} />
+        <button
+          type="button"
+          onClick={signOut}
+          title="Sign out"
+          className="btn btn-ghost btn-sm"
+          style={{ width: 28, padding: 0 }}
+        >
+          <Icon name="power" size={13} color="var(--blocked)" />
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div style={{
+      marginTop: 6, paddingTop: 10,
+      borderTop: '1px solid var(--border-muted)',
+      padding: '10px 12px 0',
+    }}>
+      <div style={{ fontSize: 11, color: 'var(--fg-faint)' }}>Signed in as</div>
+      <div
+        style={{
+          fontSize: 13, fontWeight: 500, color: 'var(--fg)',
+          marginTop: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+        }}
+        title={email}
+      >{displayName}</div>
+      <div style={{
+        fontSize: 11, color: 'var(--fg-muted)',
+        overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+      }}>{email}</div>
+      <button
+        type="button"
+        onClick={signOut}
+        className="btn btn-sm"
+        style={{
+          width: '100%', marginTop: 10, justifyContent: 'center',
+          color: 'var(--blocked)',
+        }}
+      >
+        <Icon name="power" size={13} color="var(--blocked)" />Sign out
+      </button>
+    </div>
+  );
+}
 
 // --- Reusable comment markup body ---
 export const CommentBody = ({ children }: { children: ReactNode }) => (
