@@ -221,8 +221,7 @@ BIRA/
         ├── project-overview.tsx
         ├── board.tsx         ← Kanban + bulk-action bar
         ├── list.tsx          ← Project-scoped issue list
-        ├── workflow.tsx      ← Graph editor + variants
-        ├── rule-editor.tsx
+        ├── workflow.tsx      ← Graph editor + variants (rule editor lives in EdgeInspector)
         ├── issue-detail.tsx
         ├── create-issue.tsx
         ├── project-members.tsx
@@ -430,7 +429,6 @@ Top-level routes (defined in `src/App.tsx`):
 | `/:workspace/:project/board` | `BoardPage` |
 | `/:workspace/:project/list` | `ListPage` |
 | `/:workspace/:project/workflow` | `WorkflowPage` |
-| `/:workspace/:project/workflow/rules` | `RuleEditorPage` |
 | `/:workspace/:project/issue/new` | `CreateIssuePage` (modal route) |
 | `/:workspace/:project/issue/:key` | `IssueDetailPage` |
 | `/:workspace/:project/members` | `ProjectMembersPage` |

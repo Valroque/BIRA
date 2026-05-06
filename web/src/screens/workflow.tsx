@@ -1,5 +1,4 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { Link } from 'react-router-dom';
 import { Icon } from '../components/icons';
 import { TopBar, Tabs, Toolbar, Chip, StatusDot, TypeChip, STATUSES, projectTabs, useTenantBreadcrumbs } from '../components/shell';
 import { useDismiss } from '../components/use-dismiss';
@@ -19,6 +18,9 @@ import type {
   Workflow,
   WorkflowNode as GraphNode,
   WorkflowEdge as GraphEdge,
+  WorkflowRule,
+  WorkflowRuleType,
+  WorkflowRuleParams,
 } from '../api/adapters/workflow.adapter';
 // Suppress unused import warning — we re-export above only as a typing hint.
 void _WorkflowsProvider;
@@ -797,9 +799,6 @@ export function WorkflowEditor() {
           selected={selected}
           nodes={nodes}
           edges={edges}
-          tenant={tenant}
-          workspace={workspace}
-          project={project}
           workflowName={baseWorkflow?.name ?? '—'}
           issueTypeName={ISSUE_TYPE_NAMES[type]}
           onUpdateNode={updateNode}
@@ -912,9 +911,6 @@ interface InspectorProps {
   selected: Selection | null;
   nodes: GraphNode[];
   edges: GraphEdge[];
-  tenant: string;
-  workspace: string;
-  project: string;
   workflowName: string;
   issueTypeName: string;
   onUpdateNode: (id: string, patch: Partial<GraphNode>) => void;
@@ -923,7 +919,7 @@ interface InspectorProps {
   onDeleteEdge: (id: string) => void;
 }
 function Inspector({
-  selected, nodes, edges, tenant, workspace, project,
+  selected, nodes, edges,
   workflowName, issueTypeName,
   onUpdateNode, onUpdateEdge, onDeleteNode, onDeleteEdge,
 }: InspectorProps) {
@@ -949,9 +945,6 @@ function Inspector({
         <EdgeInspector
           edge={edges.find((e) => e.id === selected.id)!}
           nodes={nodes}
-          tenant={tenant}
-          workspace={workspace}
-          project={project}
           onChange={(patch) => onUpdateEdge(selected.id, patch)}
           onDelete={() => onDeleteEdge(selected.id)}
         />
@@ -1084,21 +1077,37 @@ function NodeInspector({
 interface EdgeInspectorProps {
   edge: GraphEdge;
   nodes: GraphNode[];
-  tenant: string;
-  workspace: string;
-  project: string;
   onChange: (patch: Partial<GraphEdge>) => void;
   onDelete: () => void;
 }
-function EdgeInspector({ edge, nodes, tenant, workspace, project, onChange, onDelete }: EdgeInspectorProps) {
+function EdgeInspector({ edge, nodes, onChange, onDelete }: EdgeInspectorProps) {
   const from = nodes.find((n) => n.id === edge.from);
   const to = nodes.find((n) => n.id === edge.to);
   const fromStatus = STATUSES.find((s) => s.id === from?.statusId);
   const toStatus = STATUSES.find((s) => s.id === to?.statusId);
 
-  // Demo rules — restricted (dashed) edges get the full three-rule example,
-  // others get a single rule. Real rule data would live on the edge itself.
-  const isFull = !!edge.dashed;
+  // Local-rule id pattern matches the rest of the editor's locally-minted ids
+  // (`n<base36-timestamp>`, `e<base36-timestamp>`). The write adapter drops
+  // the id on save — the BE re-issues real uuids — so this only needs to be
+  // unique within the current edit session.
+  const newRuleId = () => `r${Date.now().toString(36)}${Math.random().toString(36).slice(2, 4)}`;
+
+  const usedTypes = new Set(edge.rules.map((r) => r.type));
+  const availableTypes = ALL_RULE_TYPES.filter((t) => !usedTypes.has(t));
+
+  const addRule = (type: WorkflowRuleType) => {
+    const params: WorkflowRuleParams =
+      type === 'role' ? { role: 'admin' } :
+      type === 'required_fields' ? { fields: [] } :
+      null;
+    onChange({ rules: [...edge.rules, { id: newRuleId(), type, params }] });
+  };
+  const removeRule = (id: string) => {
+    onChange({ rules: edge.rules.filter((r) => r.id !== id) });
+  };
+  const updateRule = (id: string, params: WorkflowRuleParams) => {
+    onChange({ rules: edge.rules.map((r) => (r.id === id ? { ...r, params } : r)) });
+  };
 
   return (
     <>
@@ -1123,44 +1132,30 @@ function EdgeInspector({ edge, nodes, tenant, workspace, project, onChange, onDe
       </div>
 
       <div className="scroll" style={{ flex: 1, overflow: 'auto', padding: 12 }}>
-        <div style={{
-          display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8,
-        }}>
-          <span className="label-section">Rules · {isFull ? 3 : 1}</span>
-          <Link
-            to={`/${tenant}/${workspace}/${project}/workflow/rules`}
-            style={{ fontSize: 11.5, color: 'var(--accent)', textDecoration: 'none' }}
-          >Edit in detail →</Link>
+        <div className="label-section" style={{ marginBottom: 8 }}>
+          Rules · {edge.rules.length}
         </div>
 
-        {/*
-          Drift fix: rule cards rewritten to use the agreed five rule types
-          (role, assignee_only, reporter_only, required_fields, not_self).
-          Original used invented types (approver / external check / custom script).
-        */}
-        {isFull && (
-          <>
-            <RuleCard ruleType="role" title="Only admins" subtitle="role: admin" />
-            <RuleCard ruleType="required_fields" title="Required fields" subtitle="estimate, assignee" />
-            <RuleCard ruleType="not_self" title="Reviewer ≠ reporter" subtitle="acting user is not the reporter" />
-          </>
-        )}
-        {!isFull && (
-          <RuleCard ruleType="assignee_only" title="Assignee only" subtitle="only the assignee may transition" />
+        {edge.rules.length === 0 && (
+          <div style={{
+            padding: '10px 12px', marginBottom: 8,
+            background: 'var(--bg-subtle)', borderRadius: 6,
+            fontSize: 12, color: 'var(--fg-muted)',
+          }}>
+            No rules — anyone can transition.
+          </div>
         )}
 
-        <Link
-          to={`/${tenant}/${workspace}/${project}/workflow/rules`}
-          style={{
-            marginTop: 8, width: '100%', height: 32,
-            border: '1.5px dashed var(--border)', borderRadius: 6, background: 'transparent',
-            color: 'var(--fg-muted)', fontSize: 12, fontWeight: 500, cursor: 'pointer',
-            display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 6,
-            textDecoration: 'none',
-          }}
-        >
-          <Icon name="plus" size={13} />Add rule
-        </Link>
+        {edge.rules.map((rule) => (
+          <RuleCard
+            key={rule.id}
+            rule={rule}
+            onRemove={() => removeRule(rule.id)}
+            onUpdateParams={(params) => updateRule(rule.id, params)}
+          />
+        ))}
+
+        <AddRuleButton availableTypes={availableTypes} onAdd={addRule} />
 
         {/* Drift fix: dropped "Visible to" select and "Auto-transition" toggle (out of v1 scope). */}
         <div className="label-section" style={{ marginTop: 18, marginBottom: 8 }}>Properties</div>
@@ -1348,41 +1343,297 @@ export function EmptyState() {
 
 // --- Inspector helper components ---
 
-type RuleType = 'role' | 'assignee_only' | 'reporter_only' | 'required_fields' | 'not_self';
-
-const RULE_ICON: Record<RuleType, string> = {
-  role: 'shield',
-  assignee_only: 'user',
-  reporter_only: 'user',
-  required_fields: 'asterisk',
-  not_self: 'users',
+// Rule type metadata. Ported from the old standalone rule-editor screen
+// when the editor moved inline into EdgeInspector.
+//
+// Drift fix: the role select previously offered `admin` / `member`. v1
+// uses the three-role ladder `admin / write / read` per
+// `.claude/rules/v1-constraints.md`; the BE adapter type accepts the same
+// three values and nothing else.
+const RULE_META: Record<WorkflowRuleType, { icon: string; color: string; title: string; subtitle: string }> = {
+  role: {
+    icon: 'shield', color: 'var(--accent)',
+    title: 'Role-restricted',
+    subtitle: 'Only users with the selected role can perform this transition.',
+  },
+  assignee_only: {
+    icon: 'user', color: 'var(--in-review)',
+    title: 'Assignee only',
+    subtitle: 'Only the issue’s current assignee can perform this transition.',
+  },
+  reporter_only: {
+    icon: 'user', color: 'var(--in-progress)',
+    title: 'Reporter only',
+    subtitle: 'Only the user who reported the issue can perform this transition.',
+  },
+  required_fields: {
+    icon: 'asterisk', color: 'var(--done)',
+    title: 'Required fields',
+    subtitle: 'Specified fields must be non-empty on the issue before transition.',
+  },
+  not_self: {
+    icon: 'users', color: 'var(--in-review)',
+    title: 'Reviewer ≠ reporter',
+    subtitle: 'The acting user must not be the issue’s reporter.',
+  },
 };
 
+const ALL_RULE_TYPES: WorkflowRuleType[] = [
+  'role', 'assignee_only', 'reporter_only', 'required_fields', 'not_self',
+];
+
 interface RuleCardProps {
-  ruleType: RuleType;
-  title: string;
-  subtitle: string;
+  rule: WorkflowRule;
+  onRemove: () => void;
+  onUpdateParams: (params: WorkflowRuleParams) => void;
 }
-function RuleCard({ ruleType, title, subtitle }: RuleCardProps) {
+function RuleCard({ rule, onRemove, onUpdateParams }: RuleCardProps) {
+  const m = RULE_META[rule.type];
   return (
-    <div className="card" style={{
-      padding: 10, marginBottom: 6,
-      display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer',
-    }}>
+    <div className="card" style={{ marginBottom: 8, overflow: 'hidden' }}>
       <div style={{
-        width: 28, height: 28, borderRadius: 6,
-        background: 'var(--accent-subtle)', color: 'var(--accent)',
-        display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
+        padding: '8px 10px', borderBottom: '1px solid var(--border-muted)',
+        display: 'flex', alignItems: 'center', gap: 8, background: 'var(--bg-subtle)',
       }}>
-        <Icon name={RULE_ICON[ruleType]} size={14} />
+        <div style={{
+          // Drift fix: was raw `#fff` in the old standalone editor.
+          // Use `var(--bg)` so dark-mode tokens (when introduced) carry through.
+          width: 26, height: 26, borderRadius: 6,
+          background: 'var(--bg)', border: '1px solid var(--border-muted)',
+          color: m.color, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
+        }}>
+          <Icon name={m.icon} size={13} />
+        </div>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 5, flexWrap: 'wrap' }}>
+            <span style={{ fontSize: 12.5, fontWeight: 600 }}>{m.title}</span>
+            <span className="mono" style={{
+              fontSize: 10, color: 'var(--fg-faint)', background: 'var(--bg-muted)',
+              padding: '1px 5px', borderRadius: 3,
+            }}>{rule.type}</span>
+          </div>
+        </div>
+        <button
+          type="button"
+          onClick={onRemove}
+          className="btn btn-ghost btn-sm"
+          style={{ width: 22, padding: 0, color: 'var(--fg-muted)' }}
+          data-tip="Remove rule"
+        >
+          <Icon name="trash" size={12} />
+        </button>
       </div>
-      <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--fg)' }}>{title}</div>
-        <div style={{ fontSize: 11.5, color: 'var(--fg-muted)', marginTop: 1, fontFamily: 'var(--font-mono)' }}>{subtitle}</div>
+      <div style={{ padding: '10px 10px 8px' }}>
+        <RuleParams rule={rule} onUpdateParams={onUpdateParams} />
       </div>
-      <button className="btn btn-ghost btn-sm" style={{ width: 24, padding: 0 }}>
-        <Icon name="moreV" size={13} color="var(--fg-faint)" />
+    </div>
+  );
+}
+
+function RuleParams({
+  rule, onUpdateParams,
+}: { rule: WorkflowRule; onUpdateParams: (params: WorkflowRuleParams) => void }) {
+  if (rule.type === 'role') {
+    const role = (rule.params && 'role' in rule.params) ? rule.params.role : 'admin';
+    return (
+      <>
+        <Field label="Required role">
+          <select
+            className="input input-sm"
+            value={role}
+            onChange={(e) => onUpdateParams({ role: e.target.value as 'admin' | 'write' | 'read' })}
+          >
+            <option value="admin">admin</option>
+            <option value="write">write</option>
+            <option value="read">read</option>
+          </select>
+        </Field>
+        <Hint>
+          Only members at or above the selected role can move issues across this transition.
+          v1 supports three roles (<code>admin</code>, <code>write</code>, <code>read</code>).
+        </Hint>
+      </>
+    );
+  }
+  if (rule.type === 'required_fields') {
+    const fields = (rule.params && 'fields' in rule.params) ? rule.params.fields : [];
+    return (
+      <>
+        <Field label="Fields">
+          <FieldChips
+            fields={fields}
+            onChange={(next) => onUpdateParams({ fields: next })}
+          />
+        </Field>
+        <Hint>Validation runs on transition. Users see inline errors with the failing field names.</Hint>
+      </>
+    );
+  }
+  // assignee_only / reporter_only / not_self — no params.
+  const hint = (
+    rule.type === 'assignee_only' ? 'Useful when only the assignee should be able to start or finish work.'
+    : rule.type === 'reporter_only' ? 'Useful when the original reporter is the only one who can confirm a fix or close a request.'
+    : 'Useful for review states where the reporter shouldn’t approve their own issue. No parameters.'
+  );
+  return <Hint>{hint}</Hint>;
+}
+
+function FieldChips({
+  fields, onChange,
+}: { fields: string[]; onChange: (fs: string[]) => void }) {
+  const [adding, setAdding] = useState(false);
+  const [draft, setDraft] = useState('');
+
+  const commit = () => {
+    const v = draft.trim().replace(/\s+/g, '_');
+    if (v && !fields.includes(v)) onChange([...fields, v]);
+    setDraft('');
+    setAdding(false);
+  };
+
+  return (
+    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center' }}>
+      {fields.map((f) => (
+        <span key={f} style={{
+          display: 'inline-flex', alignItems: 'center', gap: 4, height: 22,
+          padding: '0 4px 0 8px', background: 'var(--bg-muted)', borderRadius: 4,
+          fontFamily: 'var(--font-mono)', fontSize: 11.5,
+        }}>
+          {f}
+          <button
+            type="button"
+            onClick={() => onChange(fields.filter((x) => x !== f))}
+            data-tip="Remove field"
+            style={{
+              padding: 2, background: 'transparent', border: 'none', cursor: 'pointer',
+              color: 'var(--fg-faint)', display: 'flex',
+            }}
+          >
+            <Icon name="x" size={10} />
+          </button>
+        </span>
+      ))}
+      {adding ? (
+        <input
+          autoFocus
+          className="input input-sm mono"
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          onBlur={commit}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') commit();
+            if (e.key === 'Escape') { setDraft(''); setAdding(false); }
+          }}
+          placeholder="field_name"
+          style={{ width: 130 }}
+        />
+      ) : (
+        <button
+          type="button"
+          onClick={() => setAdding(true)}
+          className="pill pill-outline"
+          style={{ cursor: 'pointer' }}
+        >
+          <Icon name="plus" size={11} />Add field
+        </button>
+      )}
+    </div>
+  );
+}
+
+function Hint({ children }: { children: ReactNode }) {
+  return (
+    <div style={{
+      marginTop: 8, padding: '7px 9px', background: 'var(--bg-subtle)', borderRadius: 5,
+      fontSize: 11.5, color: 'var(--fg-muted)', display: 'flex', gap: 6, alignItems: 'flex-start',
+      lineHeight: 1.45,
+    }}>
+      <Icon name="question" size={12} color="var(--fg-faint)" style={{ marginTop: 1, flexShrink: 0 }} />
+      <span>{children}</span>
+    </div>
+  );
+}
+
+/**
+ * Compressed picker for the 320px sidebar. Click the dashed "Add rule"
+ * button → a popover lists the unused rule types. The two-column grid
+ * the standalone editor used would overflow this width, so we render a
+ * single-column list of clickable rows.
+ */
+function AddRuleButton({
+  availableTypes, onAdd,
+}: { availableTypes: WorkflowRuleType[]; onAdd: (type: WorkflowRuleType) => void }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  useDismiss(ref, () => setOpen(false), open);
+
+  const allUsed = availableTypes.length === 0;
+
+  return (
+    <div ref={ref} style={{ position: 'relative', marginTop: 4 }}>
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        disabled={allUsed}
+        data-tip={allUsed ? 'All rule types are already on this transition' : undefined}
+        style={{
+          width: '100%', height: 32,
+          border: '1.5px dashed var(--border)', borderRadius: 6, background: 'transparent',
+          color: allUsed ? 'var(--fg-faint)' : 'var(--fg-muted)',
+          fontSize: 12, fontWeight: 500,
+          cursor: allUsed ? 'not-allowed' : 'pointer',
+          display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+        }}
+      >
+        <Icon name="plus" size={13} />Add rule
       </button>
+      {open && !allUsed && (
+        <div style={{
+          position: 'absolute', top: '100%', left: 0, right: 0, marginTop: 6, zIndex: 30,
+          background: 'var(--bg)', border: '1px solid var(--border)',
+          borderRadius: 8, boxShadow: 'var(--shadow-lg)', overflow: 'hidden',
+        }}>
+          <div className="label-section" style={{
+            padding: '8px 10px', borderBottom: '1px solid var(--border-muted)',
+          }}>
+            Pick a rule type
+          </div>
+          <div style={{ padding: 4, maxHeight: 240, overflow: 'auto' }} className="scroll">
+            {availableTypes.map((t) => {
+              const m = RULE_META[t];
+              return (
+                <button
+                  key={t}
+                  type="button"
+                  onClick={() => { onAdd(t); setOpen(false); }}
+                  style={{
+                    display: 'flex', alignItems: 'flex-start', gap: 8,
+                    width: '100%', padding: '7px 8px', borderRadius: 5,
+                    border: 'none', cursor: 'pointer', textAlign: 'left',
+                    background: 'transparent', color: 'var(--fg)',
+                  }}
+                  onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--bg-subtle)'; }}
+                  onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
+                >
+                  <Icon name={m.icon} size={13} color={m.color} style={{ marginTop: 2, flexShrink: 0 }} />
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 5, flexWrap: 'wrap' }}>
+                      <span style={{ fontSize: 12.5, fontWeight: 500 }}>{m.title}</span>
+                      <span className="mono" style={{
+                        fontSize: 10, color: 'var(--fg-faint)', background: 'var(--bg-muted)',
+                        padding: '1px 5px', borderRadius: 3,
+                      }}>{t}</span>
+                    </div>
+                    <div style={{ fontSize: 11, color: 'var(--fg-muted)', marginTop: 2, lineHeight: 1.35 }}>
+                      {m.subtitle}
+                    </div>
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
