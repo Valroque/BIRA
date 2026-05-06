@@ -14,6 +14,7 @@ import {
   adaptWorkflow, adaptProjectWorkflowMap,
   type RawWorkflow, type RawProjectWorkflowMap,
   type Workflow, type ProjectWorkflowMap,
+  type UpdateWorkflowPayload,
 } from './adapters/workflow.adapter';
 import type { IssueTypeLetter } from '../fixtures';
 
@@ -34,6 +35,27 @@ export async function getWorkflow(
 ): Promise<Workflow> {
   const raw = await apiFetch<RawWorkflow>(
     `/api/tenants/${tenantSlug}/workspaces/${workspaceSlug}/workflows/${workflowSlug}`,
+  );
+  return adaptWorkflow(raw);
+}
+
+/**
+ * PATCH a workflow's nodes / transitions / metadata. The BE accepts a
+ * partial: any combination of `name`, `description`, `nodes`, `transitions`.
+ * `nodes` + `transitions` are full-replace when supplied — pass the whole
+ * graph each time. Existing nodes keep their UUIDs by passing `id` through;
+ * fresh nodes omit `id` so the BE mints one. See `toUpdateWorkflowPayload`
+ * for the FE→payload translation.
+ */
+export async function updateWorkflow(
+  tenantSlug: string,
+  workspaceSlug: string,
+  workflowSlug: string,
+  payload: UpdateWorkflowPayload,
+): Promise<Workflow> {
+  const raw = await apiFetch<RawWorkflow>(
+    `/api/tenants/${tenantSlug}/workspaces/${workspaceSlug}/workflows/${workflowSlug}`,
+    { method: 'PATCH', body: JSON.stringify(payload) },
   );
   return adaptWorkflow(raw);
 }

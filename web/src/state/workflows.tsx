@@ -26,10 +26,17 @@ import {
 import {
   listWorkflows as apiListWorkflows,
   getWorkflow as apiGetWorkflow,
+  updateWorkflow as apiUpdateWorkflow,
   getProjectWorkflows as apiGetProjectWorkflows,
   setProjectWorkflow as apiSetProjectWorkflow,
 } from '../api/workflows';
-import type { Workflow, ProjectWorkflowMap } from '../api/adapters/workflow.adapter';
+import {
+  toUpdateWorkflowPayload,
+  type Workflow,
+  type ProjectWorkflowMap,
+  type WorkflowNode,
+  type WorkflowEdge,
+} from '../api/adapters/workflow.adapter';
 import type { IssueTypeLetter } from '../fixtures';
 
 // ---------------------------------------------------------------------------
@@ -52,6 +59,26 @@ export interface WorkflowsCtxValue {
    * <ErrorState> in their own surface).
    */
   fetchWorkflowDetail: (slug: string) => Promise<Workflow>;
+  /** True while a `saveWorkflow` PATCH is in flight. */
+  saving: boolean;
+  /**
+   * PATCH a workflow's metadata + graph in a single round-trip. The
+   * adapter handles translating FE node/edge shape into the BE payload
+   * (including dropping local-only ids so the BE mints uuids for fresh
+   * nodes — see `toUpdateWorkflowPayload`). On success, the returned
+   * `Workflow` replaces the cached entry by id so callers re-render
+   * with server-authoritative ids and timestamps. Throws on failure;
+   * callers decide UX (this provider does not surface errors itself).
+   */
+  saveWorkflow: (
+    slug: string,
+    patch: {
+      name?: string;
+      description?: string | null;
+      nodes?: WorkflowNode[];
+      edges?: WorkflowEdge[];
+    },
+  ) => Promise<Workflow>;
   /** Re-fetch the list. Does not toggle `loading`. */
   refresh: () => Promise<void>;
 }
@@ -66,6 +93,7 @@ export function WorkflowsProvider({
   const [workflows, setWorkflows] = useState<Workflow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
 
   const load = useCallback(async (toggleLoading: boolean) => {
     if (!tenant || !workspace) {
@@ -116,11 +144,39 @@ export function WorkflowsProvider({
     return fresh;
   }, [tenant, workspace, workflows]);
 
+  const saveWorkflow = useCallback(async (
+    slug: string,
+    patch: {
+      name?: string;
+      description?: string | null;
+      nodes?: WorkflowNode[];
+      edges?: WorkflowEdge[];
+    },
+  ): Promise<Workflow> => {
+    setSaving(true);
+    try {
+      const payload = toUpdateWorkflowPayload(patch);
+      const fresh = await apiUpdateWorkflow(tenant, workspace, slug, payload);
+      // Replace by id, same pattern as `fetchWorkflowDetail`. Append if
+      // the list cache was empty / hadn't loaded yet.
+      setWorkflows((prev) => {
+        const idx = prev.findIndex((w) => w.id === fresh.id);
+        if (idx === -1) return [...prev, fresh];
+        const copy = [...prev];
+        copy[idx] = fresh;
+        return copy;
+      });
+      return fresh;
+    } finally {
+      setSaving(false);
+    }
+  }, [tenant, workspace]);
+
   const refresh = useCallback(() => load(false), [load]);
 
   const value: WorkflowsCtxValue = {
-    workflows, loading, error,
-    getWorkflow, getWorkflowById, fetchWorkflowDetail, refresh,
+    workflows, loading, error, saving,
+    getWorkflow, getWorkflowById, fetchWorkflowDetail, saveWorkflow, refresh,
   };
 
   return <WorkflowsContext.Provider value={value}>{children}</WorkflowsContext.Provider>;

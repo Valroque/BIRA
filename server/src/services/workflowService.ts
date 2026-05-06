@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import type { Knex } from 'knex';
 import { db } from '../db/knex.js';
 import { Workflow, type WorkflowRow } from '../entities/Workflow.js';
@@ -123,6 +124,13 @@ export async function deleteById(id: string, trx?: Q): Promise<boolean> {
 // ---------- workflow nodes ----------
 
 export interface WorkflowNodeInput {
+  /**
+   * Optional client-supplied uuid. When present, the inserted row uses
+   * this id verbatim; transitions in the same PATCH may reference it.
+   * When absent, a fresh uuid is minted at insert time. Validated for
+   * within-input uniqueness by `validateNodes`.
+   */
+  id?: string;
   statusId: StatusId;
   x: number;
   y: number;
@@ -170,6 +178,11 @@ export async function replaceNodes(
   const rows = (await trx('workflow_nodes')
     .insert(
       nodes.map((n) => ({
+        // Preserve client-supplied id when present so transitions
+        // referencing existing node uuids (e.g. from a prior GET) survive
+        // the full-replace; mint a fresh uuid otherwise. Within-input
+        // uniqueness is enforced by validateNodes before we get here.
+        id: n.id ?? randomUUID(),
         workflowId,
         statusId: n.statusId,
         x: n.x,

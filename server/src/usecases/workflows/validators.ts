@@ -15,6 +15,12 @@ export function validateNodes(nodes: WorkflowNodeInput[]): void {
   }
   let initialCount = 0;
   const seenStatuses = new Set<StatusId>();
+  // Within-input uniqueness check for client-supplied ids. Two nodes
+  // carrying the same explicit id would collide on insert (PK conflict)
+  // and silently let one win on retry — surface as 400 instead. We do
+  // not validate against the DB row set: replaceNodes drops the old
+  // rows in the same transaction, so any pre-existing id is fair game.
+  const seenIds = new Set<string>();
   for (const n of nodes) {
     if (!STATUSES.includes(n.statusId)) {
       throw new AppError(`Invalid status '${n.statusId}' on workflow node`, 400);
@@ -23,6 +29,12 @@ export function validateNodes(nodes: WorkflowNodeInput[]): void {
       throw new AppError(`Duplicate node for status '${n.statusId}'`, 400);
     }
     seenStatuses.add(n.statusId);
+    if (n.id !== undefined) {
+      if (seenIds.has(n.id)) {
+        throw new AppError(`Duplicate node id '${n.id}' in input`, 400);
+      }
+      seenIds.add(n.id);
+    }
     if (!Number.isInteger(n.x) || !Number.isInteger(n.y)) {
       throw new AppError('Workflow node x / y must be integers', 400);
     }

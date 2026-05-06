@@ -255,6 +255,90 @@ export function adaptWorkflow(raw: RawWorkflow): Workflow {
   };
 }
 
+// ---------------------------------------------------------------------------
+// Write adapter — FE editor shape → BE PATCH payload
+//
+// The graph editor (`screens/workflow.tsx`) creates fresh nodes with locally-
+// minted ids like `n<base36-timestamp>` so it can wire up edges before the
+// BE ever sees the node. Those local ids are NOT uuids — the BE PATCH
+// endpoint expects either a real uuid (for nodes already persisted) or no
+// id at all (so it mints fresh). Sending a `n<…>` id would 400 against
+// `NodeSchema.id: z.string().uuid().optional()`.
+//
+// `isUuid` filters the id field; everything else maps straight through.
+// Edge ids are dropped — the BE re-issues them on every PATCH.
+// ---------------------------------------------------------------------------
+
+const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+function isUuid(s: string | undefined): s is string {
+  return typeof s === 'string' && UUID_REGEX.test(s);
+}
+
+export interface UpdateWorkflowPayload {
+  name?: string;
+  description?: string | null;
+  nodes?: Array<{
+    id?: string;
+    statusId: string;
+    x: number;
+    y: number;
+    isInitial?: boolean;
+    isTerminal?: boolean;
+  }>;
+  transitions?: Array<{
+    fromNodeId: string;
+    toNodeId: string;
+    label?: string | null;
+    dashed?: boolean;
+    rules?: Array<{ type: WorkflowRuleType; params?: unknown }>;
+  }>;
+}
+
+/**
+ * Translate FE editor state to a BE PATCH payload.
+ *
+ * Local-id vs uuid filter: the editor creates fresh nodes with ids of the
+ * shape `n<base36-timestamp>` (see `addState` in `screens/workflow.tsx`).
+ * Those aren't uuids, and the BE rejects them. We drop ids that don't
+ * match the uuid regex so the BE mints fresh ones; uuid ids (i.e. nodes
+ * already persisted) pass through so transitions can keep referencing
+ * the same node across saves.
+ *
+ * Edge ids are dropped unconditionally — the BE re-issues them on every
+ * PATCH because transitions are full-replace.
+ */
+export function toUpdateWorkflowPayload(patch: {
+  name?: string;
+  description?: string | null;
+  nodes?: WorkflowNode[];
+  edges?: WorkflowEdge[];
+}): UpdateWorkflowPayload {
+  const out: UpdateWorkflowPayload = {};
+  if (patch.name !== undefined) out.name = patch.name;
+  if (patch.description !== undefined) out.description = patch.description;
+  if (patch.nodes !== undefined) {
+    out.nodes = patch.nodes.map((n) => ({
+      ...(isUuid(n.id) ? { id: n.id } : {}),
+      statusId: n.statusId,
+      x: Math.round(n.x),
+      y: Math.round(n.y),
+      ...(n.initial ? { isInitial: true } : {}),
+      ...(n.terminal ? { isTerminal: true } : {}),
+    }));
+  }
+  if (patch.edges !== undefined) {
+    out.transitions = patch.edges.map((e) => ({
+      fromNodeId: e.from,
+      toNodeId: e.to,
+      ...(e.label !== undefined ? { label: e.label } : {}),
+      ...(e.dashed ? { dashed: true } : {}),
+      rules: e.rules.map((r) => ({ type: r.type, params: r.params })),
+    }));
+  }
+  return out;
+}
+
 /**
  * Adapt the BE's `Record<IssueType, WorkflowSummary | null>`. Null entries
  * pass through — they mean "no workflow assigned and no default available".

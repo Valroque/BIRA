@@ -500,12 +500,17 @@ export function WorkflowEditor() {
     workflows: catalog,
     loading: catalogLoading,
     error: catalogError,
+    saving: saveInFlight,
+    saveWorkflow,
   } = useWorkflows();
   const {
     projectWorkflows,
     loading: assignmentsLoading,
     error: assignmentsError,
-    saving,
+    // `saving` here is the project↔workflow assignment PUT — separate
+    // concern from the graph PATCH below. Aliased to keep the two
+    // visibly distinct in this component.
+    saving: assignmentSaving,
     setWorkflowForType,
   } = useProjectWorkflows();
 
@@ -538,23 +543,34 @@ export function WorkflowEditor() {
   }, [projectWorkflows, summary]);
 
   // Session-local working copy of the current workflow. Edits in the
-  // inspector mutate this copy so the graph reflects them immediately —
-  // matches the rest of the prototype, where graph mutations don't yet
-  // round-trip to the BE.
+  // inspector mutate this copy and flip `dirty` so the toolbar Save button
+  // can light up. The save handler PATCHes the BE and lets the
+  // `useEffect` below re-seed local state from the fresh response.
   const [nodes, setNodes] = useState<GraphNode[]>([]);
   const [edges, setEdges] = useState<GraphEdge[]>([]);
+  const [dirty, setDirty] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
   // Reset whenever the source workflow changes (issue type switch, project
-  // switch). Re-running this on baseWorkflow identity is the right trigger
-  // because the `Workflow` reference is stable per id within the catalogue.
+  // switch, or post-save replacement of the cached workflow). Re-running
+  // this on baseWorkflow identity is the right trigger because the
+  // `Workflow` reference is stable per id within the catalogue, and a
+  // successful save replaces it with a new reference carrying server-
+  // authoritative ids + timestamps.
   useEffect(() => {
     setNodes(baseWorkflow?.nodes ?? []);
     setEdges(baseWorkflow?.edges ?? []);
+    setDirty(false);
+    setSaveError(null);
   }, [baseWorkflow]);
 
-  const updateNode = (id: string, patch: Partial<GraphNode>) =>
+  const updateNode = (id: string, patch: Partial<GraphNode>) => {
     setNodes((prev) => prev.map((n) => (n.id === id ? { ...n, ...patch } : n)));
-  const updateEdge = (id: string, patch: Partial<GraphEdge>) =>
+    setDirty(true);
+  };
+  const updateEdge = (id: string, patch: Partial<GraphEdge>) => {
     setEdges((prev) => prev.map((e) => (e.id === id ? { ...e, ...patch } : e)));
+    setDirty(true);
+  };
 
   // Append a new state at a sensible spot — start near the top-left so the
   // user always sees it appear in-viewport, then they can drag from there.
@@ -568,6 +584,7 @@ export function WorkflowEditor() {
     };
     setNodes((prev) => [...prev, next]);
     setSelected({ type: 'node', id });
+    setDirty(true);
   };
 
   // Delete a node + every edge that touches it, so the graph stays consistent.
@@ -575,11 +592,13 @@ export function WorkflowEditor() {
     setNodes((prev) => prev.filter((n) => n.id !== id));
     setEdges((prev) => prev.filter((e) => e.from !== id && e.to !== id));
     setSelected(null);
+    setDirty(true);
   };
 
   const deleteEdge = (id: string) => {
     setEdges((prev) => prev.filter((e) => e.id !== id));
     setSelected(null);
+    setDirty(true);
   };
 
   const addEdge = (fromId: string, toId: string) => {
@@ -588,6 +607,20 @@ export function WorkflowEditor() {
     const id = `e${Date.now().toString(36)}`;
     setEdges((prev) => [...prev, { id, from: fromId, to: toId, rules: [] }]);
     setSelected({ type: 'edge', id });
+    setDirty(true);
+  };
+
+  const onSave = async () => {
+    if (!baseWorkflow || !dirty || saveInFlight) return;
+    setSaveError(null);
+    try {
+      // saveWorkflow replaces the cached workflow on success; the
+      // baseWorkflow useEffect above then re-seeds nodes/edges and
+      // resets `dirty` to false.
+      await saveWorkflow(baseWorkflow.slug, { nodes, edges });
+    } catch (err) {
+      setSaveError(err instanceof Error ? err.message : 'Failed to save workflow');
+    }
   };
 
   const onPickWorkflow = async (slug: string) => {
@@ -652,7 +685,7 @@ export function WorkflowEditor() {
             <WorkflowSwitcher
               catalog={catalog}
               currentSlug={summary?.slug}
-              disabled={saving || !summary}
+              disabled={assignmentSaving || !summary}
               onPick={onPickWorkflow}
             />
             <Chip dim>
@@ -666,18 +699,59 @@ export function WorkflowEditor() {
               <>
                 <button className="btn btn-sm"><Icon name="history" size={13} />History</button>
                 <button className="btn btn-sm"><Icon name="eye" size={13} />Preview</button>
-                <button className="btn btn-primary btn-sm"><Icon name="check" size={13} />Publish</button>
+                <button
+                  type="button"
+                  className="btn btn-primary btn-sm"
+                  onClick={onSave}
+                  disabled={!baseWorkflow || !dirty || saveInFlight}
+                  data-tip={
+                    !baseWorkflow ? undefined
+                      : !dirty ? 'No unsaved changes'
+                      : saveInFlight ? undefined
+                      : 'Save workflow changes'
+                  }
+                >
+                  <Icon name="check" size={13} />
+                  {saveInFlight ? 'Saving…' : 'Save changes'}
+                </button>
               </>
             }
           >
             <span style={{ fontSize: 12, color: 'var(--fg-muted)', maxWidth: 520, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
               {baseWorkflow?.description ?? ''}
             </span>
-            <span style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--fg-muted)' }}>
-              <span style={{ width: 6, height: 6, borderRadius: 3, background: 'var(--in-progress)' }} />
-              <span>Unpublished changes</span>
-            </span>
+            {dirty && (
+              <span style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--fg-muted)' }}>
+                <span style={{ width: 6, height: 6, borderRadius: 3, background: 'var(--in-progress)' }} />
+                <span>Unsaved changes</span>
+              </span>
+            )}
           </Toolbar>
+          {saveError && (
+            <div
+              role="alert"
+              style={{
+                display: 'flex', alignItems: 'center', gap: 8,
+                padding: '8px 16px',
+                background: 'var(--blocked-bg)',
+                borderBottom: '1px solid var(--blocked)',
+                color: 'var(--blocked)',
+                fontSize: 12,
+              }}
+            >
+              <Icon name="alert" size={13} />
+              <span style={{ flex: 1, color: 'var(--fg)' }}>{saveError}</span>
+              <button
+                type="button"
+                className="btn btn-sm"
+                onClick={() => setSaveError(null)}
+                data-tip="Dismiss"
+                style={{ height: 22, padding: '0 8px' }}
+              >
+                <Icon name="x" size={12} />
+              </button>
+            </div>
+          )}
 
           <div style={{ flex: 1, padding: 16, overflow: 'hidden', display: 'flex', minHeight: 0 }}>
             {fatalError && (
