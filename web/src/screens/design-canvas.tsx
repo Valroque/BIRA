@@ -16,7 +16,6 @@ import {
   WorkflowVariantKanban,
   EmptyState,
 } from './workflow';
-import { RuleEditor } from './rule-editor';
 import { CreateIssue } from './create-issue';
 
 const DC = {
@@ -72,16 +71,6 @@ export function DesignCanvasPage() {
         </Artboard>
         <Artboard label="04 · Empty state with templates" width={W} height={H}>
           <AppShell sidebarActive="comet-workflow"><EmptyState /></AppShell>
-        </Artboard>
-      </Section>
-
-      <Section
-        id="rules"
-        title="Transition rules"
-        subtitle="The 5 rule types as cards. Role · assignee_only · reporter_only · required_fields · not_self."
-      >
-        <Artboard label="01 · Rule editor — In Review → Done" width={W} height={H}>
-          <AppShell sidebarActive="comet-workflow"><RuleEditor /></AppShell>
         </Artboard>
       </Section>
 

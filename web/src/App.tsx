@@ -18,7 +18,6 @@ import { BoardPage } from './screens/board';
 import { ListPage } from './screens/list';
 import { IssueDetailPage } from './screens/issue-detail';
 import { WorkflowPage } from './screens/workflow';
-import { RuleEditorPage } from './screens/rule-editor';
 import { CreateIssuePage } from './screens/create-issue';
 import { AcceptInvitePage } from './screens/accept-invite';
 import { SettingsLayout, GeneralSettings, MembersSettings, ProfileSettings } from './screens/settings';
@@ -185,7 +184,6 @@ export default function App() {
               <Route path="/:tenant/:workspace/:project/board" element={<BoardPage />} />
               <Route path="/:tenant/:workspace/:project/list" element={<ListPage />} />
               <Route path="/:tenant/:workspace/:project/workflow" element={<WorkflowPage />} />
-              <Route path="/:tenant/:workspace/:project/workflow/rules" element={<RuleEditorPage />} />
               <Route path="/:tenant/:workspace/:project/issue/new" element={<CreateIssuePage />} />
               <Route path="/:tenant/:workspace/:project/issue/:key" element={<IssueDetailPage />} />
 
