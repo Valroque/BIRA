@@ -183,9 +183,8 @@ describe('POST /api/tenants', () => {
       .get('/api/tenants')
       .set('Authorization', `Bearer ${token}`);
     expect(list.status).toBe(200);
-    const slugs = list.body.data.map(
-      (item: { tenant: { slug: string } }) => item.tenant.slug
-    );
+    // GET /api/tenants is the public pre-login picker — flat Tenant[].
+    const slugs = list.body.data.map((item: { slug: string }) => item.slug);
     expect(slugs).toContain('just-made');
   });
 });

@@ -89,9 +89,9 @@ router.get(
 );
 
 // POST /api/tenants/:tenantSlug/deactivate — tenant admin only. Soft-freeze;
-// no data is destroyed. The tenant disappears from the default `GET
-// /api/tenants` list (an admin can still find it via
-// `?includeDeactivated=true` to reactivate).
+// no data is destroyed. The tenant disappears from the public `GET
+// /api/tenants` picker. An admin who knows the slug can still reach the
+// detail endpoint and POST `/reactivate` to flip it back.
 router.post(
   '/:tenantSlug/deactivate',
   authorize('admin'),
