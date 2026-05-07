@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useState, type FormEvent, type ReactNode } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Icon } from '../components/icons';
-import { TypeChip, StatusDot, Priority, Avatar, KBD, useTenantContext } from '../components/shell';
+import { TypeChip, StatusDot, Priority, KBD, useTenantContext } from '../components/shell';
 import { AttachmentRow, useComposer } from '../components/composer';
+import { OwnerPicker } from '../components/owner-picker';
 import { type Issue } from '../fixtures';
 import { useIssues } from '../state/issues';
 import { useProjects } from '../state/projects';
@@ -56,6 +57,11 @@ export function CreateIssuePage() {
   const [title, setTitle] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
+  // Owner — at most one of (assigneeUserId, teamId) is non-null. The
+  // OwnerPicker enforces this via its onChange contract; the BE rejects
+  // both non-null with 400 as a defensive backstop.
+  const [assigneeUserId, setAssigneeUserId] = useState<string | null>(null);
+  const [teamId, setTeamId] = useState<string | null>(null);
   // If the parent changes (e.g. user opens the form from a different issue),
   // ensure the currently-selected type is still allowed.
   useEffect(() => {
@@ -90,6 +96,11 @@ export function CreateIssuePage() {
       title: title.trim(),
       description: desc.value.trim() ? desc.value : undefined,
       parent: parent?.key,
+      // Owner — send whichever side is set; both null when nothing's
+      // picked. The picker's mutual-exclusion guarantee + the BE's 400
+      // on both-non-null keep this consistent.
+      assigneeUserId: assigneeUserId ?? undefined,
+      teamId: teamId ?? undefined,
       descriptionAttachmentIds: desc.attachmentIds.length ? desc.attachmentIds : undefined,
     });
     setSubmitting(false);
@@ -279,16 +290,26 @@ export function CreateIssuePage() {
           </div>
 
           {/*
-            Meta placeholders — priority / assignee / labels are still UI-only
-            in the create form. The detail page can edit all three through
-            patchIssue once the issue is created. Wiring them into the create
-            payload is a follow-up; the BE accepts them as optional fields.
+            Meta row — owner is now wired through OwnerPicker (Person | Team
+            mutual-exclusive). Priority / labels / link are still UI-only
+            placeholders — the detail page can edit them through patchIssue
+            once the issue is created. Wiring them into the create payload is
+            a follow-up; the BE accepts them as optional fields.
             Drift fix: removed "Sprint" and "Estimate" meta buttons (out of v1 scope).
           */}
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 8 }}>
             <MetaBtn icon={<StatusDot status="backlog" size={11} />} label="Backlog" hint="Initial" />
             <MetaBtn icon={<Priority p="urgent" />} label="Urgent" />
-            <MetaBtn icon={<Avatar name="Maya Chen" size={16} />} label="Maya Chen" />
+            <OwnerPicker
+              assigneeUserId={assigneeUserId}
+              teamId={teamId}
+              onChange={(next) => {
+                setAssigneeUserId(next.assigneeUserId);
+                setTeamId(next.teamId);
+              }}
+              variant="form"
+              disabled={submitting}
+            />
             <MetaBtn icon={<Icon name="tag" size={12} color="var(--fg-muted)" />} label="2 labels" />
             <MetaBtn icon={<Icon name="link" size={12} color="var(--fg-muted)" />} label="Link" placeholder />
           </div>

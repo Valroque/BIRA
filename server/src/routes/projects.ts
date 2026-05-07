@@ -18,6 +18,7 @@ import { ISSUE_TYPES, PROJECT_STATUSES } from '../lib/constants.js';
 import type { Project } from '../entities/Project.js';
 import projectIssuesRouter from './projectIssues.js';
 import projectAccessRouter from './projectAccess.js';
+import projectMilestonesRouter from './projectMilestones.js';
 
 const router: Router = Router({ mergeParams: true });
 
@@ -252,5 +253,10 @@ router.use('/:projectSlug/issues', projectIssuesRouter);
 // access router so the same `:projectSlug` token serves both reads and
 // mutations.
 router.use('/:projectSlug/access', projectAccessRouter);
+
+// /api/tenants/:t/workspaces/:w/projects/:projectSlug/milestones —
+// project-scoped milestone CRUD. Project lookup + status gating happen
+// inside the milestones router (mirrors projectIssues / projectAccess).
+router.use('/:projectSlug/milestones', projectMilestonesRouter);
 
 export default router;

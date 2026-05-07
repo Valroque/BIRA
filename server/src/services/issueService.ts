@@ -16,6 +16,7 @@ const COLUMNS = [
   'description',
   'labels',
   'assignee_user_id',
+  'team_id',
   'reporter_user_id',
   'parent_issue_id',
   'start_date',
@@ -32,6 +33,7 @@ export interface IssueFilters {
   status?: StatusId;
   type?: IssueType;
   assigneeUserId?: string;
+  teamId?: string;
   label?: string;
   priority?: Priority;
   projectId?: string;
@@ -41,6 +43,7 @@ function applyFilters<T extends Knex.QueryBuilder>(q: T, filters: IssueFilters):
   if (filters.status) q.where('status', filters.status);
   if (filters.type) q.where('type', filters.type);
   if (filters.assigneeUserId) q.where('assignee_user_id', filters.assigneeUserId);
+  if (filters.teamId) q.where('team_id', filters.teamId);
   if (filters.priority) q.where('priority', filters.priority);
   if (filters.projectId) q.where('project_id', filters.projectId);
   // labels[] is a Postgres text[]; `?` operator tests for membership.
@@ -101,6 +104,7 @@ export interface CreateIssueInput {
   description?: string | null;
   labels?: string[];
   assigneeUserId?: string | null;
+  teamId?: string | null;
   reporterUserId?: string | null;
   parentIssueId?: string | null;
   startDate?: string | null;
@@ -125,6 +129,7 @@ export async function create(input: CreateIssueInput, trx?: Q): Promise<Issue> {
       description: input.description ?? null,
       labels: input.labels ?? [],
       assigneeUserId: input.assigneeUserId ?? null,
+      teamId: input.teamId ?? null,
       reporterUserId: input.reporterUserId ?? null,
       parentIssueId: input.parentIssueId ?? null,
       startDate: input.startDate ?? null,
@@ -142,6 +147,7 @@ export interface UpdateIssueInput {
   status?: StatusId;
   priority?: Priority;
   assigneeUserId?: string | null;
+  teamId?: string | null;
   labels?: string[];
   // parentIssueId is settable via this service so setIssueParent can
   // route through one place. The general-purpose updateIssue usecase

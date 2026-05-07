@@ -14,6 +14,7 @@ import tenantMembersRouter from './tenantMembers.js';
 import workspaceMembersRouter from './workspaceMembers.js';
 import teamsRouter from './teams.js';
 import issuesRouter from './issues.js';
+import milestonesRouter from './milestones.js';
 import workflowsRouter from './workflows.js';
 import filesRouter from './files.js';
 import mentionablesRouter from './mentionables.js';
@@ -160,6 +161,15 @@ router.use(
   '/:tenantSlug/workspaces/:workspaceSlug/issues',
   resolveWorkspaceScope,
   issuesRouter
+);
+
+// /api/tenants/:tenantSlug/workspaces/:workspaceSlug/milestones — workspace-
+// scoped milestone listing (optionally filtered by ?projectId=). Project-
+// scoped CRUD lives under /projects/:p/milestones.
+router.use(
+  '/:tenantSlug/workspaces/:workspaceSlug/milestones',
+  resolveWorkspaceScope,
+  milestonesRouter
 );
 
 // /api/tenants/:tenantSlug/workspaces/:workspaceSlug/workflows — workflows

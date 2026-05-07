@@ -6,6 +6,7 @@ import { TopBar, Avatar, useTenantContext, useTenantBreadcrumbs } from '../compo
 import { Modal, ModalHeader, ModalFooter } from '../components/modal';
 import { Field, Hint } from '../components/forms';
 import { ProjectBadge } from '../components/project-chip';
+import { DataTable, type DataTableColumn, type DataTableGroup } from '../components/data-table';
 import {
   DEFAULT_PROJECT_WORKFLOWS, ISSUE_TYPE_NAMES,
   RESERVED_PROJECT_SLUGS,
@@ -19,6 +20,12 @@ import { useWorkflows } from '../state/workflows';
 import { useTeams } from '../state/teams';
 import { useUsers, UNKNOWN_USER_LABEL } from '../state/users';
 
+interface ProjectRow {
+  project: Project;
+  open: number;
+  memberCount: number;
+}
+
 export function ProjectsPage() {
   const { tenant, workspace, tenantName, workspaceName } = useTenantBreadcrumbs();
   const { projects } = useProjects();
@@ -31,8 +38,6 @@ export function ProjectsPage() {
     const f = filter.toLowerCase();
     return p.name.toLowerCase().includes(f) || p.key.toLowerCase().includes(f);
   });
-  const active = filtered.filter((p) => p.status === 'active');
-  const archived = filtered.filter((p) => p.status === 'archived');
 
   // Open-issue counts per project. The list endpoint doesn't expose
   // aggregates yet so we compute client-side off the workspace cache —
@@ -45,6 +50,88 @@ export function ProjectsPage() {
     }
     return m;
   }, [issues]);
+
+  const toRow = (p: Project): ProjectRow => ({
+    project: p,
+    open: openByProjectId.get(p.id) ?? 0,
+    memberCount: projectEffectiveMembers(p, tenant).length,
+  });
+  const active = filtered.filter((p) => p.status === 'active').map(toRow);
+  const archived = filtered.filter((p) => p.status === 'archived').map(toRow);
+
+  const columns: DataTableColumn<ProjectRow>[] = [
+    {
+      id: 'name',
+      header: 'Name',
+      width: 'minmax(260px, 2fr)',
+      sortable: true,
+      sortValue: (r) => r.project.name,
+      render: (r) => (
+        <span style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
+          <ProjectBadge project={r.project} size={26} radius={6} />
+          <span style={{ display: 'flex', flexDirection: 'column', minWidth: 0 }}>
+            <span style={{ fontSize: 13, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {r.project.name}
+            </span>
+            <span className="mono" style={{ fontSize: 11, color: 'var(--fg-faint)' }}>{r.project.key}</span>
+          </span>
+        </span>
+      ),
+    },
+    {
+      id: 'description',
+      header: 'Description',
+      width: 'minmax(180px, 3fr)',
+      render: (r) => (
+        <span style={{
+          fontSize: 12.5, color: 'var(--fg-muted)',
+          overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+        }}>
+          {r.project.description || <span style={{ color: 'var(--fg-faint)' }}>—</span>}
+        </span>
+      ),
+    },
+    {
+      id: 'open',
+      header: 'Open',
+      width: 80,
+      align: 'right',
+      sortable: true,
+      sortValue: (r) => r.open,
+      render: (r) => <span className="tnum" style={{ fontWeight: 600 }}>{r.open}</span>,
+    },
+    {
+      id: 'members',
+      header: 'Members',
+      width: 100,
+      align: 'right',
+      sortable: true,
+      sortValue: (r) => r.memberCount,
+      render: (r) => <span className="tnum" style={{ fontWeight: 600 }}>{r.memberCount}</span>,
+    },
+    {
+      id: 'status',
+      header: 'Status',
+      width: 110,
+      sortable: true,
+      sortValue: (r) => r.project.status,
+      render: (r) => (
+        <span
+          className="pill"
+          style={{
+            background: r.project.status === 'archived' ? 'var(--bg-muted)' : 'var(--accent-subtle)',
+            color: r.project.status === 'archived' ? 'var(--fg-muted)' : 'var(--accent-active)',
+          }}
+        >
+          {r.project.status === 'archived' ? 'Archived' : 'Active'}
+        </span>
+      ),
+    },
+  ];
+
+  const groups: DataTableGroup<ProjectRow>[] = [];
+  if (active.length > 0) groups.push({ id: 'active', label: 'Active', rows: active });
+  if (archived.length > 0) groups.push({ id: 'archived', label: 'Archived', rows: archived, dim: true });
 
   return (
     <div className="bira" style={{ height: '100%', display: 'flex', flexDirection: 'column', background: 'var(--bg)' }}>
@@ -80,13 +167,7 @@ export function ProjectsPage() {
       </div>
 
       <div className="scroll" style={{ flex: 1, overflow: 'auto', padding: '24px 28px' }}>
-        {active.length > 0 && (
-          <Group label="Active" projects={active} tenant={tenant} workspace={workspace} openByProjectId={openByProjectId} />
-        )}
-        {archived.length > 0 && (
-          <Group label="Archived" projects={archived} tenant={tenant} workspace={workspace} dim openByProjectId={openByProjectId} />
-        )}
-        {filtered.length === 0 && (
+        {filtered.length === 0 ? (
           <div style={{
             padding: 48, textAlign: 'center', color: 'var(--fg-muted)',
             background: 'var(--bg-subtle)', borderRadius: 8,
@@ -110,58 +191,18 @@ export function ProjectsPage() {
               </div>
             )}
           </div>
+        ) : (
+          <DataTable
+            columns={columns}
+            groups={groups}
+            rowKey={(r) => r.project.slug}
+            rowHref={(r) => `/${tenant}/${workspace}/${r.project.slug}`}
+          />
         )}
       </div>
 
       {showCreate && <CreateProjectModal onClose={() => setShowCreate(false)} />}
     </div>
-  );
-}
-
-function Group({ label, projects, tenant, workspace, dim, openByProjectId }: {
-  label: string;
-  projects: Project[];
-  tenant: string;
-  workspace: string;
-  dim?: boolean;
-  openByProjectId: Map<string, number>;
-}) {
-  return (
-    <section style={{ marginBottom: 28, opacity: dim ? 0.65 : 1 }}>
-      <div className="label-section" style={{ marginBottom: 10 }}>{label} · {projects.length}</div>
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 12 }}>
-        {projects.map((p) => {
-          const open = openByProjectId.get(p.id) ?? 0;
-          const memberCount = projectEffectiveMembers(p, tenant).length;
-          return (
-            <Link
-              key={p.slug}
-              to={`/${tenant}/${workspace}/${p.slug}`}
-              className="card"
-              style={{ padding: 16, textDecoration: 'none', color: 'inherit' }}
-            >
-              <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
-                <ProjectBadge project={p} size={32} radius={8} />
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontSize: 14, fontWeight: 600 }}>{p.name}</div>
-                  <div className="mono" style={{ fontSize: 11, color: 'var(--fg-faint)' }}>{p.key}</div>
-                </div>
-                {p.status === 'archived' && (
-                  <span className="pill" style={{ background: 'var(--bg-muted)' }}>Archived</span>
-                )}
-              </div>
-              <p style={{ fontSize: 12.5, color: 'var(--fg-muted)', margin: '0 0 12px', lineHeight: 1.5, minHeight: 36 }}>
-                {p.description}
-              </p>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 12, fontSize: 11.5, color: 'var(--fg-muted)' }}>
-                <span><span className="tnum" style={{ color: 'var(--fg)', fontWeight: 600 }}>{open}</span> open</span>
-                <span><span className="tnum" style={{ color: 'var(--fg)', fontWeight: 600 }}>{memberCount}</span> members</span>
-              </div>
-            </Link>
-          );
-        })}
-      </div>
-    </section>
   );
 }
 

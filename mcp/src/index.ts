@@ -100,6 +100,19 @@ tool(
     ok(await client.request('POST', '/api/auth/refresh-token', body, { authed: false }))
 );
 
+tool(
+  'register',
+  'Register a new user. Public — no Bearer auth required. The created user has no tenant or workspace memberships; grant them via add_workspace_member after the tenant admin has already been added (tenant membership is created automatically when the user is granted into a workspace via that flow). Email must be unique. Returns the new user plus access + refresh tokens.',
+  z.object({
+    email: z.string().email(),
+    password: z.string().min(8),
+    firstName: z.string().min(1).max(128),
+    lastName: z.string().min(1).max(128),
+  }),
+  async (body) =>
+    ok(await client.request('POST', '/api/auth/register', body, { authed: false }))
+);
+
 // ── Tenants ────────────────────────────────────────────────────────────────
 
 tool(
@@ -145,6 +158,20 @@ tool(
   z.object({ tenantSlug: z.string().min(1) }),
   async ({ tenantSlug }) =>
     ok(await client.request('POST', `/api/tenants/${tenantSlug}/reactivate`))
+);
+
+tool(
+  'update_tenant',
+  'Update a tenant (name / letter / color / bg). Slug + plan are immutable. Tenant admin only; rejected on deactivated tenants.',
+  z.object({
+    tenantSlug: z.string().min(1),
+    name: z.string().min(1).max(255).optional(),
+    letter: z.string().min(1).max(4).optional(),
+    color: z.string().min(1).max(16).optional(),
+    bg: z.string().min(1).max(16).optional(),
+  }),
+  async ({ tenantSlug, ...body }) =>
+    ok(await client.request('PATCH', `/api/tenants/${tenantSlug}`, body))
 );
 
 // ── Workspaces ─────────────────────────────────────────────────────────────
@@ -388,6 +415,22 @@ tool(
 );
 
 tool(
+  'get_tenant_member',
+  'Get a single tenant member by user uuid. Powers UUID-fallback display-name resolution for users not in the current workspace directory. Open to any tenant member (read+).',
+  z.object({
+    tenantSlug: z.string().min(1),
+    userId: z.string().uuid(),
+  }),
+  async ({ tenantSlug, userId }) =>
+    ok(
+      await client.request(
+        'GET',
+        `/api/tenants/${tenantSlug}/members/${userId}`
+      )
+    )
+);
+
+tool(
   'admin_reset_password',
   'Tenant admin generates a temporary password for another member. The plaintext is returned exactly once — share it OOB. The target user must call change_password before they can interact with tenant data.',
   z.object({
@@ -490,7 +533,7 @@ tool(
 
 tool(
   'create_issue',
-  'Create an issue under a project. Workspace write+. Stories require an Epic parent. Schedules (start/end/estimate) are only valid on Tasks/Bugs.',
+  'Create an issue under a project. Workspace write+. Stories require an Epic parent. Schedules (start/end/estimate) are only valid on Tasks/Bugs. `assigneeUserId` and `teamId` are mutually exclusive — passing both non-null is a 400; both null is allowed (Unscheduled).',
   z.object({
     tenantSlug: z.string().min(1),
     workspaceSlug: z.string().min(1),
@@ -502,6 +545,7 @@ tool(
     priority: PRIORITY.optional(),
     labels: z.array(z.string().min(1).max(64)).max(64).optional(),
     assigneeUserId: z.string().uuid().nullable().optional(),
+    teamId: z.string().uuid().nullable().optional(),
     parent: ISSUE_KEY.nullable().optional(),
     startDate: ISO_DATE.nullable().optional(),
     endDate: ISO_DATE.nullable().optional(),
@@ -520,7 +564,7 @@ tool(
 
 tool(
   'update_issue',
-  'Update an issue by key. At least one field is required. Status changes are validated against the project workflow.',
+  'Update an issue by key. At least one field is required. Status changes are validated against the project workflow. `assigneeUserId` and `teamId` are mutually exclusive: setting one to a non-null value automatically clears the other on the same write. Passing both non-null in one patch is a 400. Explicit `null` clears that field WITHOUT touching the other.',
   z.object({
     tenantSlug: z.string().min(1),
     workspaceSlug: z.string().min(1),
@@ -531,6 +575,7 @@ tool(
     status: STATUS.optional(),
     priority: PRIORITY.optional(),
     assigneeUserId: z.string().uuid().nullable().optional(),
+    teamId: z.string().uuid().nullable().optional(),
     labels: z.array(z.string().min(1).max(64)).max(64).optional(),
     startDate: ISO_DATE.nullable().optional(),
     endDate: ISO_DATE.nullable().optional(),
@@ -721,6 +766,104 @@ tool(
       await client.request(
         'DELETE',
         `/api/tenants/${tenantSlug}/workspaces/${workspaceSlug}/comments/${commentId}`
+      )
+    )
+);
+
+// ── Milestones ────────────────────────────────────────────────────────────
+
+tool(
+  'list_milestones',
+  'List milestones. Pass projectSlug to scope to one project; omit it to list across the whole workspace. The workspace-scoped form additionally accepts projectId (uuid) as a filter.',
+  z.object({
+    tenantSlug: z.string().min(1),
+    workspaceSlug: z.string().min(1),
+    projectSlug: z.string().min(1).optional(),
+    projectId: z.string().uuid().optional(),
+  }),
+  async ({ tenantSlug, workspaceSlug, projectSlug, projectId }) => {
+    const path = projectSlug
+      ? `/api/tenants/${tenantSlug}/workspaces/${workspaceSlug}/projects/${projectSlug}/milestones`
+      : `/api/tenants/${tenantSlug}/workspaces/${workspaceSlug}/milestones${projectId ? `?projectId=${projectId}` : ''}`;
+    return ok(await client.request('GET', path));
+  }
+);
+
+tool(
+  'get_milestone',
+  "Get a milestone by uuid. The URL must match the milestone's project — a milestone uuid that lives in the same workspace but on a different project 404s.",
+  z.object({
+    tenantSlug: z.string().min(1),
+    workspaceSlug: z.string().min(1),
+    projectSlug: z.string().min(1),
+    milestoneId: z.string().uuid(),
+  }),
+  async ({ tenantSlug, workspaceSlug, projectSlug, milestoneId }) =>
+    ok(
+      await client.request(
+        'GET',
+        `/api/tenants/${tenantSlug}/workspaces/${workspaceSlug}/projects/${projectSlug}/milestones/${milestoneId}`
+      )
+    )
+);
+
+tool(
+  'create_milestone',
+  'Create a milestone under a project. Workspace write+; rejected if the project is archived.',
+  z.object({
+    tenantSlug: z.string().min(1),
+    workspaceSlug: z.string().min(1),
+    projectSlug: z.string().min(1),
+    name: z.string().min(1).max(200),
+    description: z.string().max(2000).nullable().optional(),
+    date: ISO_DATE,
+  }),
+  async ({ tenantSlug, workspaceSlug, projectSlug, ...body }) =>
+    ok(
+      await client.request(
+        'POST',
+        `/api/tenants/${tenantSlug}/workspaces/${workspaceSlug}/projects/${projectSlug}/milestones`,
+        body
+      )
+    )
+);
+
+tool(
+  'update_milestone',
+  'Update a milestone (name / description / date). At least one field required. Workspace write+; rejected if the project is archived.',
+  z.object({
+    tenantSlug: z.string().min(1),
+    workspaceSlug: z.string().min(1),
+    projectSlug: z.string().min(1),
+    milestoneId: z.string().uuid(),
+    name: z.string().min(1).max(200).optional(),
+    description: z.string().max(2000).nullable().optional(),
+    date: ISO_DATE.optional(),
+  }),
+  async ({ tenantSlug, workspaceSlug, projectSlug, milestoneId, ...body }) =>
+    ok(
+      await client.request(
+        'PATCH',
+        `/api/tenants/${tenantSlug}/workspaces/${workspaceSlug}/projects/${projectSlug}/milestones/${milestoneId}`,
+        body
+      )
+    )
+);
+
+tool(
+  'delete_milestone',
+  'Delete a milestone. Workspace write+; rejected if the project is archived.',
+  z.object({
+    tenantSlug: z.string().min(1),
+    workspaceSlug: z.string().min(1),
+    projectSlug: z.string().min(1),
+    milestoneId: z.string().uuid(),
+  }),
+  async ({ tenantSlug, workspaceSlug, projectSlug, milestoneId }) =>
+    ok(
+      await client.request(
+        'DELETE',
+        `/api/tenants/${tenantSlug}/workspaces/${workspaceSlug}/projects/${projectSlug}/milestones/${milestoneId}`
       )
     )
 );

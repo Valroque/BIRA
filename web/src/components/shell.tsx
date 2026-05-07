@@ -159,9 +159,13 @@ export const TopBar = ({ breadcrumbs = [], showSearch = true, showNotifications 
 interface SidebarProps {
   collapsed?: boolean;
   active?: string;
+  /** Optional. Renders a chevron toggle next to the BIRA brand when set;
+   *  click flips collapsed state in the parent. AppShell wires this to
+   *  a useState that persists to `bira:sidebar-collapsed`. */
+  onToggleCollapsed?: () => void;
 }
 
-export const Sidebar = ({ collapsed = false, active = '' }: SidebarProps) => {
+export const Sidebar = ({ collapsed = false, active = '', onToggleCollapsed }: SidebarProps) => {
   const w = collapsed ? 52 : 232;
   const { tenant, workspace } = useTenantContext();
   const { projects } = useProjects();
@@ -249,16 +253,16 @@ export const Sidebar = ({ collapsed = false, active = '' }: SidebarProps) => {
       width: w, background: 'var(--bg-subtle)', borderRight: '1px solid var(--border-muted)',
       display: 'flex', flexDirection: 'column', flexShrink: 0, transition: 'width .2s ease',
     }}>
-      <BiraBrand collapsed={collapsed} />
+      <BiraBrand collapsed={collapsed} onToggleCollapsed={onToggleCollapsed} />
       <div className="scroll" style={{ flex: 1, overflow: 'auto', padding: '12px 0' }}>
         {/* Counts are derived from issues whose project belongs to the
             current workspace — so a fresh workspace with no projects shows
             "0", not the global fixture total. */}
-        <Item id="inbox"      icon="inbox" label="Inbox"      to={`/${tenant}/${workspace}/inbox`} count={3} />
         <Item id="my-issues"  icon="user"  label="My issues"  to={`/${tenant}/${workspace}/my-issues`}
               count={user ? workspaceIssues.filter((i) => i.assigneeUserId === user.id).length : 0} />
         <Item id="all-issues" icon="list"  label="All issues" to={`/${tenant}/${workspace}/all-issues`}
               count={workspaceIssues.length} />
+        <Item id="planner"    icon="calendar" label="Planner"    to={`/${tenant}/${workspace}/planner`} />
 
         <Section label="Projects">
           <Item id="all-projects" icon="grid" label="All projects" to={`/${tenant}/${workspace}/projects`} />
@@ -323,13 +327,55 @@ export const Sidebar = ({ collapsed = false, active = '' }: SidebarProps) => {
 /**
  * BIRA wordmark used across sidebars (workspace shell + tenant picker shell).
  * Collapsed mode hides the wordmark and centres the chip so it tucks into the
- * narrow rail.
+ * narrow rail. When `onToggleCollapsed` is provided, the brand row also
+ * renders a chevron toggle (flips the rail width); see AppShell for the
+ * persistence hookup.
  */
-export function BiraBrand({ collapsed = false }: { collapsed?: boolean }) {
+export function BiraBrand({
+  collapsed = false,
+  onToggleCollapsed,
+}: { collapsed?: boolean; onToggleCollapsed?: () => void }) {
+  // Toggle button — rendered as a sibling of the brand chip. In
+  // expanded mode it sits to the right of the wordmark (flex row); in
+  // collapsed mode it stacks below the chip (flex column) so it stays
+  // reachable on the narrow rail without overflowing. Native `title`
+  // gives the tooltip — same pattern Sidebar `Item` uses for collapsed
+  // labels.
+  const toggle = onToggleCollapsed ? (
+    <button
+      type="button"
+      onClick={onToggleCollapsed}
+      aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+      aria-pressed={collapsed}
+      title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+      style={{
+        width: 22, height: 22,
+        display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+        background: 'transparent', border: '1px solid var(--border-muted)',
+        borderRadius: 4, padding: 0, cursor: 'pointer',
+        color: 'var(--fg-muted)', flexShrink: 0,
+      }}
+      onMouseEnter={(e) => {
+        e.currentTarget.style.background = 'var(--bg-muted)';
+        e.currentTarget.style.color = 'var(--fg)';
+      }}
+      onMouseLeave={(e) => {
+        e.currentTarget.style.background = 'transparent';
+        e.currentTarget.style.color = 'var(--fg-muted)';
+      }}
+    >
+      <Icon name={collapsed ? 'chevronRight' : 'chevronLeft'} size={13} />
+    </button>
+  ) : null;
+
   return (
     <div style={{
-      display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0,
-      padding: collapsed ? '12px 0' : '14px 16px',
+      display: 'flex',
+      flexDirection: collapsed ? 'column' : 'row',
+      alignItems: 'center',
+      gap: collapsed ? 6 : 8,
+      flexShrink: 0,
+      padding: collapsed ? '12px 0' : '14px 12px 14px 16px',
       justifyContent: collapsed ? 'center' : 'flex-start',
     }}>
       <div style={{
@@ -340,8 +386,9 @@ export function BiraBrand({ collapsed = false }: { collapsed?: boolean }) {
         fontFamily: 'var(--font-mono)', letterSpacing: -0.5,
       }}>B</div>
       {!collapsed && (
-        <span style={{ fontSize: 16, fontWeight: 700, letterSpacing: -0.5 }}>BIRA</span>
+        <span style={{ fontSize: 16, fontWeight: 700, letterSpacing: -0.5, flex: 1 }}>BIRA</span>
       )}
+      {toggle}
     </div>
   );
 }
@@ -499,11 +546,12 @@ export const Chip = ({ children, onX, dim, style }: ChipProps) => (
 export function projectTabs(tenant: string, workspace: string, project: string, opts?: { issueCount?: number }): Tab[] {
   const base = `/${tenant}/${workspace}/${project}`;
   return [
-    { id: 'overview', label: 'Overview', icon: 'eye',      to: base },
-    { id: 'board',    label: 'Board',    icon: 'board',    to: `${base}/board` },
-    { id: 'issues',   label: 'Issues',   icon: 'list',     to: `${base}/list`, count: opts?.issueCount },
-    { id: 'workflow', label: 'Workflow', icon: 'workflow', to: `${base}/workflow` },
-    { id: 'members',  label: 'Members',  icon: 'users',    to: `${base}/members` },
-    { id: 'settings', label: 'Settings', icon: 'settings', to: `${base}/settings` },
+    { id: 'overview',   label: 'Overview',   icon: 'eye',      to: base },
+    { id: 'board',      label: 'Board',      icon: 'board',    to: `${base}/board` },
+    { id: 'issues',     label: 'Issues',     icon: 'list',     to: `${base}/list`, count: opts?.issueCount },
+    { id: 'milestones', label: 'Milestones', icon: 'flag',     to: `${base}/milestones` },
+    { id: 'workflow',   label: 'Workflow',   icon: 'workflow', to: `${base}/workflow` },
+    { id: 'members',    label: 'Members',    icon: 'users',    to: `${base}/members` },
+    { id: 'settings',   label: 'Settings',   icon: 'settings', to: `${base}/settings` },
   ];
 }

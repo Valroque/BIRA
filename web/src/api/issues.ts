@@ -123,6 +123,13 @@ export interface UpdateIssuePayload {
   status?: Issue['status'];
   priority?: Issue['priority'];
   assigneeUserId?: string | null;
+  /**
+   * Mutual-exclusive with assigneeUserId — BE rejects both non-null with
+   * 400. Setting `teamId` non-null auto-clears `assigneeUserId` server-side
+   * (and vice versa); the auto-clear arrives in the response and the
+   * provider's success path replaces the optimistic row with that.
+   */
+  teamId?: string | null;
   labels?: string[];
   startDate?: string | null;
   endDate?: string | null;
@@ -164,6 +171,11 @@ export interface CreateIssuePayload {
   priority?: Issue['priority'];
   labels?: string[];
   assigneeUserId?: string | null;
+  /**
+   * Mutual-exclusive with assigneeUserId — BE rejects both non-null with
+   * 400. Pass one or neither at create time.
+   */
+  teamId?: string | null;
   parent?: string | null;
   startDate?: string | null;
   endDate?: string | null;

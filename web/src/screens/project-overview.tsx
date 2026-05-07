@@ -3,12 +3,20 @@ import { TopBar, Tabs, projectTabs, useTenantBreadcrumbs } from '../components/s
 import { ListRow } from '../components/issue-row';
 import { useProjects } from '../state/projects';
 import { useIssues } from '../state/issues';
+import { useMilestones } from '../state/milestones';
+import { workingDaysBetween, type Milestone } from '../fixtures';
+import { dayToIso, todayDay } from '../components/gantt-utils';
 
 export function ProjectOverviewPage() {
   const { tenant, workspace, project, tenantName, workspaceName } = useTenantBreadcrumbs();
   const { getProject } = useProjects();
   const { issues } = useIssues();
+  const { milestonesForProject, loading: milestonesLoading } = useMilestones();
   const projectInfo = getProject(project);
+  // Hide the chip strip while the milestones provider is doing its first
+  // fetch — same outcome as "no milestones" so the layout doesn't pop in.
+  const milestones = (projectInfo && !milestonesLoading) ? milestonesForProject(projectInfo.id) : [];
+  const todayIso = dayToIso(todayDay());
   return (
     <div className="bira" style={{ height: '100%', display: 'flex', flexDirection: 'column', background: 'var(--bg)' }}>
       <TopBar breadcrumbs={[
@@ -40,6 +48,22 @@ export function ProjectOverviewPage() {
         <p style={{ fontSize: 13.5, color: 'var(--fg-muted)', margin: '0 0 24px', maxWidth: 540 }}>
           {projectInfo?.description ?? 'No description.'}
         </p>
+
+        {milestones.length > 0 && (
+          <div style={{ marginBottom: 24 }}>
+            <h2 style={{ fontSize: 13, fontWeight: 600, margin: '0 0 10px' }}>Milestones</h2>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+              {milestones.map((m) => (
+                <MilestoneChip
+                  key={m.id}
+                  milestone={m}
+                  todayIso={todayIso}
+                  to={`/${tenant}/${workspace}/${project}/milestones`}
+                />
+              ))}
+            </div>
+          </div>
+        )}
 
         {/* Drift fix: replaced "Velocity 34 pts 14d avg" (sprint-flavored) with a sprint-agnostic "Done (7d)". */}
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 10, marginBottom: 22 }}>
@@ -104,6 +128,61 @@ function Stat({ label, value, trend, tone, muted }: StatProps) {
       {trend && <div style={{ fontSize: 11.5, color: trendColor, marginTop: 2 }}>{trend}</div>}
     </div>
   );
+}
+
+// Compact milestone chip for the overview strip. Links to the project's
+// dedicated milestones tab so users can jump to the full CRUD surface.
+function MilestoneChip({
+  milestone, todayIso, to,
+}: { milestone: Milestone; todayIso: string; to: string }) {
+  const overdue = milestone.date < todayIso;
+  const today = milestone.date === todayIso;
+  const tone = overdue || today ? 'blocked' : 'accent';
+  const bg = tone === 'blocked' ? 'var(--blocked-bg)' : 'var(--accent-muted)';
+  const fg = tone === 'blocked' ? 'var(--blocked)' : 'var(--accent)';
+  const rel = relativeChipLabel(milestone.date, todayIso);
+  const tip = (() => {
+    const head = `${milestone.name} · due ${formatChipDate(milestone.date)}`;
+    return milestone.description ? `${head} · ${milestone.description}` : head;
+  })();
+  return (
+    <Link
+      to={to}
+      data-tip={tip}
+      style={{
+        display: 'inline-flex', alignItems: 'center', gap: 6,
+        padding: '4px 10px', borderRadius: 999,
+        background: bg, color: fg,
+        fontSize: 12, fontWeight: 500, textDecoration: 'none',
+        maxWidth: 320,
+      }}
+    >
+      <span style={{
+        fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+      }}>{milestone.name}</span>
+      <span style={{ color: fg, opacity: 0.65 }}>·</span>
+      <span className="tnum">{rel}</span>
+    </Link>
+  );
+}
+
+const CHIP_MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+function formatChipDate(iso: string): string {
+  const [y, m, d] = iso.split('-').map(Number);
+  return `${CHIP_MONTHS[m - 1]} ${d}, ${y}`;
+}
+function relativeChipLabel(date: string, todayIso: string): string {
+  if (date === todayIso) return 'due today';
+  if (date < todayIso) {
+    const [ay, am, ad] = date.split('-').map(Number);
+    const [by, bm, bd] = todayIso.split('-').map(Number);
+    const days = Math.round(
+      (Date.UTC(by, bm - 1, bd) - Date.UTC(ay, am - 1, ad)) / 86_400_000,
+    );
+    return `${days} day${days === 1 ? '' : 's'} overdue`;
+  }
+  const days = workingDaysBetween(todayIso, date);
+  return `in ${days} working day${days === 1 ? '' : 's'}`;
 }
 
 function FunnelBars() {

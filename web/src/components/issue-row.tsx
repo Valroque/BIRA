@@ -7,6 +7,8 @@ import { Link } from 'react-router-dom';
 import type { Issue, Project } from '../fixtures';
 import { useProjects } from '../state/projects';
 import { useUsers, UNKNOWN_USER_LABEL } from '../state/users';
+import { useTeams } from '../state/teams';
+import type { Team } from '../api/adapters/team.adapter';
 import { Avatar, Priority as PriorityIcon, StatusDot, STATUSES, TypeChip } from './shell';
 import { ProjectChip } from './project-chip';
 
@@ -175,6 +177,7 @@ function renderCell(
   showProject: boolean,
   project: Project | undefined,
   assigneeName: string,
+  ownerTeam: Team | undefined,
 ): ReactNode {
   switch (colId) {
     case 'id': {
@@ -268,6 +271,38 @@ function renderCell(
       );
     }
     case 'assignee': {
+      // Team-on-Issue (slice 3): when no person is assigned but a team
+      // owns the issue, render a `team:<name>` chip in place of the
+      // avatar+name. UUIDs never render — `getTeam` resolves to the
+      // workspace cache; missing entries fall back to "Unknown team".
+      if (!issue.assigneeUserId && issue.teamId) {
+        const teamName = ownerTeam?.name ?? 'Unknown team';
+        const teamColor = ownerTeam?.color ?? 'var(--fg-faint)';
+        return (
+          <span
+            title={`Team: ${teamName}`}
+            style={{
+              display: 'inline-flex', alignItems: 'center', gap: 5,
+              padding: '2px 6px', border: '1px solid var(--border)', borderRadius: 4,
+              fontSize: 11, color: 'var(--fg-muted)',
+              minWidth: 0, maxWidth: '100%',
+            }}
+          >
+            <span
+              aria-hidden="true"
+              style={{
+                width: 10, height: 10, borderRadius: 2,
+                background: teamColor, flexShrink: 0,
+              }}
+            />
+            <span style={{
+              overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+            }}>
+              team:{teamName}
+            </span>
+          </span>
+        );
+      }
       return (
         <span title={assigneeName} style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
           <Avatar name={assigneeName} size={20} />
@@ -306,8 +341,12 @@ export function ListRow(props: ListRowProps) {
   const [layout] = useColumnLayout();
   const { getProjectById } = useProjects();
   const { getUser } = useUsers();
+  const { getTeam } = useTeams();
   const project = getProjectById(issue.projectId);
   const assigneeName = getUser(issue.assigneeUserId)?.displayName ?? UNKNOWN_USER_LABEL;
+  // Team-on-Issue: resolve the team for the team-chip fallback in the
+  // assignee column. Cheap — the workspace cache holds at most a few rows.
+  const ownerTeam = issue.teamId ? getTeam(issue.teamId) : undefined;
   const effectiveOrder = order ?? layout.order;
   const effectiveVisible = visible ?? layout.visible;
   const effectiveColumns = columns ?? buildRowColumns(layout.widths, effectiveOrder, effectiveVisible, !!showProject);
@@ -345,7 +384,7 @@ export function ListRow(props: ListRowProps) {
         readOnly={!onToggleSelect}
       />
       {visibleOrder.map((colId) => (
-        <CellWrapper key={colId}>{renderCell(colId, issue, !!showProject, project, assigneeName)}</CellWrapper>
+        <CellWrapper key={colId}>{renderCell(colId, issue, !!showProject, project, assigneeName, ownerTeam)}</CellWrapper>
       ))}
       <span aria-hidden="true" />
     </Link>

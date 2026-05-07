@@ -47,6 +47,12 @@
   --canceled-bg: #f3f4f6;
   --blocked: #ef4444;
   --blocked-bg: #fef2f2;
+  /* Affirmative — used for "enabled in this plan" toggles in the planner.
+     Distinct hue from --done (which is teal-leaning, status-shaped) and
+     from --type-story (also green but tied to issue type). Pairs with
+     --blocked / --blocked-bg as the negative state. */
+  --positive: #16a34a;
+  --positive-bg: #dcfce7;
 
   /* Issue type chips */
   --type-task: #3b82f6;       /* blue */
@@ -98,6 +104,31 @@
   --t-xl: 18px;
   --t-2xl: 22px;
   --t-3xl: 28px;
+
+  /* Workload heatmap (Slice 9 — planner workload pivot)
+     Buckets by Math.round(pts/day): 0, 1, 2, 3, 4 (ideal peak), 5, 6, 7+.
+     Stops are perceptually graded green → yellow → orange → red so a
+     glance reveals overload. The 0-pt cell reuses --bg-subtle (matches
+     the rest of the planner empty surfaces); 4 pts is the ideal-velocity
+     peak in green. Weekend / holiday / leave cells get distinct stops
+     so the rhythm of the week reads through the colour grid. */
+  --workload-0: var(--bg-subtle);
+  --workload-1: #dcfce7;          /* green-100 — barely-loaded */
+  --workload-2: #bbf7d0;          /* green-200 */
+  --workload-3: #86efac;          /* green-300 */
+  --workload-4: #4ade80;          /* green-400 — ideal peak */
+  --workload-5: #fde047;          /* yellow-300 — over the line */
+  --workload-6: #fb923c;          /* orange-400 */
+  --workload-7: #ef4444;          /* red-500 — capped at 7+ */
+  --workload-leave: #0a0a0a;      /* near-black; tokenised so consumers don't inline a hex */
+  --workload-weekend: var(--bg-muted);
+  --workload-holiday: var(--blocked-bg);
+  /* Team-on-Issue slice 5 (2026-05-07): diagonal-stripe overlay applied
+     on top of the load gradient when a heatmap cell is fed by a
+     team-greedy bar (i.e. the placed assignee is provisional — the
+     issue has no real assignee yet, just a team). Soft-white at low
+     alpha so the underlying load colour still reads through. */
+  --workload-provisional-stripe: rgba(255, 255, 255, 0.4);
 }
 
 * { box-sizing: border-box; }

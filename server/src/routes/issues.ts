@@ -13,6 +13,7 @@ const ListIssuesQuerySchema = z.object({
   status: z.enum(STATUSES).optional(),
   type: z.enum(ISSUE_TYPES).optional(),
   assigneeUserId: z.string().uuid().optional(),
+  teamId: z.string().uuid().optional(),
   label: z.string().min(1).max(64).optional(),
   priority: z.enum(PRIORITIES).optional(),
   projectId: z.string().uuid().optional(),

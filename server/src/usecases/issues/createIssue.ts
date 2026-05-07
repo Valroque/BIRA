@@ -23,6 +23,11 @@ export interface CreateIssueInput {
   priority?: Priority;
   labels?: string[];
   assigneeUserId?: string | null;
+  // FK to `teams.id` — assigns the issue to a team rather than an
+  // individual. Mutually exclusive with `assigneeUserId` (passing both
+  // non-null is a 400). When set, the team must live in the same
+  // workspace (cross-workspace → 404).
+  teamId?: string | null;
   reporterUserId?: string | null;
   parentIssueId?: string | null;
   startDate?: string | null;
@@ -135,6 +140,19 @@ export async function createIssue(input: CreateIssueInput): Promise<Issue> {
     }
   }
 
+  // Team-on-Issue mutex (slice 1): assigneeUserId and teamId are mutually
+  // exclusive. Both null is fine (Unscheduled). Both non-null is a 400.
+  // The check is on non-null values specifically — passing one as null
+  // is the standard "clear" semantic and never collides.
+  if (
+    input.assigneeUserId !== undefined &&
+    input.assigneeUserId !== null &&
+    input.teamId !== undefined &&
+    input.teamId !== null
+  ) {
+    throw new AppError('Cannot set both assignee and team', 400);
+  }
+
   return db.transaction(async (trx) => {
     // Verify the project exists and belongs to the requested workspace
     // before we burn a seq number. Cross-workspace access is treated as
@@ -165,6 +183,21 @@ export async function createIssue(input: CreateIssueInput): Promise<Issue> {
       });
     }
 
+    // Team-existence + workspace-scope check. Mirrors the project check
+    // above — cross-workspace is treated as not-found (no info leak).
+    // Separate query, no JOIN — follows the BE "no JOINs without
+    // approval" rule. Runs inside the trx so the team can't disappear
+    // between this read and the insert.
+    if (input.teamId !== undefined && input.teamId !== null) {
+      const team = (await trx('teams')
+        .where('id', input.teamId)
+        .select(['id', 'workspace_id'])
+        .first()) as { id: string; workspaceId: string } | undefined;
+      if (!team || team.workspaceId !== input.workspaceId) {
+        throw new AppError(`Team '${input.teamId}' not found`, 404);
+      }
+    }
+
     // Atomic increment + read in one round trip. Postgres serialises
     // concurrent UPDATEs to the same row, so two parallel creates can
     // never claim the same seq. The returned value is the seq we own.
@@ -193,6 +226,7 @@ export async function createIssue(input: CreateIssueInput): Promise<Issue> {
         description: input.description ?? null,
         labels: input.labels ?? [],
         assigneeUserId: input.assigneeUserId ?? null,
+        teamId: input.teamId ?? null,
         reporterUserId: input.reporterUserId ?? null,
         parentIssueId: input.parentIssueId ?? null,
         startDate: input.startDate ?? null,

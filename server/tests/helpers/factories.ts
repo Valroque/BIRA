@@ -3,18 +3,22 @@ import * as userService from '../../src/services/userService.js';
 import * as tenantService from '../../src/services/tenantService.js';
 import * as workspaceService from '../../src/services/workspaceService.js';
 import * as projectService from '../../src/services/projectService.js';
+import * as teamService from '../../src/services/teamService.js';
 import * as membershipService from '../../src/services/membershipService.js';
 import { login as loginUseCase } from '../../src/usecases/auth/login.js';
 import { createIssue as createIssueUseCase } from '../../src/usecases/issues/createIssue.js';
 import { uploadFile as uploadFileUseCase } from '../../src/usecases/files/uploadFile.js';
 import { createComment as createCommentUseCase } from '../../src/usecases/comments/createComment.js';
+import { createMilestone as createMilestoneUseCase } from '../../src/usecases/milestones/createMilestone.js';
 import type { User } from '../../src/entities/User.js';
 import type { Tenant } from '../../src/entities/Tenant.js';
 import type { Workspace } from '../../src/entities/Workspace.js';
 import type { Project } from '../../src/entities/Project.js';
+import type { Team } from '../../src/entities/Team.js';
 import type { Issue } from '../../src/entities/Issue.js';
 import type { File } from '../../src/entities/File.js';
 import type { Comment } from '../../src/entities/Comment.js';
+import type { Milestone } from '../../src/entities/Milestone.js';
 import type {
   Role,
   WorkspaceStatus,
@@ -197,6 +201,29 @@ export async function createProject(opts: CreateProjectOpts): Promise<Project> {
   return project;
 }
 
+// ── Team factories ────────────────────────────────────────────────────────
+
+export interface CreateTeamOpts {
+  workspaceId: string;
+  createdByUserId: string;
+  slug?: string;
+  name?: string;
+  description?: string;
+  color?: string;
+}
+
+export async function createTeam(opts: CreateTeamOpts): Promise<Team> {
+  const tag = uniq();
+  return teamService.create({
+    workspaceId: opts.workspaceId,
+    slug: opts.slug ?? `team-${tag}`,
+    name: opts.name ?? `Team ${tag}`,
+    description: opts.description ?? '',
+    color: opts.color ?? '#6366f1',
+    createdByUserId: opts.createdByUserId,
+  });
+}
+
 // ── Issue factories ───────────────────────────────────────────────────────
 
 export interface CreateIssueOpts {
@@ -210,6 +237,9 @@ export interface CreateIssueOpts {
   priority?: Priority;
   labels?: string[];
   assigneeUserId?: string | null;
+  // Slice 1 (Team-on-Issue) — optional team uuid; mutually exclusive
+  // with assigneeUserId at the usecase layer.
+  teamId?: string | null;
   // Optional parent — accepts a uuid directly. Tests that need to
   // create a Story must pass an Epic's id here (Story-without-parent
   // is rejected by the usecase). Tasks/Bugs may omit it.
@@ -229,6 +259,7 @@ export async function createIssue(opts: CreateIssueOpts): Promise<Issue> {
     priority: opts.priority,
     labels: opts.labels,
     assigneeUserId: opts.assigneeUserId,
+    teamId: opts.teamId,
     parentIssueId: opts.parentIssueId,
   });
 }
@@ -282,5 +313,31 @@ export async function createCommentFactory(opts: CreateCommentFactoryOpts): Prom
     authorUserId: opts.authorUserId,
     body: opts.body ?? `Comment ${tag}`,
     attachmentIds: opts.attachmentIds,
+  });
+}
+
+// ── Milestone factories ───────────────────────────────────────────────────
+
+export interface CreateMilestoneFactoryOpts {
+  workspaceId: string;
+  projectId: string;
+  name?: string;
+  description?: string | null;
+  date?: string;
+}
+
+/**
+ * Creates a milestone by calling the real createMilestone usecase.
+ * Defaults `date` to a future-but-stable string so seeded milestones don't
+ * accidentally count as "overdue" in any FE assertions that creep in here.
+ */
+export async function createMilestone(opts: CreateMilestoneFactoryOpts): Promise<Milestone> {
+  const tag = uniq();
+  return createMilestoneUseCase({
+    workspaceId: opts.workspaceId,
+    projectId: opts.projectId,
+    name: opts.name ?? `Milestone ${tag}`,
+    description: opts.description,
+    date: opts.date ?? '2030-01-01',
   });
 }
