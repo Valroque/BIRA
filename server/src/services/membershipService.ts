@@ -53,6 +53,60 @@ export async function addTenantMember(
   return row;
 }
 
+export async function getTenantMembershipById(
+  id: string,
+  trx?: Knex.Transaction
+): Promise<TenantMembershipRow | null> {
+  const row = (await (trx ?? db)('tenant_memberships')
+    .where('id', id)
+    .first()) as TenantMembershipRow | undefined;
+  return row ?? null;
+}
+
+export async function updateTenantMembership(
+  id: string,
+  patch: { role?: Role; status?: TenantMembershipStatus },
+  trx?: Knex.Transaction
+): Promise<TenantMembershipRow | null> {
+  const updates: Record<string, unknown> = { updatedAt: db.fn.now() };
+  if (patch.role !== undefined) updates.role = patch.role;
+  if (patch.status !== undefined) updates.status = patch.status;
+  const [row] = (await (trx ?? db)('tenant_memberships')
+    .where('id', id)
+    .update(updates)
+    .returning('*')) as TenantMembershipRow[];
+  return row ?? null;
+}
+
+export async function deleteTenantMembership(
+  id: string,
+  trx?: Knex.Transaction
+): Promise<boolean> {
+  const count = await (trx ?? db)('tenant_memberships').where('id', id).delete();
+  return count > 0;
+}
+
+/**
+ * Count active tenant admins on a tenant. v1 has no team-derived tenant
+ * role, so this is just the explicit `tenant_memberships` set with
+ * `role='admin'` and `status='active'`. Used by the last-admin guard.
+ */
+export async function countActiveTenantAdmins(
+  tenantId: string,
+  excludeUserId: string | null = null,
+  trx?: Knex.Transaction
+): Promise<number> {
+  const q = (trx ?? db)('tenant_memberships')
+    .where('tenant_id', tenantId)
+    .where('role', 'admin')
+    .where('status', 'active');
+  if (excludeUserId) q.whereNot('user_id', excludeUserId);
+  const [{ count }] = (await q.count<{ count: string }[]>('id as count')) as Array<{
+    count: string;
+  }>;
+  return Number(count);
+}
+
 // ── Workspace memberships ─────────────────────────────────────────────────
 
 export interface WorkspaceMembershipRow {
