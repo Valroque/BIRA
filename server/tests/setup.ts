@@ -37,6 +37,7 @@ const TABLES = [
   'workspaces',
   'tenant_memberships',
   'tenants',
+  'personal_access_tokens',
   'users',
 ];
 

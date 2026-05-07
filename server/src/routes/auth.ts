@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { z } from 'zod';
 import { asyncHandler } from '../middleware/errorHandler.js';
-import { authenticate } from '../middleware/auth.js';
+import { authenticate, requireJwtAuth } from '../middleware/auth.js';
 import { logger } from '../middleware/logger.js';
 import { register } from '../usecases/auth/register.js';
 import { login } from '../usecases/auth/login.js';
@@ -9,6 +9,9 @@ import { refreshToken } from '../usecases/auth/refreshToken.js';
 import { getProfile } from '../usecases/auth/getProfile.js';
 import { updateProfile } from '../usecases/auth/updateProfile.js';
 import { changePassword } from '../usecases/auth/changePassword.js';
+import { createToken } from '../usecases/personalAccessTokens/createToken.js';
+import { listTokens } from '../usecases/personalAccessTokens/listTokens.js';
+import { revokeToken } from '../usecases/personalAccessTokens/revokeToken.js';
 import { AppError } from '../lib/errors.js';
 
 const router: Router = Router();
@@ -46,6 +49,20 @@ const UpdateProfileSchema = z
 const ChangePasswordSchema = z.object({
   currentPassword: z.string().min(1, 'Current password is required'),
   newPassword: z.string().min(8, 'New password must be at least 8 characters'),
+});
+
+// PAT create — name 1..64 chars, expiresIn enum. The four-value enum
+// matches the picker on the FE settings panel; adding values requires
+// a migration of the dropdown copy AND a usecase update, so the
+// schema is the single source of truth.
+const CreateTokenSchema = z.object({
+  name: z.string().min(1).max(64),
+  expiresIn: z.enum(['never', '30d', '90d', '1y']),
+});
+
+// Path param `:id` for revoke — uuid only, anything else is 400.
+const TokenIdParamsSchema = z.object({
+  id: z.string().uuid('Token id must be a uuid'),
 });
 
 router.post(
@@ -123,6 +140,66 @@ router.post(
     // IMPORTANT: never log either password — current or new — only the user id.
     logger.info('Password changed', { userId: req.user.id });
     res.json({ success: true, data: user });
+  })
+);
+
+// ── Personal Access Tokens ────────────────────────────────────────────────
+//
+// CRUD for the user's own PATs. All three routes additionally mount
+// `requireJwtAuth` so a stolen / leaked PAT cannot mint or revoke tokens
+// — the legitimate owner must log in with their password to manage them.
+//
+// `last4` and the entity itself are safe to log; the plaintext returned
+// from POST is never logged anywhere (only the create response carries it).
+
+router.post(
+  '/tokens',
+  requireJwtAuth,
+  asyncHandler(async (req, res) => {
+    if (!req.user) throw new AppError('Authentication required', 401);
+    const input = CreateTokenSchema.parse(req.body);
+    const result = await createToken({
+      userId: req.user.id,
+      name: input.name,
+      expiresIn: input.expiresIn,
+    });
+    // Log the metadata only — NEVER the plaintext.
+    logger.info('PAT created', {
+      userId: req.user.id,
+      tokenId: result.token.id,
+      name: result.token.name,
+      last4: result.token.last4,
+      expiresAt: result.token.expiresAt,
+    });
+    res.status(201).json({
+      success: true,
+      data: {
+        token: result.token,
+        plaintext: result.plaintext,
+      },
+    });
+  })
+);
+
+router.get(
+  '/tokens',
+  requireJwtAuth,
+  asyncHandler(async (req, res) => {
+    if (!req.user) throw new AppError('Authentication required', 401);
+    const tokens = await listTokens({ userId: req.user.id });
+    res.json({ success: true, data: tokens });
+  })
+);
+
+router.delete(
+  '/tokens/:id',
+  requireJwtAuth,
+  asyncHandler(async (req, res) => {
+    if (!req.user) throw new AppError('Authentication required', 401);
+    const { id } = TokenIdParamsSchema.parse(req.params);
+    const result = await revokeToken({ userId: req.user.id, tokenId: id });
+    logger.info('PAT revoked', { userId: req.user.id, tokenId: result.id });
+    res.json({ success: true, data: result });
   })
 );
 

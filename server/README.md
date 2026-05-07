@@ -61,11 +61,18 @@ Zod parse failures are auto-converted to 400 with a flat message.
 
 - Bcrypt + JWT (access + refresh, distinct secrets).
 - Access tokens passed as `Authorization: Bearer <token>`.
-- `authenticate` middleware sets `req.user: User`.
+- `authenticate` middleware sets `req.user: User` AND `req.auth: { method:
+  'jwt' | 'pat', tokenId? }` so downstream handlers can branch on auth
+  method when needed (notably the PAT-mint guard — see "Auth model" below).
 - `requirePasswordResetCleared` (mounted on `/api/tenants` after
   `authenticate`) returns HTTP 423 with `code: 'PASSWORD_RESET_REQUIRED'`
   when `req.user.mustResetPassword` is set. See "Password reset gate"
   below.
+- `requireJwtAuth` returns HTTP 403 with `code: 'PAT_CANNOT_MINT_PAT'`
+  when `req.auth.method !== 'jwt'`. Mounted on the PAT-management routes
+  (`POST/GET/DELETE /api/auth/tokens`) so a leaked PAT can't mint or
+  revoke other tokens — the legitimate owner must log in with their
+  password to manage their tokens.
 - `resolveTenantScope` (mounted on `/:tenantSlug` routers) sets
   `req.scope = { tenantId, tenantSlug, role }` after looking up
   `tenant_memberships`.
@@ -81,6 +88,47 @@ Zod parse failures are auto-converted to 400 with a flat message.
   after `resolveTenantScope`. Intentionally NOT mounted on
   `POST /api/tenants/:t/reactivate` — that's the only escape hatch.
 
+### Auth model — JWT vs PAT
+
+BIRA accepts two Bearer credentials. Both flow through the same
+`authenticate` middleware and resolve to the same `req.user`, so all
+downstream RBAC (tenant / workspace / project access, password-reset
+gate, archive gates) behaves identically regardless of how the request
+was authenticated.
+
+| Credential | Format | How it's obtained | Lifetime | Header |
+|---|---|---|---|---|
+| **JWT** (access token) | Opaque signed token | `POST /api/auth/login` (email + password) → `{ token, refreshToken }`. Refresh via `POST /api/auth/refresh-token`. | `JWT_EXPIRE` (default `1d`); refresh via refresh token (`14d`). | `Authorization: Bearer <token>` |
+| **PAT** (Personal Access Token) | `bira_pat_<43-char-base64url>` (52 chars total). The `bira_pat_` prefix matches the GitHub-style "secret-scanning friendly" pattern (`ghp_…`, `xoxb-…`). | `POST /api/auth/tokens` (JWT-authed only). Plaintext returned **exactly once** in the response — never recoverable afterwards. | User-chosen at create: `never \| 30d \| 90d \| 1y`. Revocable any time via `DELETE /api/auth/tokens/:id`. | `Authorization: Bearer bira_pat_<…>` |
+
+Routing rule inside `authenticate`: any Bearer that starts with
+`bira_pat_` takes the PAT path (sha256 lookup against `token_hash`,
+reject if revoked / expired / owner inactive); anything else is verified
+as a JWT. Failure modes on the PAT path collapse into a single 401 with
+a generic message — the caller doesn't get to distinguish "wrong token"
+from "revoked" from "expired" (information-leak avoidance).
+
+Storage: PATs are SHA-256 hashed at the column level (not bcrypt) — they
+carry 256 bits of entropy so the slow-KDF cost would be wasted on every
+authenticated request. Mirrors GitHub's public design. The plaintext is
+never logged; the create response is the only place it touches a string.
+
+**PATs cannot mint or revoke PATs.** All three `/api/auth/tokens` routes
+mount `requireJwtAuth` after `authenticate`, returning 403
+`PAT_CANNOT_MINT_PAT` when called via a PAT bearer. This means a leaked
+PAT can read / write user data per the user's RBAC, but cannot
+self-perpetuate — the legitimate owner can revoke it via the web UI,
+which kills it on the next request. PATs DO flow through
+`requirePasswordResetCleared` exactly like JWTs, so a locked account's
+PATs stop working until the user clears the flag via
+`POST /api/auth/change-password`.
+
+`last_used_at` is updated on every PAT-authed request, debounced to at
+most one write per minute per token via an in-process map. Single-instance
+BE today; if the BE goes multi-instance the debounce becomes per-instance
+(at worst one extra write per minute per instance, not a correctness
+issue). The write is fire-and-forget and never blocks the request.
+
 ### User-facing auth endpoints
 
 | Method | Path                              | Auth                               |
@@ -91,6 +139,9 @@ Zod parse failures are auto-converted to 400 with a flat message.
 | GET    | `/api/auth/profile`               | any authenticated user (incl. locked) |
 | PATCH  | `/api/auth/me`                    | any authenticated user (incl. locked) |
 | POST   | `/api/auth/change-password`       | any authenticated user (incl. locked) |
+| POST   | `/api/auth/tokens`                | JWT-authed user (PATs forbidden)   |
+| GET    | `/api/auth/tokens`                | JWT-authed user (PATs forbidden)   |
+| DELETE | `/api/auth/tokens/:id`            | JWT-authed user (PATs forbidden)   |
 
 `PATCH /api/auth/me` accepts any subset of `{ firstName, lastName, email,
 phone, avatar }` — at least one field is required. `phone` and `avatar`
@@ -101,6 +152,60 @@ accept `null` to clear. Email collisions return HTTP 409.
 `mustResetPassword`. Wrong current password → 401. **This is the only
 path that clears the locked flag** — re-logging in with a temp password
 does NOT clear it.
+
+### Personal access tokens
+
+PATs are user-scoped Bearer credentials (see "Auth model" above for the
+model overview). The three endpoints below let a user mint, list, and
+revoke their own tokens; all are JWT-only (`requireJwtAuth`) so a leaked
+PAT can't self-perpetuate.
+
+`POST /api/auth/tokens` body: `{ name (1..64 chars), expiresIn ('never'
+| '30d' | '90d' | '1y') }`. Response 201:
+
+```json
+{
+  "success": true,
+  "data": {
+    "token": {
+      "id": "...uuid...",
+      "userId": "...uuid...",
+      "name": "ci-bot",
+      "last4": "aZ7q",
+      "lastUsedAt": null,
+      "expiresAt": null,
+      "revokedAt": null,
+      "createdAt": "...",
+      "updatedAt": "..."
+    },
+    "plaintext": "bira_pat_<…43 chars…>"
+  }
+}
+```
+
+The `plaintext` field is the **only** place the secret ever appears —
+copy it now or revoke + re-create. The token entity itself never carries
+`tokenHash`. The create response is also the only path that includes
+`plaintext`; list / revoke responses never do.
+
+Failure cases:
+
+- `400` — invalid `name` (empty, > 64 chars) or invalid `expiresIn`.
+- `401` — no `Authorization` header.
+- `403 PAT_CANNOT_MINT_PAT` — request was authed via a PAT, not a JWT.
+- `422 PAT_LIMIT_REACHED` — user already has 10 active tokens (revoked
+  rows don't count). Revoke one before creating another.
+
+`GET /api/auth/tokens` returns the caller's tokens (`PersonalAccessToken[]`,
+no plaintext, no `tokenHash`). Active rows bubble to the top, ordered by
+`last_used_at DESC NULLS LAST, created_at DESC`; revoked rows trail at
+the bottom for audit context. Other users' tokens are never visible.
+
+`DELETE /api/auth/tokens/:id` revokes the token (sets `revoked_at = now()`).
+Returns `{ id }` on success. `404 PAT_NOT_FOUND` covers all "no row matched"
+cases — bogus uuid, another user's token, already-revoked token. The "already-
+revoked → 404" choice is deliberate: a successful revoke is observable (the
+token stops working), so a second call has nothing useful to do.
 
 ### Password reset gate
 

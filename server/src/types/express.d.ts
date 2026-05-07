@@ -6,6 +6,22 @@ declare global {
     interface Request {
       user?: User;
       /**
+       * How the request was authenticated. Set by `authenticate`:
+       *   - `{ method: 'jwt' }`            — Authorization: Bearer <jwt>
+       *   - `{ method: 'pat', tokenId }`   — Authorization: Bearer bira_pat_<…>
+       *
+       * `req.user` looks identical between the two paths so downstream
+       * handlers stay agnostic. The `tokenId` is the row id from
+       * `personal_access_tokens` and is only set on the PAT path — it's
+       * load-bearing for the `requireJwtAuth` gate (which 403s when a PAT
+       * tries to mint another PAT) and for the debounced `last_used_at`
+       * write inside the middleware itself.
+       */
+      auth?: {
+        method: 'jwt' | 'pat';
+        tokenId?: string;
+      };
+      /**
        * Populated by `tenantScope` middleware after `authenticate`. Available
        * only on routes mounted under `/:tenantSlug` or that go through the
        * tenant-scope chain.
