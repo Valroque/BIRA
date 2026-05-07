@@ -70,6 +70,13 @@ tool(
 );
 
 tool(
+  'whoami',
+  'Return the BIRA user this MCP process is currently acting as. Use this to confirm identity — especially when the credential came from the BIRA_API_TOKEN env var (PAT) and there was no interactive `login` call. Wraps GET /api/auth/profile and returns the user object verbatim.',
+  z.object({}),
+  async () => ok(await client.request('GET', '/api/auth/profile'))
+);
+
+tool(
   'update_profile',
   'Update the current user profile. At least one of firstName / lastName / email / phone / avatar must be provided. phone and avatar accept null to clear.',
   z.object({
@@ -111,6 +118,41 @@ tool(
   }),
   async (body) =>
     ok(await client.request('POST', '/api/auth/register', body, { authed: false }))
+);
+
+// ── Personal access tokens ────────────────────────────────────────────────
+//
+// CRUD wrappers around POST/GET/DELETE /api/auth/tokens. The mint guard
+// (BE returns 403 PAT_CANNOT_MINT_PAT) means `create_pat` and `revoke_pat`
+// only work when the MCP process is JWT-authed via the `login` tool — a
+// PAT cannot mint or revoke other PATs. `list_pats` works under either
+// credential.
+
+tool(
+  'list_pats',
+  "List the current user's personal access tokens. The response NEVER includes the secret — only metadata (id, name, last4, createdAt, lastUsedAt, expiresAt, revokedAt). Active rows first, then revoked rows for audit context.",
+  z.object({}),
+  async () => ok(await client.request('GET', '/api/auth/tokens'))
+);
+
+tool(
+  'create_pat',
+  "Mint a new personal access token for the current user. Requires interactive `login` first — cannot be called via env token; the BE returns 403 PAT_CANNOT_MINT_PAT in that case. The plaintext secret is returned EXACTLY ONCE in the response and cannot be retrieved later — copy it immediately. Cap is 10 active (non-revoked, non-expired) tokens per user; the 11th attempt returns 422 PAT_LIMIT_REACHED.",
+  z.object({
+    name: z.string().min(1).max(64),
+    expiresIn: z.enum(['never', '30d', '90d', '1y']),
+  }),
+  async (body) => ok(await client.request('POST', '/api/auth/tokens', body))
+);
+
+tool(
+  'revoke_pat',
+  "Revoke one of the current user's personal access tokens by id. Requires interactive `login` first — cannot be called via env token; the BE returns 403 PAT_CANNOT_MINT_PAT in that case. Idempotent-ish: an unknown id, another user's token id, or an already-revoked token all return 404 PAT_NOT_FOUND.",
+  z.object({
+    tokenId: z.string().uuid(),
+  }),
+  async ({ tokenId }) =>
+    ok(await client.request('DELETE', `/api/auth/tokens/${tokenId}`))
 );
 
 // ── Tenants ────────────────────────────────────────────────────────────────

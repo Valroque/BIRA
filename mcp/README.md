@@ -13,13 +13,21 @@ change.
 ### Auth
 | Tool | What it does |
 |---|---|
-| `login` | Auth against `/api/auth/login`; cache token in process |
-| `logout` | Clear the cached session |
+| `login` | Auth against `/api/auth/login`; cache token in process. **Dev fallback only** — production agents should use `BIRA_API_TOKEN` instead (see Auth model below). |
+| `logout` | Clear the cached JWT. The `BIRA_API_TOKEN` env (if set) remains as the fallback Bearer. |
 | `register` | `POST /api/auth/register` — public; create a new user with no memberships |
 | `profile` | `GET /api/auth/profile` |
+| `whoami` | `GET /api/auth/profile` — confirm which user this MCP process is acting as. Especially useful when the credential is `BIRA_API_TOKEN` and there was no interactive `login`. |
 | `update_profile` | `PATCH /api/auth/me` (firstName / lastName / email / phone / avatar) |
 | `change_password` | Self-service password change; required to clear `mustResetPassword` |
 | `refresh_token` | Exchange a refresh token for a new access token |
+
+### Personal access tokens
+| Tool | What it does |
+|---|---|
+| `list_pats` | `GET /api/auth/tokens` — list the current user's PATs (metadata only; secret never returned). Works under JWT or PAT auth. |
+| `create_pat` | `POST /api/auth/tokens` — mint a new PAT (`name`, `expiresIn ∈ {never, 30d, 90d, 1y}`). Plaintext returned **exactly once**. **Requires interactive `login`** — BE returns 403 `PAT_CANNOT_MINT_PAT` when called via env token. |
+| `revoke_pat` | `DELETE /api/auth/tokens/:id` — revoke one of the current user's PATs. **Requires interactive `login`** (same mint guard). |
 
 ### Tenants
 | Tool | What it does |
@@ -144,7 +152,10 @@ For **Claude Desktop**, add to
     "bira": {
       "command": "node",
       "args": ["/absolute/path/to/BIRA/mcp/dist/index.js"],
-      "env": { "BIRA_API_URL": "http://localhost:5001" }
+      "env": {
+        "BIRA_API_URL": "http://localhost:5001",
+        "BIRA_API_TOKEN": "bira_pat_…"
+      }
     }
   }
 }
@@ -158,12 +169,60 @@ the BIRA backend is up (`npm run dev:server`).
 | Var | Default | Notes |
 |---|---|---|
 | `BIRA_API_URL` | `http://localhost:5001` | BIRA backend base URL |
+| `BIRA_API_TOKEN` | _(unset)_ | Personal access token (`bira_pat_…`). Recommended credential — see Auth model below. |
 
 ## Auth model
 
-State is per-process: each MCP client gets its own server instance with
-its own token cache. There's no persistence — restarting the MCP
-connection means logging in again.
+The recommended credential is a **Personal Access Token (PAT)** set via the
+`BIRA_API_TOKEN` env var. PATs are scoped to a single user, can be revoked
+without rotating a password, never leak into chat, and survive process
+restarts because the credential lives in the client's config rather than
+in this MCP server's memory.
+
+### Generate and install a PAT
+
+1. Log into the BIRA web app as the user the agent should act as.
+2. Go to **Settings → Profile → API tokens**.
+3. Click **Generate new token**, give it a descriptive name (e.g.
+   `claude-desktop`), pick an expiry (`Never`, `30 days`, `90 days`, or
+   `1 year`), and submit.
+4. **Copy the plaintext immediately** — it's shown exactly once and
+   cannot be retrieved later. If you lose it, revoke the token and mint
+   a new one.
+5. Paste it into your MCP client config under `env.BIRA_API_TOKEN` (see
+   the Configure clients example above).
+6. Restart the MCP client so the new env var is picked up.
+
+Once the env var is set, every authenticated tool call uses the PAT as the
+Bearer credential. Confirm with the `whoami` tool — it should return the
+user that owns the PAT.
+
+### Credential precedence
+
+If both an env-token and an interactive `login` happen in the same
+process, the **JWT from `login` wins** for the rest of the process. This
+is a deliberate "dev fallback" — you can override a config-driven session
+mid-conversation by logging in as a different user. Calling `logout`
+clears the in-process JWT but does **not** clear the env-token; the env
+PAT remains as the fallback Bearer.
+
+### `login` / `logout` are dev-only
+
+The `login` tool puts the user's email and password into the chat
+transcript. **Do not use it in production agents** — use a PAT instead.
+The `login`/`logout` pair stays in the toolset only because it's the
+fastest path for local hacking when the BIRA web app isn't reachable.
+
+### Mint guard
+
+`create_pat` and `revoke_pat` require an interactive `login` first. The
+BE refuses to let a PAT mint or revoke other PATs and returns
+**403 `PAT_CANNOT_MINT_PAT`** in that case. Token CRUD is intentionally
+gated to JWT-authed sessions so a leaked PAT cannot bootstrap a fresh
+credential.
+
+### Seeded demo user
 
 The seeded demo user is `jordan@acme.com` / `password123` (see
-`server/db/seeds/01_demo.ts`).
+`server/db/seeds/01_demo.ts`). Log in as Jordan in the web app to mint a
+PAT for local development.
