@@ -1,4 +1,4 @@
-import { required, toISO } from './utils.js';
+import { required, toISO, formatDate } from './utils.js';
 import { EntityError } from '../lib/errors.js';
 import {
   ISSUE_TYPES,
@@ -22,6 +22,12 @@ export interface IssueRow {
   description: string | null;
   labels: string[];
   assigneeUserId: string | null;
+  // FK to `teams.id`. Mutually exclusive with `assigneeUserId` at the
+  // usecase layer (createIssue / updateIssue) — at most one is non-null
+  // on any given row. Both null is allowed (Unscheduled rail). Entity
+  // does NOT enforce the mutex; the usecase already validates input
+  // shape and the rule has no DB CHECK.
+  teamId: string | null;
   reporterUserId: string | null;
   parentIssueId: string | null;
   startDate: Date | string | null;
@@ -52,6 +58,9 @@ export class Issue {
   readonly description: string | null;
   readonly labels: string[];
   readonly assigneeUserId: string | null;
+  // See note on IssueRow.teamId — mutual exclusion lives in the usecase
+  // layer, not the entity.
+  readonly teamId: string | null;
   readonly reporterUserId: string | null;
   // The uuid of this issue's parent, or null. The hierarchy type rules
   // (Epics top-level, Stories under Epics, Tasks/Bugs leaves) are NOT
@@ -110,6 +119,7 @@ export class Issue {
     this.description = row.description ?? null;
     this.labels = Array.isArray(row.labels) ? row.labels : [];
     this.assigneeUserId = row.assigneeUserId ?? null;
+    this.teamId = row.teamId ?? null;
     this.reporterUserId = row.reporterUserId ?? null;
     this.parentIssueId = row.parentIssueId ?? null;
     this.startDate = formatDate(row.startDate);
@@ -137,23 +147,4 @@ export class Issue {
   static fromRow(row: IssueRow): Issue {
     return new Issue(row);
   }
-}
-
-/**
- * Format a `date`-typed pg column as `YYYY-MM-DD`. Knex returns these
- * as `Date` objects under most configurations; we strip the time part
- * and return a date-only ISO string.
- */
-function formatDate(value: Date | string | null | undefined): string | null {
-  if (value === null || value === undefined) return null;
-  if (value instanceof Date) {
-    if (Number.isNaN(value.getTime())) return null;
-    const y = value.getUTCFullYear();
-    const m = String(value.getUTCMonth() + 1).padStart(2, '0');
-    const d = String(value.getUTCDate()).padStart(2, '0');
-    return `${y}-${m}-${d}`;
-  }
-  // Already a string. If it includes a 'T' it's an ISO datetime — slice
-  // to the date portion. Otherwise it's already YYYY-MM-DD.
-  return value.length >= 10 ? value.slice(0, 10) : value;
 }

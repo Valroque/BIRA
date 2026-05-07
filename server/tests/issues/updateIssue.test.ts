@@ -7,6 +7,7 @@ import {
   createWorkspace,
   addWorkspaceMember,
   createProject,
+  createTeam,
   createIssue,
   loginAs,
 } from '../helpers/factories.js';
@@ -166,5 +167,128 @@ describe('PATCH /api/tenants/:t/workspaces/:w/projects/:projectSlug/issues/:key'
       .set('Authorization', `Bearer ${token}`)
       .send({ title: 'Updated' });
     expect(res.status).toBe(409);
+  });
+
+  // ── Team-on-Issue mutex (slice 1) ─────────────────────────────────────
+
+  it('200 setting teamId on an issue with assigneeUserId clears the assignee', async () => {
+    const { user, tenant, ws, proj, token } = await setupAdmin();
+    const team = await createTeam({ workspaceId: ws.id, createdByUserId: user.id });
+    // Start with assignee set.
+    const issue = await createIssue({
+      workspaceId: ws.id,
+      projectId: proj.id,
+      reporterUserId: user.id,
+      title: 'has assignee',
+      assigneeUserId: user.id,
+    });
+    expect(issue.assigneeUserId).toBe(user.id);
+
+    const res = await api()
+      .patch(
+        `/api/tenants/${tenant.slug}/workspaces/${ws.slug}/projects/${proj.slug}/issues/${issue.key}`
+      )
+      .set('Authorization', `Bearer ${token}`)
+      .send({ teamId: team.id });
+    expect(res.status).toBe(200);
+    expect(res.body.data.teamId).toBe(team.id);
+    expect(res.body.data.assigneeUserId).toBeNull();
+  });
+
+  it('200 setting assigneeUserId on an issue with teamId clears the team', async () => {
+    const { user, tenant, ws, proj, token } = await setupAdmin();
+    const team = await createTeam({ workspaceId: ws.id, createdByUserId: user.id });
+    const issue = await createIssue({
+      workspaceId: ws.id,
+      projectId: proj.id,
+      reporterUserId: user.id,
+      title: 'has team',
+      teamId: team.id,
+    });
+    expect(issue.teamId).toBe(team.id);
+
+    const res = await api()
+      .patch(
+        `/api/tenants/${tenant.slug}/workspaces/${ws.slug}/projects/${proj.slug}/issues/${issue.key}`
+      )
+      .set('Authorization', `Bearer ${token}`)
+      .send({ assigneeUserId: user.id });
+    expect(res.status).toBe(200);
+    expect(res.body.data.assigneeUserId).toBe(user.id);
+    expect(res.body.data.teamId).toBeNull();
+  });
+
+  it('200 explicit-null assigneeUserId leaves teamId untouched', async () => {
+    const { user, tenant, ws, proj, token } = await setupAdmin();
+    const team = await createTeam({ workspaceId: ws.id, createdByUserId: user.id });
+    const issue = await createIssue({
+      workspaceId: ws.id,
+      projectId: proj.id,
+      reporterUserId: user.id,
+      title: 'has team',
+      teamId: team.id,
+    });
+
+    const res = await api()
+      .patch(
+        `/api/tenants/${tenant.slug}/workspaces/${ws.slug}/projects/${proj.slug}/issues/${issue.key}`
+      )
+      .set('Authorization', `Bearer ${token}`)
+      .send({ assigneeUserId: null });
+    expect(res.status).toBe(200);
+    // assigneeUserId was already null on a team-assigned issue, so this
+    // is a noop on that field; the important assertion is that teamId
+    // is NOT touched.
+    expect(res.body.data.assigneeUserId).toBeNull();
+    expect(res.body.data.teamId).toBe(team.id);
+  });
+
+  it('200 explicit-null teamId leaves assigneeUserId untouched', async () => {
+    const { user, tenant, ws, proj, token } = await setupAdmin();
+    const issue = await createIssue({
+      workspaceId: ws.id,
+      projectId: proj.id,
+      reporterUserId: user.id,
+      title: 'has assignee',
+      assigneeUserId: user.id,
+    });
+
+    const res = await api()
+      .patch(
+        `/api/tenants/${tenant.slug}/workspaces/${ws.slug}/projects/${proj.slug}/issues/${issue.key}`
+      )
+      .set('Authorization', `Bearer ${token}`)
+      .send({ teamId: null });
+    expect(res.status).toBe(200);
+    expect(res.body.data.teamId).toBeNull();
+    expect(res.body.data.assigneeUserId).toBe(user.id);
+  });
+
+  it('400 when both assigneeUserId and teamId are non-null in the same patch', async () => {
+    const { user, tenant, ws, proj, issue, token } = await setupAdmin();
+    const team = await createTeam({ workspaceId: ws.id, createdByUserId: user.id });
+    const res = await api()
+      .patch(
+        `/api/tenants/${tenant.slug}/workspaces/${ws.slug}/projects/${proj.slug}/issues/${issue.key}`
+      )
+      .set('Authorization', `Bearer ${token}`)
+      .send({ assigneeUserId: user.id, teamId: team.id });
+    expect(res.status).toBe(400);
+  });
+
+  it('404 when teamId references a team in a different workspace', async () => {
+    const { user, tenant, ws, proj, issue, token } = await setupAdmin();
+    const otherWs = await createWorkspace({ tenantId: tenant.id });
+    const otherTeam = await createTeam({
+      workspaceId: otherWs.id,
+      createdByUserId: user.id,
+    });
+    const res = await api()
+      .patch(
+        `/api/tenants/${tenant.slug}/workspaces/${ws.slug}/projects/${proj.slug}/issues/${issue.key}`
+      )
+      .set('Authorization', `Bearer ${token}`)
+      .send({ teamId: otherTeam.id });
+    expect(res.status).toBe(404);
   });
 });

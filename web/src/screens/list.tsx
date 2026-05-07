@@ -8,6 +8,7 @@ import { TopBar, Tabs, projectTabs, useTenantBreadcrumbs } from '../components/s
 import { IssuesTable } from '../components/issues-table';
 import { useProjects } from '../state/projects';
 import { useIssues } from '../state/issues';
+import { useMilestones } from '../state/milestones';
 import { ErrorState } from '../components/states';
 
 export function ListPage() {
@@ -18,6 +19,7 @@ export function ListView() {
   const { tenant, workspace, project, tenantName, workspaceName } = useTenantBreadcrumbs();
   const { getProject } = useProjects();
   const { issues, loading, error, refresh } = useIssues();
+  const { milestonesForProject } = useMilestones();
   const projectInfo = getProject(project);
 
   // Resolve the URL slug to the project's UUID at the boundary so the issue
@@ -28,6 +30,10 @@ export function ListView() {
       ? issues.filter((i) => i.projectId === projectInfo.id)
       : [],
     [issues, projectInfo],
+  );
+  const projectMilestones = useMemo(
+    () => projectInfo ? milestonesForProject(projectInfo.id) : [],
+    [milestonesForProject, projectInfo],
   );
 
   if (error && !loading) {
@@ -65,6 +71,7 @@ export function ListView() {
       <Tabs active="issues" tabs={projectTabs(tenant, workspace, project)} />
       <IssuesTable
         issues={projectIssues}
+        milestones={projectMilestones}
         projectScoped
         // Project-scoped /list is the reality view — drags PATCH the BE.
         // The two workspace-level pages (My Issues / All Issues) keep the

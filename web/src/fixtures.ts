@@ -164,6 +164,49 @@ export const RESERVED_PROJECT_SLUGS = new Set<string>([
 ]);
 
 // ---------------------------------------------------------------------------
+// Milestones
+// ---------------------------------------------------------------------------
+
+/**
+ * A project-level deadline annotation. Pure annotation — milestones don't
+ * link to issues in v1. Why no `completed` flag: completion is derived from
+ * the calendar — `today > date` is overdue (red), today/future is upcoming
+ * (accent). The only state that matters is "did the date pass yet?".
+ */
+export interface Milestone {
+  /** Stable UUID. Never rendered. */
+  id: string;
+  /** UUID of the owning project. */
+  projectId: string;
+  /** User-facing label (e.g. "Mutual Fund Go-Live"). */
+  name: string;
+  /** Optional context surfaced in tooltips + the milestones tab list. */
+  description?: string;
+  /**
+   * ISO YYYY-MM-DD. Inclusive EOD-by completion deadline — the user has
+   * the entire calendar day of `date` (until end-of-day) to finish. Past
+   * `date` means overdue. Mental model: a "go-live April 7" target stores
+   * `date = April 6` (the user has all of April 6 to finish).
+   */
+  date: string;
+}
+
+/**
+ * @deprecated Reference-only since the milestones provider was flipped to
+ * the BE. Kept here so the FE can document what `npm run seed` populates
+ * for the demo workspace, but no code reads this anymore — the source of
+ * truth is the `milestones` table on the server. The id segments use `a`
+ * (a valid hex digit) so they match the BE seed exactly; an earlier
+ * version used `m`, which is not a hex digit and didn't parse as a uuid.
+ */
+export const SEED_MILESTONES: Milestone[] = [
+  { id: '00000000-0000-0000-0000-000000001a01', projectId: SEED_PROJECT_IDS.comet, name: 'Mutual Fund Go-Live', description: 'Launch the MF onboarding flow to all customers.', date: '2026-05-28' },
+  { id: '00000000-0000-0000-0000-000000001a02', projectId: SEED_PROJECT_IDS.comet, name: 'Beta Launch',         description: 'Internal beta to the design + backend teams.',     date: '2026-05-01' },
+  { id: '00000000-0000-0000-0000-000000001a03', projectId: SEED_PROJECT_IDS.orbit, name: 'Dashboard v2 Ship',                                                                       date: '2026-06-15' },
+  { id: '00000000-0000-0000-0000-000000001a04', projectId: SEED_PROJECT_IDS.atlas, name: 'Mapping API GA',      description: 'Stable v1 of the geospatial query API.',           date: '2026-04-30' },
+];
+
+// ---------------------------------------------------------------------------
 // Issues
 // ---------------------------------------------------------------------------
 
@@ -181,8 +224,19 @@ export interface Issue {
   /**
    * UUID of the assignee, or null when unassigned. Resolve to a display name
    * via `useUsers().getUser(id)` at every consumer; the UUID is never rendered.
+   *
+   * `assigneeUserId` and `teamId` are mutually exclusive at the BE layer —
+   * setting one to a non-null value auto-clears the other in the response.
    */
   assigneeUserId: string | null;
+  /**
+   * UUID of the team this issue is assigned to, or omitted when there's no
+   * team owner. Mutually exclusive with `assigneeUserId` (BE rejects both
+   * non-null with 400; setting either auto-clears the other in the
+   * response). Resolve to a team via `useTeams()` at consumers; the UUID is
+   * never rendered.
+   */
+  teamId?: string;
   labels: string[];
   updated: string;
   estimate?: number;

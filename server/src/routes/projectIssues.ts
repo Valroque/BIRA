@@ -45,6 +45,9 @@ const CreateIssueSchema = z.object({
   priority: z.enum(PRIORITIES).optional(),
   labels: z.array(z.string().min(1).max(64)).max(64).optional(),
   assigneeUserId: z.string().uuid().nullable().optional(),
+  // Team-on-Issue (slice 1) — mutually exclusive with assigneeUserId at
+  // the usecase layer. Both null is allowed; both non-null is 400.
+  teamId: z.string().uuid().nullable().optional(),
   // External callers reference issues by key (e.g. 'CMT-7'); the route
   // resolves this to a uuid before handing off to the usecase.
   parent: z.string().regex(ISSUE_KEY_RE).nullable().optional(),
@@ -77,6 +80,9 @@ const UpdateIssueSchema = z
     status: z.enum(STATUSES).optional(),
     priority: z.enum(PRIORITIES).optional(),
     assigneeUserId: z.string().uuid().nullable().optional(),
+    // Team-on-Issue (slice 1). See createIssue / updateIssue usecases
+    // for the null-vs-absent mutex semantics.
+    teamId: z.string().uuid().nullable().optional(),
     labels: z.array(z.string().min(1).max(64)).max(64).optional(),
     startDate: z.string().regex(ISO_DATE).nullable().optional(),
     endDate: z.string().regex(ISO_DATE).nullable().optional(),
@@ -92,6 +98,7 @@ const ListIssuesQuerySchema = z.object({
   status: z.enum(STATUSES).optional(),
   type: z.enum(ISSUE_TYPES).optional(),
   assigneeUserId: z.string().uuid().optional(),
+  teamId: z.string().uuid().optional(),
   label: z.string().min(1).max(64).optional(),
   priority: z.enum(PRIORITIES).optional(),
 });

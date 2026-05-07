@@ -254,21 +254,42 @@ the workflow guard arrives in slice 5.
 | PATCH  | `/api/tenants/:t/workspaces/:w/projects/:p/issues/:key/parent`          | workspace `write`             |
 
 Both list endpoints accept query params: `status`, `type`,
-`assigneeUserId`, `label`, `priority`. The workspace-scoped list
-additionally accepts `projectId`.
+`assigneeUserId`, `teamId`, `label`, `priority`. The workspace-scoped
+list additionally accepts `projectId`.
 
 `POST` body: `{ type, title, description?, status?, priority?,
-assigneeUserId?, labels?, parent? }`. `type` is required; defaults are
-`status='backlog'`, `priority='none'`, `labels=[]`,
-`description=null`, `assigneeUserId=null`. The reporter is the
-calling user. `parent` is an issue key (e.g. `'CMT-7'`); see
+assigneeUserId?, teamId?, labels?, parent? }`. `type` is required;
+defaults are `status='backlog'`, `priority='none'`, `labels=[]`,
+`description=null`, `assigneeUserId=null`, `teamId=null`. The reporter
+is the calling user. `parent` is an issue key (e.g. `'CMT-7'`); see
 hierarchy rules below.
 
 `PATCH` body: any subset of `{ title, description, status,
-priority, assigneeUserId, labels }`; at least one field is
+priority, assigneeUserId, teamId, labels, startDate, endDate,
+estimate, descriptionAttachmentIds }`; at least one field is
 required. Note: `parent` is **not** accepted here — hierarchy
 mutations go through the dedicated `PATCH /:key/parent` endpoint
 to keep the type / scope / cycle validation in one place.
+
+**Team-on-Issue mutex (slice 1)** — `assigneeUserId` and `teamId` are
+mutually exclusive: at most one is non-null on any given issue. Both
+null is allowed (the issue lands on the planner's Unscheduled rail).
+The rule lives in the usecase layer, not as a DB CHECK.
+
+- On create / update, passing both non-null in the same call → 400
+  (`Cannot set both assignee and team`).
+- On update, the null-vs-absent semantics matter:
+  - **SET** `assigneeUserId` to a non-null uuid while the existing
+    issue has a non-null `teamId` → `teamId` is auto-cleared on the
+    same write.
+  - **SET** `teamId` to a non-null uuid while the existing issue has a
+    non-null `assigneeUserId` → `assigneeUserId` is auto-cleared on
+    the same write.
+  - **CLEAR** `assigneeUserId` (`assigneeUserId: null`) → leaves
+    `teamId` untouched. Same in the inverse direction. Clearing one
+    field never implicitly modifies the other.
+- Cross-workspace `teamId` references → 404 (matches the
+  cross-workspace-not-found posture used elsewhere — no info leak).
 
 `PATCH /:key/parent` body: `{ parent: string | null }` where
 `parent` is an issue key or `null` to clear. Hierarchy rules:
@@ -290,6 +311,7 @@ Response shape (slice 2 + slice C additions):
   description: string | null,
   labels: string[],
   assigneeUserId: string | null,
+  teamId: string | null,             // FK to teams.id; mutex with assigneeUserId
   reporterUserId: string | null,
   parentIssueId: string | null,    // internal uuid (kept for round-trip)
   parent: string | null,           // parent issue KEY, e.g. 'CMT-7'
@@ -359,6 +381,7 @@ of writing, 45 files / 345 it-blocks):
 | Workspaces | `tests/workspaces/` — list, create, get, update, archive, unarchive |
 | Projects | `tests/projects/` — list, create, get |
 | Issues | `tests/issues/` — create, get, list (project + workspace), update, key allocation (concurrency), set parent (hierarchy), description attachments (slice C) |
+| Milestones | `tests/milestones/` — create, get, list (project + workspace), update, delete |
 | Files | `tests/files/` — upload, download, delete |
 | Comments | `tests/comments/` — create, list, update, delete |
 | Workspace members | `tests/workspaceMembers/` — list, add, update role, remove (incl. last-admin guard, self-leave, team_memberships cascade) |
@@ -509,6 +532,32 @@ through.
 
 GET returns a record `{ T?, B?, S?, E? }` of workflow slugs. PUT body is
 `{ workflowSlug }`; `:issueType` must be one of `T|B|S|E`.
+
+### Milestones
+
+Project-level deadline annotations. Pure annotation: no link to issues, no
+completion flag — the FE derives "overdue" from `today > date`.
+
+| Method | Path                                                                  | Auth                |
+|--------|-----------------------------------------------------------------------|---------------------|
+| GET    | `/api/tenants/:t/workspaces/:w/projects/:p/milestones`               | workspace member    |
+| POST   | `/api/tenants/:t/workspaces/:w/projects/:p/milestones`               | workspace `write`   |
+| GET    | `/api/tenants/:t/workspaces/:w/projects/:p/milestones/:id`           | workspace member    |
+| PATCH  | `/api/tenants/:t/workspaces/:w/projects/:p/milestones/:id`           | workspace `write`   |
+| DELETE | `/api/tenants/:t/workspaces/:w/projects/:p/milestones/:id`           | workspace `write`   |
+| GET    | `/api/tenants/:t/workspaces/:w/milestones`                            | workspace member    |
+
+Body shape: `{ name (1-200), description? (≤2000, nullable), date (YYYY-MM-DD) }`.
+PATCH requires at least one field; PATCH/DELETE 404 when the `:id` does not
+belong to the URL's project (cross-project access through the wrong
+project slug is rejected). The workspace-scoped GET accepts an optional
+`?projectId=<uuid>` filter; both list endpoints sort by `date` ascending
+(soonest first).
+
+`workspace_id` AND `project_id` are denormalised on each row (mirrors
+`issues`); queries stay JOIN-free per the no-DB-JOINs rule. Mutations
+(POST/PATCH/DELETE) are blocked with 409 when the project is archived;
+reads work regardless. Cross-workspace milestone ids 404 — no info leak.
 
 ### Comments (slice B)
 

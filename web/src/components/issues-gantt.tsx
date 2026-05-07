@@ -6,13 +6,34 @@
 import { Fragment, useCallback, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import { Icon } from './icons';
-import { TypeChip, IssueId, Avatar, STATUSES, type StatusId } from './shell';
+import { TypeChip, IssueId, Avatar } from './shell';
 import { useDismiss } from './use-dismiss';
-import { HOLIDAYS, IDEAL_POINTS_PER_DAY, computeTaskLoad, isWorkingDate, type Issue } from '../fixtures';
+import { IDEAL_POINTS_PER_DAY, computeTaskLoad, type Issue, type Milestone } from '../fixtures';
 import { useIssues } from '../state/issues';
 import { useProjects } from '../state/projects';
 import { useUsers } from '../state/users';
 import type { IssueGroupKey } from './issues-table';
+// Pure helpers (day/week math, range building, bar derivation, per-day load,
+// status colour resolution, formatting) live in gantt-utils.ts so the
+// planner gantt can reuse them without pulling in this file's React layer.
+import {
+  buildDayTicks,
+  buildMonthSpans,
+  barFor,
+  dailyLoadFor,
+  dayToIso,
+  deriveRange,
+  fromDayNumber,
+  formatOverload,
+  formatPpd,
+  issueBar,
+  statusColors,
+  toDayNumber,
+  todayDay,
+  type BarSpec,
+  type DayRange,
+  type DayTick,
+} from './gantt-utils';
 
 interface Group {
   id: string;
@@ -56,6 +77,30 @@ interface IssuesGanttProps {
   granularity: GanttGranularity;
   /** Reality vs planning. See `GanttMode`. Defaults to 'planning'. */
   mode?: GanttMode;
+  /**
+   * Project-level milestones to surface as vertical lines + flag chips in
+   * the timeline header. Only the project gantt passes this — workspace-
+   * level views (My Issues / All Issues) intentionally omit it. Milestones
+   * outside the visible day-range are silently dropped.
+   */
+  milestones?: Milestone[];
+}
+
+/**
+ * Pre-computed milestone position used by both the header flag chips and
+ * the per-row vertical dashed lines. Milestones outside the visible range
+ * are filtered out before this is built.
+ */
+interface MilestoneMark {
+  id: string;
+  name: string;
+  description?: string;
+  date: string;
+  /** Centre x in pixels within the timeline track. */
+  centre: number;
+  /** Vermillion when overdue, accent when upcoming. */
+  color: string;
+  isOverdue: boolean;
 }
 
 // Tree row produced by `flattenTree` — depth drives the indent, hasChildren
@@ -95,208 +140,10 @@ function buildAndFlattenTree(items: Issue[], collapsedNodes: Set<string>): TreeR
   return out;
 }
 
-const MS_PER_DAY = 86_400_000;
 const ROW_HEIGHT = 32;
 const LABEL_COL_WIDTH = 360;
 const HEADER_HEIGHT = 56;
 const GROUP_HEADER_HEIGHT = 32;
-
-const MONTH_NAMES = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-const DOW = ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
-
-function toDayNumber(iso: string): number {
-  const [y, m, d] = iso.split('-').map(Number);
-  return Math.floor(Date.UTC(y, m - 1, d) / MS_PER_DAY);
-}
-function fromDayNumber(day: number): Date {
-  return new Date(day * MS_PER_DAY);
-}
-function dayToIso(day: number): string {
-  const d = fromDayNumber(day);
-  const y = d.getUTCFullYear();
-  const m = String(d.getUTCMonth() + 1).padStart(2, '0');
-  const dd = String(d.getUTCDate()).padStart(2, '0');
-  return `${y}-${m}-${dd}`;
-}
-function todayDay(): number {
-  const now = new Date();
-  return Math.floor(Date.UTC(now.getFullYear(), now.getMonth(), now.getDate()) / MS_PER_DAY);
-}
-
-interface DayRange { start: number; end: number; }
-
-function deriveRange(issues: Issue[], today: number): DayRange {
-  const days: number[] = [today];
-  for (const i of issues) {
-    if (i.startDate) days.push(toDayNumber(i.startDate));
-    if (i.endDate) days.push(toDayNumber(i.endDate));
-  }
-  return { start: Math.min(...days) - 14, end: Math.max(...days) + 60 };
-}
-
-interface MonthSpan { key: string; label: string; left: number; width: number; }
-function buildMonthSpans(range: DayRange, dayPx: number): MonthSpan[] {
-  const out: MonthSpan[] = [];
-  let cursor = range.start;
-  while (cursor <= range.end) {
-    const d = fromDayNumber(cursor);
-    const y = d.getUTCFullYear();
-    const m = d.getUTCMonth();
-    const monthEndDate = new Date(Date.UTC(y, m + 1, 0));
-    const monthEndDay = Math.floor(monthEndDate.getTime() / MS_PER_DAY);
-    const spanEnd = Math.min(monthEndDay, range.end);
-    const left = (cursor - range.start) * dayPx;
-    const width = (spanEnd - cursor + 1) * dayPx;
-    out.push({
-      key: `${y}-${m}`,
-      label: `${MONTH_NAMES[m]} ${y}`,
-      left,
-      width,
-    });
-    cursor = spanEnd + 1;
-  }
-  return out;
-}
-
-interface DayTick {
-  day: number;
-  left: number;
-  isToday: boolean;
-  isWeekend: boolean;
-  /** True for any HOLIDAYS entry — rendered like a weekend in the backdrop. */
-  isHoliday: boolean;
-  isWeekStart: boolean;
-  primaryLabel: string;
-  secondaryLabel: string;
-  /** Holiday name for the tooltip, when applicable. */
-  holidayLabel?: string;
-}
-const HOLIDAY_NAMES: Record<string, string> = {
-  '2026-05-01': 'Labour Day',
-};
-function buildDayTicks(range: DayRange, dayPx: number, today: number, weekly: boolean): DayTick[] {
-  const out: DayTick[] = [];
-  for (let day = range.start; day <= range.end; day++) {
-    const d = fromDayNumber(day);
-    const dow = d.getUTCDay();
-    const isWeekStart = dow === 1;
-    if (weekly && !isWeekStart) continue;
-    const iso = `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(d.getUTCDate()).padStart(2, '0')}`;
-    const isHoliday = HOLIDAYS.has(iso);
-    out.push({
-      day,
-      left: (day - range.start) * dayPx,
-      isToday: day === today,
-      isWeekend: dow === 0 || dow === 6,
-      isHoliday,
-      isWeekStart,
-      primaryLabel: weekly ? `${d.getUTCDate()}` : `${d.getUTCDate()}`,
-      secondaryLabel: weekly ? MONTH_NAMES[d.getUTCMonth()] : DOW[dow],
-      holidayLabel: isHoliday ? (HOLIDAY_NAMES[iso] ?? 'Holiday') : undefined,
-    });
-  }
-  return out;
-}
-
-// Trim trailing zeros so "4.0" reads as "4" without losing precision when
-// the user has actually entered or arrived at a fractional value.
-function trimZeros(s: string): string {
-  return s.replace(/\.0+$/, '').replace(/(\.\d*?)0+$/, '$1');
-}
-function formatPpd(ppd: number): string {
-  return trimZeros((Math.round(ppd * 10) / 10).toString());
-}
-function formatOverload(overload: number): string {
-  return `${trimZeros((Math.round(overload * 10) / 10).toString())}×`;
-}
-
-/**
- * Sum a group's per-day load (in points). For each leaf item with a
- * positive estimate and both dates, distribute the estimate across
- * working days in the span and accumulate per day. Returns a map keyed
- * by absolute day-number → total points scheduled for that day across
- * all items in the group. Skips weekends, holidays, and items with no
- * working day in their span.
- *
- * Used when the Gantt is grouped by assignee — each group's items are
- * the assignee's leaves, so this directly produces the assignee's daily
- * workload.
- */
-function dailyLoadFor(items: Issue[]): Map<number, number> {
-  const out = new Map<number, number>();
-  for (const issue of items) {
-    if (issue.type !== 'T' && issue.type !== 'B') continue;
-    if (!issue.startDate || !issue.endDate || !issue.estimate || issue.estimate <= 0) continue;
-    const startDay = toDayNumber(issue.startDate);
-    const endDay = toDayNumber(issue.endDate);
-    if (endDay < startDay) continue;
-    const workingDays: number[] = [];
-    for (let d = startDay; d <= endDay; d++) {
-      if (isWorkingDate(fromDayNumber(d))) workingDays.push(d);
-    }
-    if (workingDays.length === 0) continue;
-    const ppd = issue.estimate / workingDays.length;
-    for (const d of workingDays) out.set(d, (out.get(d) ?? 0) + ppd);
-  }
-  return out;
-}
-
-function statusColors(status: StatusId | string) {
-  const s = STATUSES.find((x) => x.id === status);
-  return {
-    bg: s?.bg ?? 'var(--bg-muted)',
-    fg: s?.color ?? 'var(--fg)',
-  };
-}
-
-interface BarSpec {
-  startDay: number;
-  endDay: number;
-  hasStart: boolean;
-  hasEnd: boolean;
-}
-function issueBar(issue: Issue): BarSpec | null {
-  const hasStart = !!issue.startDate;
-  const hasEnd = !!issue.endDate;
-  if (!hasStart && !hasEnd) return null;
-  const startDay = hasStart ? toDayNumber(issue.startDate!) : toDayNumber(issue.endDate!);
-  const endDay = hasEnd ? toDayNumber(issue.endDate!) : toDayNumber(issue.startDate!);
-  return { startDay, endDay, hasStart, hasEnd };
-}
-
-// Derive a Story/Epic bar from the leaves (Task/Bug) underneath it. Walks the
-// whole subtree because a Task/Bug can sit under a Story under an Epic, and a
-// Task/Bug can also be a direct child of an Epic. Returns null if no leaf in
-// the subtree carries a date — Stories/Epics never set their own dates in v1.
-function deriveContainerBar(issue: Issue, lookup: Map<string, Issue>): BarSpec | null {
-  if (issue.type !== 'S' && issue.type !== 'E') return null;
-  let min = Infinity;
-  let max = -Infinity;
-  let anyStart = false;
-  let anyEnd = false;
-  const visit = (id: string) => {
-    const node = lookup.get(id);
-    if (!node) return;
-    if (node.type === 'T' || node.type === 'B') {
-      const b = issueBar(node);
-      if (b) {
-        if (b.startDay < min) min = b.startDay;
-        if (b.endDay > max) max = b.endDay;
-        anyStart ||= b.hasStart;
-        anyEnd ||= b.hasEnd;
-      }
-    }
-    if (node.children) for (const c of node.children) visit(c);
-  };
-  if (issue.children) for (const c of issue.children) visit(c);
-  if (!isFinite(min)) return null;
-  return { startDay: min, endDay: max, hasStart: anyStart, hasEnd: anyEnd };
-}
-
-function barFor(issue: Issue, lookup: Map<string, Issue>): BarSpec | null {
-  if (issue.type === 'T' || issue.type === 'B') return issueBar(issue);
-  return deriveContainerBar(issue, lookup);
-}
 
 function groupSpan(items: Issue[]): BarSpec | null {
   let min = Infinity;
@@ -316,6 +163,7 @@ function groupSpan(items: Issue[]): BarSpec | null {
 export function IssuesGantt({
   groups, groupBy, collapsed, onToggleCollapsed, tenant, workspace, hierarchical, granularity,
   mode = 'planning',
+  milestones,
 }: IssuesGanttProps) {
   const [collapsedNodes, setCollapsedNodes] = useState<Set<string>>(() => new Set());
   const toggleNode = (id: string) => setCollapsedNodes((prev) => {
@@ -404,6 +252,30 @@ export function IssuesGantt({
   const ticks = useMemo(() => buildDayTicks(range, dayPx, today, weekly), [range, dayPx, today, weekly]);
   const todayOffset = (today - range.start) * dayPx + dayPx / 2;
 
+  // Resolve milestones to pixel positions once per relevant change. Skipping
+  // milestones outside the visible day-range keeps the header chips honest:
+  // a deadline two years off shouldn't squat at the right edge.
+  const todayIso = useMemo(() => dayToIso(today), [today]);
+  const milestoneMarks = useMemo<MilestoneMark[]>(() => {
+    if (!milestones || milestones.length === 0) return [];
+    const out: MilestoneMark[] = [];
+    for (const m of milestones) {
+      const day = toDayNumber(m.date);
+      if (day < range.start || day > range.end) continue;
+      const isOverdue = m.date < todayIso;
+      out.push({
+        id: m.id,
+        name: m.name,
+        description: m.description,
+        date: m.date,
+        centre: (day - range.start) * dayPx + dayPx / 2,
+        color: isOverdue ? 'var(--blocked)' : 'var(--accent)',
+        isOverdue,
+      });
+    }
+    return out;
+  }, [milestones, range.start, range.end, dayPx, todayIso]);
+
   const isFlat = groupBy === 'none';
 
   return (
@@ -468,6 +340,12 @@ export function IssuesGantt({
               borderTop: '1px solid var(--border-muted)',
             }}
           >
+            {/* Milestone flag chips. Sit above the ticks (zIndex 2) so they
+                read first; truncated to ~140px so a long name doesn't push
+                neighbouring marks off-axis. */}
+            {milestoneMarks.map((mk) => (
+              <MilestoneFlag key={`flag-${mk.id}`} mark={mk} todayIso={todayIso} />
+            ))}
             {ticks.map((t) => (
               <div
                 key={t.day}
@@ -518,6 +396,7 @@ export function IssuesGantt({
                   weekly={weekly}
                   ticks={ticks}
                   todayOffset={todayOffset}
+                  milestoneMarks={milestoneMarks}
                   showAssigneeLoad={groupBy === 'assignee'}
                 />
               )}
@@ -537,6 +416,7 @@ export function IssuesGantt({
                           weekly={weekly}
                           ticks={ticks}
                           todayOffset={todayOffset}
+                          milestoneMarks={milestoneMarks}
                           depth={row.depth}
                           hasChildren={row.hasChildren}
                           isExpanded={row.isExpanded}
@@ -562,6 +442,7 @@ export function IssuesGantt({
                         weekly={weekly}
                         ticks={ticks}
                         todayOffset={todayOffset}
+                        milestoneMarks={milestoneMarks}
                         onDateChange={updateDates}
                         onDateCommit={commitDates}
                         onAssigneeChange={updateAssignee}
@@ -589,6 +470,12 @@ interface RowChromeProps {
   weekly: boolean;
   ticks: DayTick[];
   todayOffset: number;
+  /**
+   * Milestone marks visible on this gantt. Empty when the consumer didn't
+   * pass any (workspace-level views) or when the project has no milestones
+   * within the visible range.
+   */
+  milestoneMarks: MilestoneMark[];
 }
 
 interface GroupRowProps extends RowChromeProps {
@@ -604,7 +491,7 @@ interface GroupRowProps extends RowChromeProps {
 }
 function GroupRow({
   group, isCollapsed, onToggle,
-  range, dayPx, timelineWidth, weekly, ticks, todayOffset,
+  range, dayPx, timelineWidth, weekly, ticks, todayOffset, milestoneMarks,
   showAssigneeLoad,
 }: GroupRowProps) {
   const span = useMemo(() => groupSpan(group.items), [group.items]);
@@ -684,6 +571,7 @@ function GroupRow({
           weekly={weekly}
           todayOffset={todayOffset}
           height={GROUP_HEADER_HEIGHT}
+          milestoneMarks={milestoneMarks}
         />
         {span && (
           <div
@@ -751,7 +639,7 @@ interface IssueRowProps extends RowChromeProps {
 }
 function IssueRow({
   issue, tenant, workspace,
-  range, dayPx, timelineWidth, weekly, ticks, todayOffset,
+  range, dayPx, timelineWidth, weekly, ticks, todayOffset, milestoneMarks,
   depth = 0, hasChildren = false, isExpanded = true, onToggleExpand,
   onDateChange, onDateCommit, onAssigneeChange, editingOpen, onOpenEdit, onCloseEdit, lookup,
 }: IssueRowProps) {
@@ -963,6 +851,7 @@ function IssueRow({
           weekly={weekly}
           todayOffset={todayOffset}
           height={ROW_HEIGHT}
+          milestoneMarks={milestoneMarks}
         />
         {bar && (
           <div
@@ -1049,13 +938,14 @@ function IssueRow({
 // Vertical week-start dividers, weekend / holiday shading, and the today
 // marker — shared between group rows and issue rows so they line up.
 function TimelineBackdrop({
-  ticks, dayPx, weekly, todayOffset, height,
+  ticks, dayPx, weekly, todayOffset, height, milestoneMarks,
 }: {
   ticks: DayTick[];
   dayPx: number;
   weekly: boolean;
   todayOffset: number;
   height: number;
+  milestoneMarks: MilestoneMark[];
 }) {
   return (
     <>
@@ -1086,6 +976,20 @@ function TimelineBackdrop({
           />
         ) : null,
       )}
+      {/* Milestone vertical guides — dashed so they read distinctly from the
+          solid `--accent` today marker. Sit above week dividers but below
+          the bars (which carry their own z-index in their parent row). */}
+      {milestoneMarks.map((mk) => (
+        <div
+          key={`ms-${mk.id}`}
+          style={{
+            position: 'absolute', top: 0, bottom: 0,
+            left: mk.centre - 0.5, width: 0,
+            borderLeft: `1px dashed ${mk.color}`,
+            pointerEvents: 'none', zIndex: 1,
+          }}
+        />
+      ))}
       <div
         style={{
           position: 'absolute', top: 0, bottom: 0, left: todayOffset - 0.5,
@@ -1094,6 +998,63 @@ function TimelineBackdrop({
       />
     </>
   );
+}
+
+// Header flag chip for a single milestone. Anchored to the centre of the
+// milestone's day; truncated so a long name doesn't overlap a neighbouring
+// chip too aggressively. Pure presentation — the matching dashed vertical
+// line is rendered inside `TimelineBackdrop`.
+const MILESTONE_CHIP_WIDTH = 132;
+
+function MilestoneFlag({ mark, todayIso }: { mark: MilestoneMark; todayIso: string }) {
+  const tip = (() => {
+    const abs = formatMilestoneDate(mark.date);
+    const rel = mark.isOverdue
+      ? `${calendarDays(mark.date, todayIso)} days overdue`
+      : mark.date === todayIso
+        ? 'due today'
+        : `due ${abs}`;
+    const head = `${mark.name} · ${rel}`;
+    return mark.description ? `${head}\n${mark.description}` : head;
+  })();
+  return (
+    <div
+      data-tip={tip}
+      style={{
+        position: 'absolute',
+        // Anchor centre of the chip on the milestone's day. Drop below the
+        // top edge of the day strip so the chip doesn't collide with the
+        // month strip border.
+        left: mark.centre - MILESTONE_CHIP_WIDTH / 2,
+        top: 4,
+        width: MILESTONE_CHIP_WIDTH,
+        display: 'flex', alignItems: 'center', gap: 4,
+        padding: '1px 6px',
+        borderRadius: 10,
+        background: mark.isOverdue ? 'var(--blocked-bg)' : 'var(--accent-muted)',
+        color: mark.color,
+        fontSize: 10.5, fontWeight: 600,
+        whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+        zIndex: 2,
+        pointerEvents: 'auto',
+      }}
+    >
+      <Icon name="flag" size={10} color={mark.color} />
+      <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{mark.name}</span>
+    </div>
+  );
+}
+
+function formatMilestoneDate(iso: string): string {
+  const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  const [y, m, d] = iso.split('-').map(Number);
+  return `${months[m - 1]} ${d}, ${y}`;
+}
+
+function calendarDays(aIso: string, bIso: string): number {
+  const [ay, am, ad] = aIso.split('-').map(Number);
+  const [by, bm, bd] = bIso.split('-').map(Number);
+  return Math.round((Date.UTC(by, bm - 1, bd) - Date.UTC(ay, am - 1, ad)) / 86_400_000);
 }
 
 // Bar-click edit popover. Anchored to the bar's start in the timeline track

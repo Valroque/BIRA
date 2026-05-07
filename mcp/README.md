@@ -15,6 +15,7 @@ change.
 |---|---|
 | `login` | Auth against `/api/auth/login`; cache token in process |
 | `logout` | Clear the cached session |
+| `register` | `POST /api/auth/register` — public; create a new user with no memberships |
 | `profile` | `GET /api/auth/profile` |
 | `update_profile` | `PATCH /api/auth/me` (firstName / lastName / email / phone / avatar) |
 | `change_password` | Self-service password change; required to clear `mustResetPassword` |
@@ -26,8 +27,10 @@ change.
 | `list_tenants` | All active tenants (public; pre-login picker) |
 | `get_tenant` | Tenant detail by slug |
 | `create_tenant` | Any authenticated user; caller becomes admin |
+| `update_tenant` | Tenant admin; rename + cosmetics (slug + plan immutable) |
 | `deactivate_tenant` / `reactivate_tenant` | Tenant admin lifecycle |
 | `list_tenant_members` | Hydrated tenant directory; visible to any tenant member |
+| `get_tenant_member` | Single user lookup by uuid (display-name fallback) |
 | `admin_reset_password` | Tenant admin issues a one-time temp password for another member |
 | `deactivate_user` / `reactivate_user` | Tenant admin flips another member's `isActive` flag (effective scope is global) |
 
@@ -68,6 +71,13 @@ change.
 |---|---|
 | `list_comments` / `create_comment` | Issue-scoped |
 | `update_comment` / `delete_comment` | Workspace-scoped by comment uuid |
+
+### Milestones
+| Tool | What it does |
+|---|---|
+| `list_milestones` | Workspace-scoped or project-scoped (when `projectSlug` is set); workspace form accepts `projectId` filter |
+| `get_milestone` | Project-scoped lookup by uuid |
+| `create_milestone` / `update_milestone` / `delete_milestone` | Workspace write+; rejected on archived projects |
 
 ### Workflows
 | Tool | What it does |

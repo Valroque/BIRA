@@ -7,6 +7,7 @@ import {
   createWorkspace,
   addWorkspaceMember,
   createProject,
+  createTeam,
   loginAs,
 } from '../helpers/factories.js';
 
@@ -251,6 +252,86 @@ describe('POST /api/tenants/:t/workspaces/:w/projects/:projectSlug/issues', () =
       .post(`/api/tenants/${tenant.slug}/workspaces/${w1.slug}/projects/${proj.slug}/issues`)
       .set('Authorization', `Bearer ${token}`)
       .send(baseBody);
+    expect(res.status).toBe(404);
+  });
+
+  // ── Team-on-Issue (slice 1) ─────────────────────────────────────────────
+
+  it('201 creates an issue with teamId set and assigneeUserId null', async () => {
+    const { user, tenant, ws, proj, token } = await setupAdmin();
+    const team = await createTeam({ workspaceId: ws.id, createdByUserId: user.user.id });
+    const res = await api()
+      .post(`/api/tenants/${tenant.slug}/workspaces/${ws.slug}/projects/${proj.slug}/issues`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ ...baseBody, teamId: team.id });
+    expect(res.status).toBe(201);
+    expect(res.body.data.teamId).toBe(team.id);
+    expect(res.body.data.assigneeUserId).toBeNull();
+
+    // GET round-trips the field.
+    const fetched = await api()
+      .get(
+        `/api/tenants/${tenant.slug}/workspaces/${ws.slug}/projects/${proj.slug}/issues/${res.body.data.key}`
+      )
+      .set('Authorization', `Bearer ${token}`);
+    expect(fetched.status).toBe(200);
+    expect(fetched.body.data.teamId).toBe(team.id);
+  });
+
+  it('201 creates an issue with assigneeUserId set and teamId null (existing baseline)', async () => {
+    const { user, tenant, ws, proj, token } = await setupAdmin();
+    const res = await api()
+      .post(`/api/tenants/${tenant.slug}/workspaces/${ws.slug}/projects/${proj.slug}/issues`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ ...baseBody, assigneeUserId: user.user.id, teamId: null });
+    expect(res.status).toBe(201);
+    expect(res.body.data.assigneeUserId).toBe(user.user.id);
+    expect(res.body.data.teamId).toBeNull();
+  });
+
+  it('201 creates an issue with both assignee and team null (Unscheduled)', async () => {
+    const { tenant, ws, proj, token } = await setupAdmin();
+    const res = await api()
+      .post(`/api/tenants/${tenant.slug}/workspaces/${ws.slug}/projects/${proj.slug}/issues`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ ...baseBody, assigneeUserId: null, teamId: null });
+    expect(res.status).toBe(201);
+    expect(res.body.data.assigneeUserId).toBeNull();
+    expect(res.body.data.teamId).toBeNull();
+  });
+
+  it('400 when both assigneeUserId and teamId are non-null', async () => {
+    const { user, tenant, ws, proj, token } = await setupAdmin();
+    const team = await createTeam({ workspaceId: ws.id, createdByUserId: user.user.id });
+    const res = await api()
+      .post(`/api/tenants/${tenant.slug}/workspaces/${ws.slug}/projects/${proj.slug}/issues`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ ...baseBody, assigneeUserId: user.user.id, teamId: team.id });
+    expect(res.status).toBe(400);
+  });
+
+  it('404 when teamId references a team in a different workspace', async () => {
+    const { user, tenant, ws, proj, token } = await setupAdmin();
+    // Build a second workspace under the SAME tenant and put a team there.
+    const otherWs = await createWorkspace({ tenantId: tenant.id });
+    const otherTeam = await createTeam({
+      workspaceId: otherWs.id,
+      createdByUserId: user.user.id,
+    });
+    const res = await api()
+      .post(`/api/tenants/${tenant.slug}/workspaces/${ws.slug}/projects/${proj.slug}/issues`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ ...baseBody, teamId: otherTeam.id });
+    expect(res.status).toBe(404);
+  });
+
+  it('404 when teamId does not exist', async () => {
+    const { tenant, ws, proj, token } = await setupAdmin();
+    // Random uuid that isn't a team.
+    const res = await api()
+      .post(`/api/tenants/${tenant.slug}/workspaces/${ws.slug}/projects/${proj.slug}/issues`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ ...baseBody, teamId: '00000000-0000-0000-0000-000000000001' });
     expect(res.status).toBe(404);
   });
 });

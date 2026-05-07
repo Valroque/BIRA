@@ -28,6 +28,7 @@ export async function seed(knex: Knex): Promise<void> {
   // explicit deletes keep the seed readable + order-independent.
   await knex('issue_dependencies').del();
   await knex('issue_relates').del();
+  await knex('milestones').del();
   await knex('issues').del();
   await knex('workflow_transition_rules').del();
   await knex('workflow_transitions').del();
@@ -1087,6 +1088,59 @@ const persist = debounce((view) => {
     await knex('issue_dependencies').insert(depInserts);
   }
 
+  // ── Milestones (Acme only) ──────────────────────────────────────────
+  // Mirror the FE `SEED_MILESTONES` (web/src/fixtures.ts). The FE seed
+  // uses `m` in the uuid suffix which isn't a valid hex character — we
+  // swap to `a` here so the rows are storable; the FE fixture should
+  // align in the next slice (FE wiring) so seeded rows render under the
+  // same uuids on first load.
+  const milestoneSeeds: Array<{
+    id: string;
+    projectSlug: string;
+    name: string;
+    description: string | null;
+    date: string;
+  }> = [
+    {
+      id: '00000000-0000-0000-0000-000000001a01',
+      projectSlug: 'comet',
+      name: 'Mutual Fund Go-Live',
+      description: 'Launch the MF onboarding flow to all customers.',
+      date: '2026-05-28',
+    },
+    {
+      id: '00000000-0000-0000-0000-000000001a02',
+      projectSlug: 'comet',
+      name: 'Beta Launch',
+      description: 'Internal beta to the design + backend teams.',
+      date: '2026-05-01',
+    },
+    {
+      id: '00000000-0000-0000-0000-000000001a03',
+      projectSlug: 'orbit',
+      name: 'Dashboard v2 Ship',
+      description: null,
+      date: '2026-06-15',
+    },
+    {
+      id: '00000000-0000-0000-0000-000000001a04',
+      projectSlug: 'atlas',
+      name: 'Mapping API GA',
+      description: 'Stable v1 of the geospatial query API.',
+      date: '2026-04-30',
+    },
+  ];
+  await knex('milestones').insert(
+    milestoneSeeds.map((m) => ({
+      id: m.id,
+      workspaceId: acmeWorkspaceId,
+      projectId: projectIdFor(m.projectSlug),
+      name: m.name,
+      description: m.description,
+      date: m.date,
+    }))
+  );
+
   // ── DreamStreet: test-workspace + playground project ────────────────
   // Mirror of the acme block above, scoped down: one workspace, one
   // project, one default workflow, no transition rules, no issue links —
@@ -1217,25 +1271,105 @@ const persist = debounce((view) => {
     }))
   );
 
+  // ── Teams + memberships ──────────────────────────────────────────
+  // Three workspace-scoped teams so the Planner can demonstrate
+  // Team-on-Issue: a Task with `teamId` set + `assigneeUserId` null
+  // gets a greedy-picked member from the team's roster, and the
+  // workload heatmap shows how the load distributes across that
+  // team. Members rotate across the dreamstreet roster.
+  type DsTeamSeed = {
+    slug: string;
+    name: string;
+    color: string;
+    memberEmails: string[];
+  };
+  const dsTeamSeeds: DsTeamSeed[] = [
+    {
+      slug: 'frontend', name: 'Frontend', color: '#ec4899',
+      memberEmails: ['taylor@dreamstreet.io', 'noah@dreamstreet.io', 'sage@dreamstreet.io'],
+    },
+    {
+      slug: 'backend', name: 'Backend', color: '#14b8a6',
+      memberEmails: [
+        'elena@dreamstreet.io', 'casey@dreamstreet.io',
+        'mei@dreamstreet.io', 'kiran@dreamstreet.io',
+      ],
+    },
+    {
+      slug: 'design', name: 'Design', color: '#f59e0b',
+      memberEmails: ['harper@dreamstreet.io', 'robin@dreamstreet.io', 'alex@dreamstreet.io'],
+    },
+  ];
+
+  const dsTeamRows = (await knex('teams')
+    .insert(dsTeamSeeds.map((t) => ({
+      workspaceId: dsWorkspaceId,
+      slug: t.slug,
+      name: t.name,
+      color: t.color,
+      description: '',
+      createdByUserId: dsAdminId,
+    })))
+    .returning(['id', 'slug'])) as Array<{ id: string; slug: string }>;
+
+  const dsTeamIdBySlug = new Map(dsTeamRows.map((r) => [r.slug, r.id]));
+  const dsTeamIdForSlug = (slug: string): string => {
+    const id = dsTeamIdBySlug.get(slug);
+    if (!id) throw new Error(`Seed: playground team id for slug '${slug}' not found`);
+    return id;
+  };
+
+  // Flatten (team, member) pairs into team_memberships rows.
+  const dsTeamMembershipRows: Array<{ teamId: string; userId: string }> = [];
+  for (const t of dsTeamSeeds) {
+    for (const email of t.memberEmails) {
+      dsTeamMembershipRows.push({
+        teamId: dsTeamIdForSlug(t.slug),
+        userId: idFor(email),
+      });
+    }
+  }
+  await knex('team_memberships').insert(dsTeamMembershipRows);
+
   // Dummy issues — at least one in every status so the board renders all
   // columns populated. Reporter is the workspace admin; assignees rotate
-  // across the dreamstreet roster. No parent links / relates / depends-on
-  // — keep this surface simple, the acme set above already exercises that.
+  // across the dreamstreet roster. The flat top-level set seqs 1-14
+  // exercises the board; seqs 15-20 add an Epic with a chained-dependency
+  // subtree so the Planner has interesting greedy + cross-Epic-dep shapes
+  // to render. PLG-3 (top-level Task) depends on PLG-19 (inside the Epic)
+  // to demonstrate the disable-Epic cross-Epic-dependent surface.
   type DsIssueSeed = {
     seq: number;
     type: 'T' | 'B' | 'S' | 'E';
     title: string;
     status: 'backlog' | 'todo' | 'in-progress' | 'in-review' | 'done' | 'canceled';
     priority: 'urgent' | 'high' | 'med' | 'low' | 'none';
-    assigneeEmail: string;
+    /** Email of the explicit assignee. `null` when the issue is
+     *  attached to a team instead (mutual-exclusive — the BE rejects
+     *  both non-null in updateIssue, and the seed enforces the same
+     *  invariant before the insert). */
+    assigneeEmail: string | null;
+    /** Slug of an attached team. Mutual-exclusive with assigneeEmail.
+     *  When set, the planner's greedy scheduler picks a member of this
+     *  team for placement. */
+    teamSlug?: string;
     labels: string[];
     estimate: number | null;
+    /** Local seq of the parent issue (Epic). Undefined for top-level. */
+    parentSeq?: number;
+    /** Local seqs of predecessors — A.dependsOn[] in BIRA terms. */
+    dependsOnSeqs?: number[];
   };
   const dsIssueSeeds: DsIssueSeed[] = [
     // backlog
     { seq: 1, type: 'T', title: 'Spike: pick a charting library for the dashboard', status: 'backlog', priority: 'med', assigneeEmail: 'taylor@dreamstreet.io', labels: ['spike', 'frontend'], estimate: 3 },
     { seq: 2, type: 'B', title: 'Sidebar collapse animation stutters on Safari', status: 'backlog', priority: 'low', assigneeEmail: 'noah@dreamstreet.io', labels: ['frontend'], estimate: 2 },
-    { seq: 3, type: 'T', title: 'Wire up structured logs to log aggregator', status: 'backlog', priority: 'high', assigneeEmail: 'omar@dreamstreet.io', labels: ['observability'], estimate: 5 },
+    // PLG-3 depends on PLG-20 (Wire welcome email job — inside the
+    // Onboarding Epic below). When the user disables that Epic in the
+    // Planner, PLG-3 surfaces with the orphan-dep chip — the
+    // cross-Epic-dependent demo case. (depends_on is Task-only, so
+    // the dependency target must stay a Task.)
+    { seq: 3, type: 'T', title: 'Wire up structured logs to log aggregator', status: 'backlog', priority: 'high', assigneeEmail: 'omar@dreamstreet.io', labels: ['observability'], estimate: 5, dependsOnSeqs: [20] },
     // todo
     { seq: 4, type: 'T', title: 'Add E2E test for the login → workspace redirect', status: 'todo', priority: 'med', assigneeEmail: 'elena@dreamstreet.io', labels: ['testing'], estimate: 3 },
     { seq: 5, type: 'B', title: 'Empty state on Inbox shifts vertically on first paint', status: 'todo', priority: 'low', assigneeEmail: 'sage@dreamstreet.io', labels: ['frontend'], estimate: 1 },
@@ -1252,28 +1386,94 @@ const persist = debounce((view) => {
     { seq: 13, type: 'T', title: 'Add JWT refresh-token rotation', status: 'done', priority: 'urgent', assigneeEmail: 'jamie@dreamstreet.io', labels: ['auth'], estimate: 5 },
     // canceled
     { seq: 14, type: 'B', title: 'Investigate flaky tile-cache test (could not repro)', status: 'canceled', priority: 'low', assigneeEmail: 'casey@dreamstreet.io', labels: ['testing'], estimate: 1 },
+    // ── Onboarding revamp (Epic with mixed Story / Task / Bug children
+    // attached to all three teams) ──
+    // Demonstrates Team-on-Issue across the Planner: every leaf carries
+    // a team rather than an explicit assignee, so the greedy scheduler
+    // picks members from each team's roster. Cross-team dependencies
+    // (Frontend → Backend) show how the chain flows when the resolved
+    // assignees come from different rosters with different free-day
+    // cursors. PLG-16 is a Story with two Task children (typical
+    // hierarchy); PLG-19 is a Bug sitting directly under the Epic.
+    { seq: 15, type: 'E', title: 'Onboarding revamp', status: 'backlog', priority: 'high', assigneeEmail: null, teamSlug: 'design', labels: ['onboarding', 'q3'], estimate: null },
+    { seq: 16, type: 'S', title: 'Visual refresh of empty states', status: 'backlog', priority: 'high', assigneeEmail: null, teamSlug: 'design', labels: ['design', 'empty-states'], estimate: null, parentSeq: 15 },
+    { seq: 17, type: 'T', title: 'Audit empty-state copy and visuals', status: 'backlog', priority: 'med', assigneeEmail: null, teamSlug: 'design', labels: ['design', 'audit'], estimate: 3, parentSeq: 16 },
+    { seq: 18, type: 'T', title: 'Build new empty-state component', status: 'backlog', priority: 'high', assigneeEmail: null, teamSlug: 'frontend', labels: ['frontend', 'components'], estimate: 8, parentSeq: 16, dependsOnSeqs: [17] },
+    { seq: 19, type: 'B', title: 'Onboarding tour flickers on first paint', status: 'backlog', priority: 'urgent', assigneeEmail: null, teamSlug: 'frontend', labels: ['regression', 'onboarding'], estimate: 3, parentSeq: 15 },
+    { seq: 20, type: 'T', title: 'Wire welcome email job', status: 'backlog', priority: 'med', assigneeEmail: null, teamSlug: 'backend', labels: ['backend', 'email'], estimate: 5, parentSeq: 15, dependsOnSeqs: [18] },
   ];
 
-  await knex('issues').insert(
-    dsIssueSeeds.map((s) => ({
-      workspaceId: dsWorkspaceId,
-      projectId: dsProjectId,
-      key: `PLG-${s.seq}`,
-      seq: s.seq,
-      type: s.type,
-      status: s.status,
-      priority: s.priority,
-      title: s.title,
-      description: null,
-      labels: s.labels,
-      assigneeUserId: idFor(s.assigneeEmail),
-      reporterUserId: dsAdminId,
-      parentIssueId: null,
-      startDate: null,
-      endDate: null,
-      estimate: s.estimate,
-    }))
-  );
+  // Pass 1: insert all issues with parent_issue_id null. Pass 2 backfills
+  // parents; pass 3 inserts depends-on edges. Mirrors the Acme block — the
+  // playground gained these passes when seqs 15-20 (Epic + chain) landed.
+  // Mutual-exclusion (assignee XOR team) is enforced inline so seed data
+  // honours the same invariant the BE enforces in updateIssue.
+  const dsInsertedRows = (await knex('issues')
+    .insert(
+      dsIssueSeeds.map((s) => {
+        if (s.assigneeEmail && s.teamSlug) {
+          throw new Error(
+            `Seed PLG-${s.seq}: cannot set both assigneeEmail ('${s.assigneeEmail}') and teamSlug ('${s.teamSlug}') — mutual-exclusion`,
+          );
+        }
+        return {
+          workspaceId: dsWorkspaceId,
+          projectId: dsProjectId,
+          key: `PLG-${s.seq}`,
+          seq: s.seq,
+          type: s.type,
+          status: s.status,
+          priority: s.priority,
+          title: s.title,
+          description: null,
+          labels: s.labels,
+          assigneeUserId: s.assigneeEmail ? idFor(s.assigneeEmail) : null,
+          teamId: s.teamSlug ? dsTeamIdForSlug(s.teamSlug) : null,
+          reporterUserId: dsAdminId,
+          parentIssueId: null,
+          startDate: null,
+          endDate: null,
+          estimate: s.estimate,
+        };
+      }),
+    )
+    .returning(['id', 'seq'])) as Array<{ id: string; seq: number }>;
+
+  const dsIssueIdBySeq = new Map(dsInsertedRows.map((r) => [r.seq, r.id]));
+  const dsIssueIdForSeq = (seq: number): string => {
+    const id = dsIssueIdBySeq.get(seq);
+    if (!id) throw new Error(`Seed: playground issue id for seq ${seq} not found`);
+    return id;
+  };
+
+  // Pass 2: backfill parent_issue_id on Tasks/Stories that sit under Epics.
+  for (const s of dsIssueSeeds) {
+    if (s.parentSeq == null) continue;
+    await knex('issues').where('id', dsIssueIdForSeq(s.seq)).update({
+      parentIssueId: dsIssueIdForSeq(s.parentSeq),
+      updatedAt: knex.fn.now(),
+    });
+  }
+
+  // Pass 3: insert depends-on edges. Walk only the dependent side; that's
+  // the canonical direction for issue_dependencies (blockerId, dependentId).
+  const dsDepInserts: Array<{ blockerId: string; dependentId: string }> = [];
+  const dsDepSeen = new Set<string>();
+  for (const s of dsIssueSeeds) {
+    if (!s.dependsOnSeqs?.length) continue;
+    const dependentId = dsIssueIdForSeq(s.seq);
+    for (const blockerSeq of s.dependsOnSeqs) {
+      const blockerId = dsIssueIdForSeq(blockerSeq);
+      if (blockerId === dependentId) continue;
+      const key = `${blockerId}|${dependentId}`;
+      if (dsDepSeen.has(key)) continue;
+      dsDepSeen.add(key);
+      dsDepInserts.push({ blockerId, dependentId });
+    }
+  }
+  if (dsDepInserts.length > 0) {
+    await knex('issue_dependencies').insert(dsDepInserts);
+  }
 
   // Bump nextIssueNumber past the highest seeded seq for playground.
   const dsMaxSeq = dsIssueSeeds.reduce((m, s) => (s.seq > m ? s.seq : m), 0);

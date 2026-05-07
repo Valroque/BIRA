@@ -38,6 +38,7 @@ export interface RawIssueRow {
   description: string | null;
   labels: string[];
   assigneeUserId: string | null;
+  teamId: string | null;
   reporterUserId: string | null;
   parentIssueId: string | null;
   parent: string | null;
@@ -109,6 +110,7 @@ export function adaptIssueRow(raw: RawIssueRow): Issue {
   if (raw.dependsOn?.length) issue.dependsOn = [...raw.dependsOn];
   if (raw.dependedOnBy?.length) issue.dependedOnBy = [...raw.dependedOnBy];
   if (raw.description) issue.description = raw.description;
+  if (raw.teamId) issue.teamId = raw.teamId;
 
   return issue;
 }

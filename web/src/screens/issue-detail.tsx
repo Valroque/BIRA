@@ -7,6 +7,7 @@ import {
   type RenderAttachment,
 } from '../components/composer';
 import { IssuePickerModal } from '../components/issue-picker';
+import { OwnerPicker } from '../components/owner-picker';
 import { useDismiss } from '../components/use-dismiss';
 // `ISSUES` is referenced ONLY for the design-canvas reference render
 // (default-arg fallback below). Live data flows through `useIssues()`.
@@ -260,7 +261,7 @@ function IssueDetail({ issue = ISSUES[0] }: { issue?: Issue }) {
   // the next successful patch for the same key. Slice 7 adds `related` /
   // `dependsOn` for link-mutation feedback (cycle / Task-only / etc.).
   const [errors, setErrors] = useState<Partial<Record<
-    'status' | 'priority' | 'assignee' | 'startDate' | 'endDate' | 'estimate'
+    'status' | 'priority' | 'owner' | 'startDate' | 'endDate' | 'estimate'
     | 'parent' | 'related' | 'dependsOn', string
   >>>({});
   const clearError = (k: keyof typeof errors) => setErrors((p) => {
@@ -294,6 +295,20 @@ function IssueDetail({ issue = ISSUES[0] }: { issue?: Issue }) {
       clearError('endDate');
     }
   };
+  // Owner — single picker that switches between Person and Team. Mutual
+  // exclusion is enforced server-side, but we send both fields in one PATCH
+  // so the optimistic state matches what the BE will return (the BE auto-
+  // clears the other side too, but the round-trip lag is visible without
+  // the optimistic clear).
+  const setOwner = async (next: { assigneeUserId: string | null; teamId: string | null }) => {
+    const result = await patchIssue(issue.key, {
+      assigneeUserId: next.assigneeUserId,
+      teamId: next.teamId,
+    });
+    if (!result.ok) setError('owner', result.message);
+    else clearError('owner');
+  };
+
   // Depends-on (predecessors) and Related links read directly off the
   // BE-backed `issue` — slice 7 wired both into `useIssues()` so optimistic
   // mutations show up here without a local mirror. The cycle check still
@@ -649,10 +664,13 @@ function IssueDetail({ issue = ISSUES[0] }: { issue?: Issue }) {
               <Priority p={issue.priority} /><span>{PRIORITY_LABEL[issue.priority]}</span>
             </span>
           </Meta>
-          <Meta label="Assignee">
-            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-              <Avatar name={assigneeName} size={20} /><span>{assigneeName}</span>
-            </span>
+          <Meta label="Owner" error={errors.owner}>
+            <OwnerPicker
+              assigneeUserId={issue.assigneeUserId}
+              teamId={issue.teamId ?? null}
+              onChange={setOwner}
+              variant="inspector"
+            />
           </Meta>
           <Meta label="Reporter">
             <Link

@@ -2,6 +2,7 @@ import { BrowserRouter, Routes, Route, Navigate, Outlet, useLocation, useParams,
 import { AppShell } from './components/app-shell';
 import { ErrorState } from './components/states';
 import { ProjectsProvider, useProjects } from './state/projects';
+import { MilestonesProvider } from './state/milestones';
 import { WorkspacesProvider } from './state/workspaces';
 import { IssuesProvider } from './state/issues';
 import { UsersProvider } from './state/users';
@@ -9,6 +10,7 @@ import { WorkflowsProvider } from './state/workflows';
 import { WorkspaceMembersProvider } from './state/workspace-members';
 import { TenantMembersProvider } from './state/tenant-members';
 import { TeamsProvider } from './state/teams';
+import { PlannerProvider } from './state/planner';
 import { useAuth } from './state/auth';
 import { LoginPage } from './screens/login';
 import { TenantsPage } from './screens/tenants';
@@ -27,9 +29,11 @@ import { ProjectSettingsPage } from './screens/project-settings';
 import { WorkflowsPage } from './screens/workflows';
 import { InboxPage } from './screens/inbox';
 import { MyIssuesPage, AllIssuesPage } from './screens/workspace-issues';
+import { PlannerPage } from './screens/planner';
 import { TeamsPage, TeamDetailPage } from './screens/teams';
 import { MemberProfilePage } from './screens/member-profile';
 import { ProjectMembersPage } from './screens/project-members';
+import { ProjectMilestonesPage } from './screens/project-milestones';
 import { DesignCanvasPage } from './screens/design-canvas';
 
 function RequireAuth() {
@@ -65,6 +69,7 @@ function WorkspaceLayout() {
   if (pathname.endsWith('/inbox')) sidebarActive = 'inbox';
   else if (pathname.endsWith('/my-issues')) sidebarActive = 'my-issues';
   else if (pathname.endsWith('/all-issues')) sidebarActive = 'all-issues';
+  else if (pathname.endsWith('/planner')) sidebarActive = 'planner';
   else if (pathname.endsWith('/projects')) sidebarActive = 'all-projects';
   else if (pathname.endsWith('/workflows')) sidebarActive = 'workflows';
   else if (/\/teams\/([^/]+)/.test(pathname)) {
@@ -77,6 +82,7 @@ function WorkspaceLayout() {
   else if (project) {
     if (pathname.endsWith('/board')) sidebarActive = `${project}-board`;
     else if (pathname.endsWith('/list')) sidebarActive = `${project}-list`;
+    else if (pathname.endsWith('/milestones')) sidebarActive = `${project}-milestones`;
     else if (pathname.includes('/workflow')) sidebarActive = `${project}-workflow`;
     else if (pathname.includes('/issue/')) sidebarActive = `${project}-list`;
     // overview / members / project-settings → highlight the project itself.
@@ -89,19 +95,23 @@ function WorkspaceLayout() {
   // state doesn't bleed.
   return (
     <ProjectsProvider key={`${tenant}/${workspace}`} tenant={tenant} workspace={workspace ?? ''}>
-      <UsersProvider tenant={tenant} workspace={workspace ?? ''}>
-        <IssuesProvider tenant={tenant} workspace={workspace ?? ''}>
-          <WorkflowsProvider tenant={tenant} workspace={workspace ?? ''}>
-            <WorkspaceMembersProvider tenant={tenant} workspace={workspace ?? ''}>
-              <TeamsProvider tenant={tenant} workspace={workspace ?? ''}>
-                <AppShell sidebarActive={sidebarActive}>
-                  <Outlet />
-                </AppShell>
-              </TeamsProvider>
-            </WorkspaceMembersProvider>
-          </WorkflowsProvider>
-        </IssuesProvider>
-      </UsersProvider>
+      <MilestonesProvider tenant={tenant} workspace={workspace ?? ''}>
+        <UsersProvider tenant={tenant} workspace={workspace ?? ''}>
+          <IssuesProvider tenant={tenant} workspace={workspace ?? ''}>
+            <WorkflowsProvider tenant={tenant} workspace={workspace ?? ''}>
+              <WorkspaceMembersProvider tenant={tenant} workspace={workspace ?? ''}>
+                <TeamsProvider tenant={tenant} workspace={workspace ?? ''}>
+                  <PlannerProvider tenant={tenant} workspace={workspace ?? ''}>
+                    <AppShell sidebarActive={sidebarActive}>
+                      <Outlet />
+                    </AppShell>
+                  </PlannerProvider>
+                </TeamsProvider>
+              </WorkspaceMembersProvider>
+            </WorkflowsProvider>
+          </IssuesProvider>
+        </UsersProvider>
+      </MilestonesProvider>
     </ProjectsProvider>
   );
 }
@@ -173,6 +183,7 @@ export default function App() {
               <Route path="/:tenant/:workspace/inbox" element={<InboxPage />} />
               <Route path="/:tenant/:workspace/my-issues" element={<MyIssuesPage />} />
               <Route path="/:tenant/:workspace/all-issues" element={<AllIssuesPage />} />
+              <Route path="/:tenant/:workspace/planner" element={<PlannerPage />} />
               <Route path="/:tenant/:workspace/projects" element={<ProjectsPage />} />
               <Route path="/:tenant/:workspace/workflows" element={<WorkflowsPage />} />
               <Route path="/:tenant/:workspace/teams" element={<TeamsPage />} />
@@ -183,6 +194,7 @@ export default function App() {
               <Route path="/:tenant/:workspace/:project/settings" element={<ProjectSettingsPage />} />
               <Route path="/:tenant/:workspace/:project/board" element={<BoardPage />} />
               <Route path="/:tenant/:workspace/:project/list" element={<ListPage />} />
+              <Route path="/:tenant/:workspace/:project/milestones" element={<ProjectMilestonesPage />} />
               <Route path="/:tenant/:workspace/:project/workflow" element={<WorkflowPage />} />
               <Route path="/:tenant/:workspace/:project/issue/new" element={<CreateIssuePage />} />
               <Route path="/:tenant/:workspace/:project/issue/:key" element={<IssueDetailPage />} />

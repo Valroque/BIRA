@@ -62,6 +62,9 @@ themselves live at [`.claude/rules/v1-constraints.md`](.claude/rules/v1-constrai
    list in `.claude/rules/v1-constraints.md`.
 8. **State**: in-memory fixtures only (`src/fixtures.ts`), plus a few
    `localStorage` keys: `bira:list-layout` (column UI prefs, tenant-unaware),
+   `bira:sidebar-collapsed` (boolean — sidebar rail expanded vs 52px,
+   tenant-unaware; written by `AppShell` + the chevron toggle in
+   `BiraBrand`),
    `bira:issues-view` (List vs Gantt toggle on the workspace + project
    issue lists, tenant-unaware), `bira:issues-state:<tenant>:<workspace>:<persistKey>`
    (per-page toolbar state — `groupByList` + `groupByGantt` (independent
@@ -76,7 +79,8 @@ themselves live at [`.claude/rules/v1-constraints.md`](.claude/rules/v1-constrai
    `Workspace.archived` on read; mirrors backend `workspaces.status`),
    `bira:projects:<tenant>:<workspace>`
    (per-workspace project list — only the demo `acme-corp/acme` workspace
-   gets `SEED_PROJECTS` seeded), `bira:board-columns:<tenant>:<workspace>:<project>`
+   gets `SEED_PROJECTS` seeded),
+   `bira:board-columns:<tenant>:<workspace>:<project>`
    (per-project board config), and `bira:issue-overrides:v2:<tenant>:<workspace>`
    (per-workspace `Partial<Issue>` patches — slice 5 (2026-05-05) flipped
    `IssuesProvider` to fetch live from the BE on mount and treat this
@@ -87,7 +91,13 @@ themselves live at [`.claude/rules/v1-constraints.md`](.claude/rules/v1-constrai
    using this path. The `v2` prefix was bumped on 2026-05-05 when
    `Issue.id`/`project`/`assignee` were renamed to
    `key`/`projectId` (uuid)/`assigneeUserId` (uuid|null) — pre-bump blobs
-   are silently ignored).
+   are silently ignored), and `bira:planner:<tenant>:<workspace>` (per-workspace
+   ephemeral Planner scenario state — priority order, disabled epics,
+   plan-only assignee overrides + team attachments + pinned dates, and
+   the visible time window. Per `memory/project_planning_vs_reality_gantt.md`
+   the planner is a separate product from the planning gantt: its writes
+   never touch `bira:issue-overrides:v2` and never hit the BE. Resetting
+   the planner removes this key entirely).
    Tenant + workspace + project come from the URL via
    `useTenantContext()` in `shell.tsx` — never hardcode `/acme-corp/acme/comet/`.
    Read tenant data via `useTenants()` from `src/state/tenants.tsx`, workspace data via

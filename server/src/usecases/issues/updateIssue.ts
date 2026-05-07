@@ -1,3 +1,4 @@
+import { db } from '../../db/knex.js';
 import { AppError } from '../../lib/errors.js';
 import * as issueService from '../../services/issueService.js';
 import type { Issue } from '../../entities/Issue.js';
@@ -17,6 +18,9 @@ export interface UpdateIssuePatch {
   status?: StatusId;
   priority?: Priority;
   assigneeUserId?: string | null;
+  // FK to `teams.id`. Mutex with `assigneeUserId` — see notes inside
+  // the body of `updateIssue` for the null-vs-absent rules.
+  teamId?: string | null;
   labels?: string[];
   startDate?: string | null;
   endDate?: string | null;
@@ -90,6 +94,20 @@ export async function updateIssue(
     }
   }
 
+  // Team-on-Issue mutex (slice 1): the caller cannot ask to set BOTH
+  // assignee and team to non-null in a single patch — that's a 400. The
+  // null-vs-absent semantics for the rest of the mutex (auto-clearing
+  // the other side when one is set) are handled below, after we've
+  // loaded the existing row.
+  if (
+    patch.assigneeUserId !== undefined &&
+    patch.assigneeUserId !== null &&
+    patch.teamId !== undefined &&
+    patch.teamId !== null
+  ) {
+    throw new AppError('Cannot set both assignee and team', 400);
+  }
+
   // Slice C — description attachment refs. Mirrors createIssue: max 20,
   // workspace-scoped existence check, allowed on every issue type.
   if (patch.descriptionAttachmentIds !== undefined) {
@@ -136,6 +154,63 @@ export async function updateIssue(
     throw new AppError('endDate must be on or after startDate', 400);
   }
 
+  // Team-on-Issue mutex auto-clear (slice 1).
+  //
+  // Subtle null-vs-absent rules — read carefully before tweaking:
+  //
+  //   patch.assigneeUserId === undefined  → caller didn't touch it
+  //   patch.assigneeUserId === null       → caller wants to CLEAR it
+  //   patch.assigneeUserId === <uuid>     → caller wants to SET it
+  //
+  // The "both non-null" case is already a 400 above. Here we handle the
+  // remaining cases:
+  //
+  //  - SET assignee + existing teamId is non-null → also clear teamId
+  //    (assigning to a person implicitly takes the issue off the team).
+  //  - SET teamId + existing assigneeUserId is non-null → also clear
+  //    assigneeUserId (assigning to a team implicitly removes the
+  //    individual assignee).
+  //  - CLEAR assignee (patch.assigneeUserId === null) → leave teamId
+  //    alone. The user is just clearing the assignee; no implicit
+  //    move-to-team.
+  //  - CLEAR teamId (patch.teamId === null) → leave assigneeUserId
+  //    alone. Same reason in the inverse direction.
+  //  - Either field absent (undefined) → no implication for the other.
+  //
+  // We mutate a copy of the patch so the caller's object stays
+  // untouched and the eventual updateById sees both columns when an
+  // auto-clear fires.
+  const writePatch: typeof patch = { ...patch };
+  if (
+    patch.assigneeUserId !== undefined &&
+    patch.assigneeUserId !== null &&
+    existing.teamId !== null
+  ) {
+    writePatch.teamId = null;
+  }
+  if (
+    patch.teamId !== undefined &&
+    patch.teamId !== null &&
+    existing.assigneeUserId !== null
+  ) {
+    writePatch.assigneeUserId = null;
+  }
+
+  // Team-existence + workspace-scope check. Mirrors the createIssue
+  // flow: cross-workspace teams are treated as not-found (no info
+  // leak). Separate query, no JOIN — follows the BE "no JOINs without
+  // approval" rule. Only runs when the caller is explicitly setting a
+  // team (non-null); clearing or absence skip the check.
+  if (patch.teamId !== undefined && patch.teamId !== null) {
+    const team = (await db('teams')
+      .where('id', patch.teamId)
+      .select(['id', 'workspace_id'])
+      .first()) as { id: string; workspaceId: string } | undefined;
+    if (!team || team.workspaceId !== workspaceId) {
+      throw new AppError(`Team '${patch.teamId}' not found`, 404);
+    }
+  }
+
   // Workflow status guard (slice 5). Skipped when actor context is
   // missing (internal callers) or when status is unchanged.
   if (
@@ -156,7 +231,7 @@ export async function updateIssue(
     // staying quiet for now to keep test output clean.
   }
 
-  const updated = await issueService.updateById(existing.id, patch);
+  const updated = await issueService.updateById(existing.id, writePatch);
   if (!updated) {
     throw new AppError(`Issue '${key}' not found`, 404);
   }

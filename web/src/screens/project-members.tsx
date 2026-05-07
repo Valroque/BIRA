@@ -92,7 +92,6 @@ function ProjectMembersInner() {
     setActionError(null);
     try {
       await grantTeam(teamId, role);
-      setShowAddTeam(false);
     } catch (err) {
       handleErr(err, 'Failed to add team');
     }
@@ -117,7 +116,6 @@ function ProjectMembersInner() {
     setActionError(null);
     try {
       await grantUser(userId, role);
-      setShowAddUser(false);
     } catch (err) {
       handleErr(err, 'Failed to add user');
     }

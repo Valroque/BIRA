@@ -30,7 +30,7 @@ import { useDismiss } from './use-dismiss';
 import { ProjectBadge } from './project-chip';
 import { EmptyState } from './states';
 import { IssuesGantt, type GanttGranularity, type GanttMode } from './issues-gantt';
-import { ISSUE_TYPE_NAMES, type Issue, type IssueTypeLetter, type Project } from '../fixtures';
+import { ISSUE_TYPE_NAMES, type Issue, type IssueTypeLetter, type Milestone, type Project } from '../fixtures';
 import { useProjects } from '../state/projects';
 import { useUsers, UNKNOWN_USER_LABEL, type WorkspaceUser } from '../state/users';
 
@@ -143,6 +143,13 @@ export interface IssuesTableProps {
    * `'planning'` so unwitting callers keep the historical behaviour.
    */
   ganttMode?: GanttMode;
+  /**
+   * Project-level milestones. Forwarded to the Gantt only — the List view
+   * ignores them. Workspace-level pages don't pass anything (milestones
+   * belong to a single project). Out-of-range milestones are filtered
+   * inside `IssuesGantt`.
+   */
+  milestones?: Milestone[];
 }
 
 interface PersistedView {
@@ -196,6 +203,7 @@ export function IssuesTable(props: IssuesTableProps) {
     emptyAction,
     persistKey,
     ganttMode = 'planning',
+    milestones,
   } = props;
 
   // Project-scoped pages drop the 'project' option from the picker so the user
@@ -487,6 +495,7 @@ export function IssuesTable(props: IssuesTableProps) {
             hierarchical={level === 'all'}
             granularity={granularity}
             mode={ganttMode}
+            milestones={milestones}
           />
         ) : (
           groups.map((g) => {
