@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <defs>
+    <linearGradient id="biraGradient" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#4f46e5"/>
+      <stop offset="100%" stop-color="#6366f1"/>
+    </linearGradient>
+  </defs>
+  <rect width="32" height="32" rx="7" fill="url(#biraGradient)"/>
+  <text x="16" y="22" text-anchor="middle"
+        font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace"
+        font-size="18" font-weight="700" fill="#ffffff"
+        letter-spacing="-0.5">B</text>
+</svg>

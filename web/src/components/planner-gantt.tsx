@@ -70,7 +70,7 @@ import { Icon } from './icons';
 import { TypeChip, IssueId, Avatar } from './shell';
 import { useDismiss } from './use-dismiss';
 import { Modal, ModalHeader, ModalBody, ModalFooter } from './modal';
-import { type Issue } from '../fixtures';
+import { type Issue, type Milestone } from '../fixtures';
 import { useProjects } from '../state/projects';
 import { useUsers } from '../state/users';
 import { useTeams } from '../state/teams';
@@ -111,6 +111,38 @@ export interface PlannerGanttProps {
   workspace: string;
   /** today as ISO YYYY-MM-DD. Passed in for purity / SSR-friendliness. */
   today: string;
+  /** Hierarchy collapse state lifted to the page so the page-level
+   *  "Collapse all" button can drive it. Set of container issue keys
+   *  (Story/Epic) that are collapsed. */
+  collapsedNodes: Set<string>;
+  setCollapsedNodes: React.Dispatch<React.SetStateAction<Set<string>>>;
+  /** Assignee-group collapse state, lifted alongside `collapsedNodes` so
+   *  the same toolbar button can collapse all groups in assignee mode.
+   *  Keys are user UUIDs, plus `UNSCHEDULED_GROUP_KEY` for the
+   *  unscheduled bucket. */
+  collapsedUserGroups: Set<string>;
+  setCollapsedUserGroups: React.Dispatch<React.SetStateAction<Set<string>>>;
+  /** Workspace milestones to surface as flag chips in the header + dashed
+   *  vertical guides across all rows. Read-only on the planner — editing
+   *  stays on the milestones surface (reality), the planner just visualises
+   *  them as deadline overlays. Empty / undefined → no overlay. */
+  milestones?: Milestone[];
+}
+
+// Pre-computed milestone position used by both the header flag chips and
+// the per-row vertical dashed lines. Mirrors `MilestoneMark` in
+// issues-gantt.tsx — the planner is a separate product, so the two stay
+// independent rather than sharing a util module.
+interface PlannerMilestoneMark {
+  id: string;
+  name: string;
+  description?: string;
+  date: string;
+  /** Centre x in pixels within the timeline track. */
+  centre: number;
+  /** Vermillion when overdue, accent when upcoming. */
+  color: string;
+  isOverdue: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -121,12 +153,6 @@ export interface PlannerGanttProps {
 const ROW_HEIGHT = 32;
 const LABEL_COL_WIDTH = 360;
 const HEADER_HEIGHT = 56;
-/** Slice 10 (2026-05-07) — height of the in-gantt grouping-mode toggle
- *  strip (Hierarchy · By assignee). Sits sticky-top above the existing
- *  month/day header so the pivot stays visible while scrolling the body.
- *  The page-level Gantt/Workload tabs live one level up in
- *  `screens/planner.tsx`; this strip is local to PlannerGantt. */
-const TOGGLE_STRIP_HEIGHT = 32;
 /** Group-header row height for the assignee-grouped view (slice 10).
  *  Same value as IssuesGantt's GROUP_HEADER_HEIGHT — chose deliberately
  *  to keep the visual rhythm consistent across the two surfaces. */
@@ -442,16 +468,16 @@ function groupSpanFromIssues(items: Issue[]): { startDay: number; endDay: number
 /** Sentinel key used in place of a UUID for the "Unscheduled" pseudo-group.
  *  Doubles as the React key for the group header row. Picked to avoid
  *  collisions with any real UUID. */
-const UNSCHEDULED_GROUP_KEY = '__unscheduled__';
+export const UNSCHEDULED_GROUP_KEY = '__unscheduled__';
 
 // ---------------------------------------------------------------------------
 // PlannerGantt
 // ---------------------------------------------------------------------------
 
-export function PlannerGantt({ issues, tenant, workspace, today }: PlannerGanttProps) {
+export function PlannerGantt({ issues, tenant, workspace, today, collapsedNodes, setCollapsedNodes, collapsedUserGroups, setCollapsedUserGroups, milestones }: PlannerGanttProps) {
   const {
     plan, setWindow, setPinnedDates, setAssigneeOverride, clearAssigneeOverride,
-    setPriority, toggleDisabled, setGanttGroupBy,
+    setPriority, toggleDisabled,
   } = usePlanner();
   // Slice 10 (2026-05-07) — UUID resolver for the assignee-grouped view's
   // group headers. UUIDs never render — `getUser(id)?.displayName` is the
@@ -530,15 +556,25 @@ export function PlannerGantt({ issues, tenant, workspace, today }: PlannerGanttP
     });
   }, [filteredRendered, plan.priority]);
 
-  // Hierarchical flatten — same shape as IssuesGantt's tree. Collapse is
-  // local component state: there is no group axis to lift collapsed-ness
-  // up to.
-  const [collapsedNodes, setCollapsedNodes] = useState<Set<string>>(() => new Set());
+  // Hierarchical flatten — same shape as IssuesGantt's tree. Collapse
+  // state is lifted to the page (planner.tsx) so the same toggle in the
+  // Issue header column can flip both hierarchy + assignee group modes.
   const toggleNode = (id: string) => setCollapsedNodes((prev) => {
     const next = new Set(prev);
     if (next.has(id)) next.delete(id); else next.add(id);
     return next;
   });
+
+  // All container issue keys that are actually parents in the visible
+  // tree — used by the Issue-header collapse-all toggle.
+  const allContainerKeysInTree = useMemo(() => {
+    const keys = new Set(orderedRendered.map((i) => i.key));
+    const set = new Set<string>();
+    for (const i of orderedRendered) {
+      if (i.parent && keys.has(i.parent)) set.add(i.parent);
+    }
+    return set;
+  }, [orderedRendered]);
 
   const tree = useMemo(
     () => buildAndFlattenTree(orderedRendered, collapsedNodes).filter((row) => !row.parentChainCollapsed),
@@ -558,11 +594,9 @@ export function PlannerGantt({ issues, tenant, workspace, today }: PlannerGanttP
   // The cost is small — one O(n) pass over `orderedRendered` plus one
   // sort per group on the placed leaves.
   //
-  // Collapse-state is local React state (Set<groupKey>) — same
-  // pattern as the hierarchy view's `collapsedNodes`. Not persisted:
-  // the toggle's session-only ergonomics matter less than keeping the
-  // planner blob tight.
-  const [collapsedUserGroups, setCollapsedUserGroups] = useState<Set<string>>(() => new Set());
+  // Collapse-state is lifted to the page (planner.tsx) so the
+  // single "Collapse all / Expand all" toggle in the Issue header
+  // can flip it alongside `collapsedNodes`.
   const toggleUserGroup = useCallback((groupKey: string) => {
     setCollapsedUserGroups((prev) => {
       const next = new Set(prev);
@@ -657,6 +691,28 @@ export function PlannerGantt({ issues, tenant, workspace, today }: PlannerGanttP
   const months = useMemo(() => buildMonthSpans(range, dayPx), [range, dayPx]);
   const ticks = useMemo(() => buildDayTicks(range, dayPx, today_n, weekly), [range, dayPx, today_n, weekly]);
   const todayOffset = (today_n - range.start) * dayPx + dayPx / 2;
+
+  // Resolve milestones to pixel positions once per relevant change. Out-of-window
+  // milestones are dropped so a deadline two years off doesn't squat at the right edge.
+  const milestoneMarks = useMemo<PlannerMilestoneMark[]>(() => {
+    if (!milestones || milestones.length === 0) return [];
+    const out: PlannerMilestoneMark[] = [];
+    for (const m of milestones) {
+      const day = toDayNumber(m.date);
+      if (day < range.start || day > range.end) continue;
+      const isOverdue = m.date < today;
+      out.push({
+        id: m.id,
+        name: m.name,
+        description: m.description,
+        date: m.date,
+        centre: (day - range.start) * dayPx + dayPx / 2,
+        color: isOverdue ? 'var(--blocked)' : 'var(--accent)',
+        isOverdue,
+      });
+    }
+    return out;
+  }, [milestones, range.start, range.end, dayPx, today]);
 
   // ---- Edit popover state -----------------------------------------------
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -1054,13 +1110,32 @@ export function PlannerGantt({ issues, tenant, workspace, today }: PlannerGanttP
     );
   }
 
-  // Slice 10 (2026-05-07) — internal grouping-mode toggle. Lives inside
-  // PlannerGantt (not the page-level toolbar in `screens/planner.tsx`)
-  // because the toggle only affects the Gantt's y-axis — Workload has
-  // its own pivot semantics. Visual shape mirrors the Gantt/Workload
-  // tab strip one level up so the two pivots read as the same primitive.
+  // Grouping mode is owned by the planner state and driven from the
+  // page-level toolbar's Group: select (see `screens/planner.tsx`).
   const groupBy = plan.ganttGroupBy;
   const groupedView = groupBy === 'assignee';
+
+  // Issue-header "Collapse all / Expand all" — toggles whichever axis is
+  // currently active. Hierarchy mode → containers (Story/Epic). Assignee
+  // mode → user groups (the `userGroups` set, including the unscheduled
+  // bucket). The button is hidden when there's nothing collapsible.
+  const allUserGroupKeys = useMemo(
+    () => new Set(userGroups.map((g) => g.key)),
+    [userGroups],
+  );
+  const isAnyCollapsed = groupedView
+    ? collapsedUserGroups.size > 0
+    : collapsedNodes.size > 0;
+  const collapsibleCount = groupedView
+    ? allUserGroupKeys.size
+    : allContainerKeysInTree.size;
+  const handleToggleCollapseAll = useCallback(() => {
+    if (groupedView) {
+      setCollapsedUserGroups((prev) => (prev.size > 0 ? new Set() : new Set(allUserGroupKeys)));
+    } else {
+      setCollapsedNodes((prev) => (prev.size > 0 ? new Set() : new Set(allContainerKeysInTree)));
+    }
+  }, [groupedView, allUserGroupKeys, allContainerKeysInTree, setCollapsedUserGroups, setCollapsedNodes]);
 
   return (
     <div style={{ display: 'inline-block', minWidth: '100%' }}>
@@ -1070,67 +1145,49 @@ export function PlannerGantt({ issues, tenant, workspace, today }: PlannerGanttP
           gridTemplateColumns: `${LABEL_COL_WIDTH}px ${timelineWidth}px`,
         }}
       >
-        {/* Slice 10: grouping-mode toggle strip. Spans both grid columns
-            so it reads as one bar; sticky-top alongside the existing
-            month/day header so it stays visible while scrolling. */}
+        {/* Header — issue label column. Holds the "Collapse all / Expand
+            all" toggle so it sits adjacent to the chevrons it controls,
+            which is the obvious spot in trackers like Linear/Asana. */}
         <div
           style={{
-            gridColumn: '1 / -1',
-            position: 'sticky', top: 0, zIndex: 5,
-            background: 'var(--bg)',
-            borderBottom: '1px solid var(--border-muted)',
-            height: TOGGLE_STRIP_HEIGHT,
-            display: 'flex', alignItems: 'center', gap: 2,
-            padding: '0 12px',
-          }}
-        >
-          {(['hierarchy', 'assignee'] as const).map((id) => {
-            const isActive = groupBy === id;
-            const label = id === 'hierarchy' ? 'Hierarchy' : 'By assignee';
-            return (
-              <button
-                key={id}
-                type="button"
-                onClick={() => setGanttGroupBy(id)}
-                style={{
-                  padding: '4px 10px', fontSize: 12,
-                  fontWeight: isActive ? 600 : 500,
-                  cursor: 'pointer',
-                  color: isActive ? 'var(--fg)' : 'var(--fg-muted)',
-                  background: isActive ? 'var(--bg-subtle)' : 'transparent',
-                  border: '1px solid',
-                  borderColor: isActive ? 'var(--border)' : 'transparent',
-                  borderRadius: 'var(--r-2)',
-                }}
-                aria-pressed={isActive}
-              >
-                {label}
-              </button>
-            );
-          })}
-        </div>
-
-        {/* Header — issue label column */}
-        <div
-          style={{
-            position: 'sticky', top: TOGGLE_STRIP_HEIGHT, left: 0, zIndex: 4,
+            position: 'sticky', top: 0, left: 0, zIndex: 4,
             background: 'var(--bg)',
             borderRight: '1px solid var(--border)',
             borderBottom: '1px solid var(--border)',
             height: HEADER_HEIGHT,
-            display: 'flex', alignItems: 'flex-end',
-            padding: '0 16px 8px',
+            display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between',
+            gap: 8,
+            padding: '0 12px 8px 16px',
             fontSize: 10.5, fontWeight: 600, color: 'var(--fg-muted)',
             textTransform: 'uppercase', letterSpacing: 0.5,
           }}
         >
-          Issue
+          <span>Issue</span>
+          {collapsibleCount > 0 && (
+            <button
+              type="button"
+              onClick={handleToggleCollapseAll}
+              className="btn btn-sm"
+              title={isAnyCollapsed
+                ? (groupedView ? 'Expand all assignees' : 'Expand all stories & epics')
+                : (groupedView ? 'Collapse all assignees' : 'Collapse all stories & epics')}
+              aria-label={isAnyCollapsed ? 'Expand all' : 'Collapse all'}
+              style={{
+                height: 22, padding: '0 8px', gap: 4,
+                fontSize: 11, fontWeight: 500, letterSpacing: 0,
+                textTransform: 'none', color: 'var(--fg)',
+              }}
+            >
+              <Icon name={isAnyCollapsed ? 'chevronsRight' : 'chevronsLeft'} size={12} />
+              {isAnyCollapsed ? 'Expand all' : 'Collapse all'}
+            </button>
+          )}
         </div>
 
         {/* Header — month + day strip */}
         <div
           style={{
-            position: 'sticky', top: TOGGLE_STRIP_HEIGHT, zIndex: 3,
+            position: 'sticky', top: 0, zIndex: 3,
             background: 'var(--bg)',
             borderBottom: '1px solid var(--border)',
             height: HEADER_HEIGHT,
@@ -1162,6 +1219,12 @@ export function PlannerGantt({ issues, tenant, workspace, today }: PlannerGanttP
               borderTop: '1px solid var(--border-muted)',
             }}
           >
+            {/* Milestone flag chips — sit above the day ticks (zIndex 2) so
+                they read first; truncated so a long name doesn't overlap a
+                neighbouring chip too aggressively. */}
+            {milestoneMarks.map((mk) => (
+              <PlannerMilestoneFlag key={`flag-${mk.id}`} mark={mk} todayIso={today} />
+            ))}
             {ticks.map((t) => (
               <div
                 key={t.day}
@@ -1242,6 +1305,7 @@ export function PlannerGantt({ issues, tenant, workspace, today }: PlannerGanttP
               weekly={weekly}
               ticks={ticks}
               todayOffset={todayOffset}
+              milestoneMarks={milestoneMarks}
               depth={row.depth}
               hasChildren={row.hasChildren}
               isExpanded={row.isExpanded}
@@ -1313,6 +1377,7 @@ export function PlannerGantt({ issues, tenant, workspace, today }: PlannerGanttP
                 weekly={weekly}
                 ticks={ticks}
                 todayOffset={todayOffset}
+                milestoneMarks={milestoneMarks}
               />
               {!isCollapsed && group.items.map((issue) => {
                 const placed = schedule.scheduled.get(issue.key);
@@ -1530,11 +1595,12 @@ interface PlannerUserGroupRowProps {
   weekly: boolean;
   ticks: DayTick[];
   todayOffset: number;
+  milestoneMarks?: PlannerMilestoneMark[];
 }
 
 function PlannerUserGroupRow({
   group, isCollapsed, onToggle,
-  range, dayPx, timelineWidth, weekly, ticks, todayOffset,
+  range, dayPx, timelineWidth, weekly, ticks, todayOffset, milestoneMarks,
 }: PlannerUserGroupRowProps) {
   const isUnscheduled = group.key === UNSCHEDULED_GROUP_KEY;
   // Unscheduled never has an aggregate span (its leaves are by
@@ -1604,6 +1670,7 @@ function PlannerUserGroupRow({
           weekly={weekly}
           todayOffset={todayOffset}
           height={GROUP_HEADER_HEIGHT}
+          milestoneMarks={milestoneMarks}
         />
         {span && (
           <div
@@ -1637,6 +1704,7 @@ interface RowChromeProps {
   weekly: boolean;
   ticks: DayTick[];
   todayOffset: number;
+  milestoneMarks?: PlannerMilestoneMark[];
 }
 
 interface PlannerRowProps extends RowChromeProps {
@@ -1729,7 +1797,7 @@ interface PlannerRowProps extends RowChromeProps {
 
 function PlannerRow({
   issue, parentKey, tenant, workspace,
-  range, dayPx, timelineWidth, weekly, ticks, todayOffset,
+  range, dayPx, timelineWidth, weekly, ticks, todayOffset, milestoneMarks,
   depth = 0, hasChildren = false, isExpanded = true, onToggleExpand,
   onPreviewPin, onCommitPin, onAssigneeChange,
   editingOpen, onOpenEdit, onCloseEdit, renderedByKey,
@@ -2086,6 +2154,7 @@ function PlannerRow({
           weekly={weekly}
           todayOffset={todayOffset}
           height={ROW_HEIGHT}
+          milestoneMarks={milestoneMarks}
         />
         {bar && (
           <PlannerBar
@@ -2629,13 +2698,14 @@ function PlannerBar({
 // ---------------------------------------------------------------------------
 
 function PlannerBackdrop({
-  ticks, dayPx, weekly, todayOffset, height,
+  ticks, dayPx, weekly, todayOffset, height, milestoneMarks,
 }: {
   ticks: DayTick[];
   dayPx: number;
   weekly: boolean;
   todayOffset: number;
   height: number;
+  milestoneMarks?: PlannerMilestoneMark[];
 }) {
   return (
     <>
@@ -2663,6 +2733,20 @@ function PlannerBackdrop({
           />
         ) : null,
       )}
+      {/* Milestone vertical guides — dashed so they read distinctly from the
+          solid `--accent` today marker. Sit above week dividers but below the
+          bars (which carry their own z-index). */}
+      {milestoneMarks?.map((mk) => (
+        <div
+          key={`ms-${mk.id}`}
+          style={{
+            position: 'absolute', top: 0, bottom: 0,
+            left: mk.centre - 0.5, width: 0,
+            borderLeft: `1px dashed ${mk.color}`,
+            pointerEvents: 'none', zIndex: 1,
+          }}
+        />
+      ))}
       <div
         style={{
           position: 'absolute', top: 0, bottom: 0, left: todayOffset - 0.5,
@@ -2671,6 +2755,60 @@ function PlannerBackdrop({
       />
     </>
   );
+}
+
+// Header flag chip for a single milestone. Anchored to the centre of the
+// milestone's day; truncated so a long name doesn't overlap a neighbouring
+// chip too aggressively. Pure presentation — the matching dashed vertical
+// line is rendered by `PlannerBackdrop`.
+const PLANNER_MILESTONE_CHIP_WIDTH = 132;
+
+function PlannerMilestoneFlag({ mark, todayIso }: { mark: PlannerMilestoneMark; todayIso: string }) {
+  const tip = (() => {
+    const abs = formatPlannerMilestoneDate(mark.date);
+    const rel = mark.isOverdue
+      ? `${calendarDaysBetween(mark.date, todayIso)} days overdue`
+      : mark.date === todayIso
+        ? 'due today'
+        : `due ${abs}`;
+    const head = `${mark.name} · ${rel}`;
+    return mark.description ? `${head}\n${mark.description}` : head;
+  })();
+  return (
+    <div
+      data-tip={tip}
+      style={{
+        position: 'absolute',
+        left: mark.centre - PLANNER_MILESTONE_CHIP_WIDTH / 2,
+        top: 4,
+        width: PLANNER_MILESTONE_CHIP_WIDTH,
+        display: 'flex', alignItems: 'center', gap: 4,
+        padding: '1px 6px',
+        borderRadius: 10,
+        background: mark.isOverdue ? 'var(--blocked-bg)' : 'var(--accent-muted)',
+        color: mark.color,
+        fontSize: 10.5, fontWeight: 600,
+        whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+        zIndex: 2,
+        pointerEvents: 'auto',
+      }}
+    >
+      <Icon name="flag" size={10} color={mark.color} />
+      <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{mark.name}</span>
+    </div>
+  );
+}
+
+function formatPlannerMilestoneDate(iso: string): string {
+  const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  const [y, m, d] = iso.split('-').map(Number);
+  return `${months[m - 1]} ${d}, ${y}`;
+}
+
+function calendarDaysBetween(aIso: string, bIso: string): number {
+  const [ay, am, ad] = aIso.split('-').map(Number);
+  const [by, bm, bd] = bIso.split('-').map(Number);
+  return Math.round((Date.UTC(by, bm - 1, bd) - Date.UTC(ay, am - 1, ad)) / 86_400_000);
 }
 
 // ---------------------------------------------------------------------------
