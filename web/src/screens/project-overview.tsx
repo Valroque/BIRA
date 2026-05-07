@@ -10,13 +10,27 @@ import { dayToIso, todayDay } from '../components/gantt-utils';
 export function ProjectOverviewPage() {
   const { tenant, workspace, project, tenantName, workspaceName } = useTenantBreadcrumbs();
   const { getProject } = useProjects();
-  const { issues } = useIssues();
+  const { issues, getIssue } = useIssues();
   const { milestonesForProject, loading: milestonesLoading } = useMilestones();
   const projectInfo = getProject(project);
   // Hide the chip strip while the milestones provider is doing its first
   // fetch — same outcome as "no milestones" so the layout doesn't pop in.
   const milestones = (projectInfo && !milestonesLoading) ? milestonesForProject(projectInfo.id) : [];
   const todayIso = dayToIso(todayDay());
+
+  const projectIssues = projectInfo
+    ? issues.filter((i) => i.projectId === projectInfo.id)
+    : [];
+  const counts = {
+    open: projectIssues.filter((i) => i.status !== 'done' && i.status !== 'canceled').length,
+    inProgress: projectIssues.filter((i) => i.status === 'in-progress').length,
+    blocked: projectIssues.filter((i) => isBlocked(i, getIssue)).length,
+    done: projectIssues.filter((i) => i.status === 'done').length,
+  };
+  const byStatus: Record<string, number> = {
+    backlog: 0, todo: 0, 'in-progress': 0, 'in-review': 0, done: 0, canceled: 0,
+  };
+  for (const i of projectIssues) byStatus[i.status] = (byStatus[i.status] ?? 0) + 1;
   return (
     <div className="bira" style={{ height: '100%', display: 'flex', flexDirection: 'column', background: 'var(--bg)' }}>
       <TopBar breadcrumbs={[
@@ -65,12 +79,11 @@ export function ProjectOverviewPage() {
           </div>
         )}
 
-        {/* Drift fix: replaced "Velocity 34 pts 14d avg" (sprint-flavored) with a sprint-agnostic "Done (7d)". */}
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 10, marginBottom: 22 }}>
-          <Stat label="Open" value="98" trend="+12" tone="up" />
-          <Stat label="In progress" value="12" trend="+3" />
-          <Stat label="Blocked" value="4" trend="−1" tone="down" />
-          <Stat label="Done (7d)" value="34" trend="trailing 7 days" muted />
+          <Stat label="Open" value={counts.open} />
+          <Stat label="In progress" value={counts.inProgress} />
+          <Stat label="Blocked" value={counts.blocked} />
+          <Stat label="Done" value={counts.done} muted />
         </div>
 
         {/*
@@ -84,21 +97,17 @@ export function ProjectOverviewPage() {
               to={`/${tenant}/${workspace}/${project}/workflow`}
               style={{ fontSize: 11.5, color: 'var(--fg-muted)', textDecoration: 'none' }}
             >Edit workflow →</Link>
-            <span className="pill" style={{ marginLeft: 'auto', background: 'var(--in-progress-bg)', color: 'var(--in-progress)' }}>3 stuck</span>
           </div>
-          <FunnelBars />
+          <FunnelBars byStatus={byStatus} />
         </div>
 
         <div className="card" style={{ marginTop: 16, padding: 0 }}>
           <div style={{ padding: '12px 16px', borderBottom: '1px solid var(--border-muted)', fontSize: 13, fontWeight: 600 }}>
             Recently updated
           </div>
-          {issues
-            .filter((i) => projectInfo && i.projectId === projectInfo.id)
-            .slice(0, 5)
-            .map((i) => (
-              <ListRow key={i.key} issue={i} tenant={tenant} workspace={workspace} />
-            ))}
+          {projectIssues.slice(0, 5).map((i) => (
+            <ListRow key={i.key} issue={i} tenant={tenant} workspace={workspace} />
+          ))}
         </div>
       </div>
     </div>
@@ -107,25 +116,23 @@ export function ProjectOverviewPage() {
 
 interface StatProps {
   label: string;
-  value: string;
-  trend?: string;
-  tone?: 'up' | 'down';
+  value: number;
   muted?: boolean;
 }
-function Stat({ label, value, trend, tone, muted }: StatProps) {
-  const trendColor = muted
-    ? 'var(--fg-faint)'
-    : tone === 'down' ? 'var(--done)'
-    : tone === 'up' ? 'var(--blocked)'
-    : 'var(--fg-muted)';
+function Stat({ label, value, muted }: StatProps) {
   return (
     <div className="card" style={{ padding: 12 }}>
       <div style={{
         fontSize: 11, fontWeight: 500, color: 'var(--fg-muted)',
         textTransform: 'uppercase', letterSpacing: 0.4,
       }}>{label}</div>
-      <div style={{ fontSize: 22, fontWeight: 600, marginTop: 4 }} className="tnum">{value}</div>
-      {trend && <div style={{ fontSize: 11.5, color: trendColor, marginTop: 2 }}>{trend}</div>}
+      <div
+        style={{
+          fontSize: 22, fontWeight: 600, marginTop: 4,
+          color: muted ? 'var(--fg-muted)' : undefined,
+        }}
+        className="tnum"
+      >{value}</div>
     </div>
   );
 }
@@ -185,26 +192,45 @@ function relativeChipLabel(date: string, todayIso: string): string {
   return `in ${days} working day${days === 1 ? '' : 's'}`;
 }
 
-function FunnelBars() {
+function FunnelBars({ byStatus }: { byStatus: Record<string, number> }) {
   const data = [
-    { name: 'Backlog', n: 47, color: 'var(--backlog)' },
-    { name: 'Todo', n: 23, color: 'var(--todo)' },
-    { name: 'In Progress', n: 12, color: 'var(--in-progress)' },
-    { name: 'In Review', n: 6, color: 'var(--in-review)' },
-    { name: 'Done', n: 312, color: 'var(--done)' },
+    { name: 'Backlog', n: byStatus.backlog ?? 0, color: 'var(--backlog)' },
+    { name: 'Todo', n: byStatus.todo ?? 0, color: 'var(--todo)' },
+    { name: 'In Progress', n: byStatus['in-progress'] ?? 0, color: 'var(--in-progress)' },
+    { name: 'In Review', n: byStatus['in-review'] ?? 0, color: 'var(--in-review)' },
+    { name: 'Done', n: byStatus.done ?? 0, color: 'var(--done)' },
   ];
-  const max = 50; // cap visualization
+  // Scale the visualisation against the largest bucket so all bars stay
+  // visible at small project sizes; floor at 1 to avoid div-by-zero on a
+  // brand-new project.
+  const max = Math.max(1, ...data.map((d) => d.n));
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
       {data.map((d) => (
         <div key={d.name} style={{ display: 'grid', gridTemplateColumns: '88px 1fr 36px', gap: 8, alignItems: 'center', fontSize: 12 }}>
           <span style={{ color: 'var(--fg-muted)' }}>{d.name}</span>
           <div style={{ height: 14, borderRadius: 3, background: 'var(--bg-muted)', overflow: 'hidden' }}>
-            <div style={{ height: '100%', width: `${Math.min(100, (d.n / max) * 100)}%`, background: d.color }} />
+            <div style={{ height: '100%', width: `${(d.n / max) * 100}%`, background: d.color }} />
           </div>
           <span className="tnum" style={{ textAlign: 'right', color: 'var(--fg-muted)' }}>{d.n}</span>
         </div>
       ))}
     </div>
   );
+}
+
+// "Blocked" — a Task with at least one `dependsOn` predecessor that
+// hasn't reached `done` (or `canceled`). Mirrors the v1 depends-on
+// semantics: A can't start until B has ended.
+function isBlocked(
+  issue: import('../fixtures').Issue,
+  getIssue: (key: string) => import('../fixtures').Issue | undefined,
+): boolean {
+  const deps = issue.dependsOn;
+  if (!deps || deps.length === 0) return false;
+  return deps.some((key) => {
+    const pred = getIssue(key);
+    if (!pred) return false;
+    return pred.status !== 'done' && pred.status !== 'canceled';
+  });
 }

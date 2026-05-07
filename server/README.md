@@ -377,7 +377,7 @@ of writing, 45 files / 345 it-blocks):
 | Auth | `tests/auth/` — register, login, refresh-token, profile, updateProfile, changePassword |
 | Middleware | `tests/middleware/` — passwordResetGate (423 gate) |
 | Tenants | `tests/tenants/` — list, create, get, deactivate, reactivate, deactivated gate |
-| Tenant members | `tests/tenantMembers/` — list directory; `tests/admin/` — admin password reset |
+| Tenant members | `tests/tenantMembers/` — list directory, add (incl. idempotent re-add and reactivate-deactivated), update role (incl. last-admin guard), remove (incl. self-leave, last-admin guard, workspace-membership cascade); `tests/admin/` — admin password reset |
 | Workspaces | `tests/workspaces/` — list, create, get, update, archive, unarchive |
 | Projects | `tests/projects/` — list, create, get |
 | Issues | `tests/issues/` — create, get, list (project + workspace), update, key allocation (concurrency), set parent (hierarchy), description attachments (slice C) |
@@ -586,10 +586,13 @@ when `types` is omitted now combines users and teams.
 
 ### Tenant members
 
-| Method | Path                                              | Auth          |
-|--------|---------------------------------------------------|---------------|
-| GET    | `/api/tenants/:t/members`                         | tenant member |
-| GET    | `/api/tenants/:t/members/:userId`                 | tenant member |
+| Method | Path                                              | Auth                       |
+|--------|---------------------------------------------------|----------------------------|
+| GET    | `/api/tenants/:t/members`                         | tenant member              |
+| POST   | `/api/tenants/:t/members`                         | tenant `admin`             |
+| GET    | `/api/tenants/:t/members/:userId`                 | tenant member              |
+| PATCH  | `/api/tenants/:t/members/:userId`                 | tenant `admin`             |
+| DELETE | `/api/tenants/:t/members/:userId`                 | tenant `admin` OR self     |
 
 `GET /api/tenants/:t/members` returns every row in `tenant_memberships`
 for the tenant, hydrated with user details (id, email, displayName,
@@ -601,8 +604,32 @@ Service is two independent queries (`tenant_memberships` + `users`)
 combined in JS, no SQL JOIN — see
 `feedback_no_db_joins_without_approval` rule.
 
-Per-user mutations (reset password, deactivate, reactivate) live on
-the `:userId` sub-routes — see "Password reset gate" and "User
+`POST` is direct-add — the target must already be a registered user
+(404 otherwise). Idempotent on already-active members (returns the
+existing row without changing the role; use PATCH to change role).
+Re-activates rows in `invited` / `deactivated` state in place with the
+new role. Tenant admin role is only ever explicit-on-user, never
+team-derived (v1 rule).
+
+`PATCH` updates the role. Last-admin guard refuses demoting the only
+active tenant admin with 409.
+
+`DELETE` removes the membership. Tenant admin can remove anyone, or
+the target can self-leave. Last-admin guard applies. Cascades inside
+the same transaction:
+- `workspace_memberships` rows for the user across every workspace in
+  this tenant.
+- `team_memberships` rows for the user across every team in workspaces
+  in this tenant.
+- `project_user_access` rows for the user across every project in
+  workspaces in this tenant.
+
+Files / comments / issues authored by the removed user stay attached —
+historical attribution survives, mirroring user deactivation and
+workspace-member removal.
+
+Per-user account mutations (reset password, deactivate, reactivate)
+live on the `:userId` sub-routes — see "Password reset gate" and "User
 (de)activation" above.
 
 ### Workspace members

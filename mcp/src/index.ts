@@ -431,6 +431,58 @@ tool(
 );
 
 tool(
+  'add_tenant_member',
+  'Add a registered user to a tenant. Direct-add — the target must already exist as a user (no invite-token flow in v1). Idempotent on already-active members; reactivates rows in `invited` / `deactivated` state with the new role. Tenant admin only. Note: tenant admin role is only ever explicit-on-user, never team-derived.',
+  z.object({
+    tenantSlug: z.string().min(1),
+    userId: z.string().uuid(),
+    role: z.enum(['admin', 'write', 'read']),
+  }),
+  async ({ tenantSlug, ...body }) =>
+    ok(
+      await client.request(
+        'POST',
+        `/api/tenants/${tenantSlug}/members`,
+        body
+      )
+    )
+);
+
+tool(
+  'update_tenant_member_role',
+  "Update a tenant member's role. Last-admin guard refuses demoting the only active admin. Tenant admin only.",
+  z.object({
+    tenantSlug: z.string().min(1),
+    userId: z.string().uuid(),
+    role: z.enum(['admin', 'write', 'read']),
+  }),
+  async ({ tenantSlug, userId, role }) =>
+    ok(
+      await client.request(
+        'PATCH',
+        `/api/tenants/${tenantSlug}/members/${userId}`,
+        { role }
+      )
+    )
+);
+
+tool(
+  'remove_tenant_member',
+  'Remove a tenant member. Tenant admin OR the target themselves (self-leave). Last-admin guard applies. Cascades clear workspace_memberships, team_memberships, and project_user_access for this user across the entire tenant in the same transaction.',
+  z.object({
+    tenantSlug: z.string().min(1),
+    userId: z.string().uuid(),
+  }),
+  async ({ tenantSlug, userId }) =>
+    ok(
+      await client.request(
+        'DELETE',
+        `/api/tenants/${tenantSlug}/members/${userId}`
+      )
+    )
+);
+
+tool(
   'admin_reset_password',
   'Tenant admin generates a temporary password for another member. The plaintext is returned exactly once — share it OOB. The target user must call change_password before they can interact with tenant data.',
   z.object({
