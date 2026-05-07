@@ -145,9 +145,13 @@ router.post(
 
 // ── Personal Access Tokens ────────────────────────────────────────────────
 //
-// CRUD for the user's own PATs. All three routes additionally mount
+// CRUD for the user's own PATs. POST and DELETE additionally mount
 // `requireJwtAuth` so a stolen / leaked PAT cannot mint or revoke tokens
 // — the legitimate owner must log in with their password to manage them.
+// GET deliberately allows PAT auth: an MCP agent running under a PAT
+// should be able to introspect its own tokens (verify name / last4 /
+// expiresAt) without an interactive login. The list response carries no
+// secret material, so PAT-authed reads don't broaden the leak surface.
 //
 // `last4` and the entity itself are safe to log; the plaintext returned
 // from POST is never logged anywhere (only the create response carries it).
@@ -183,7 +187,6 @@ router.post(
 
 router.get(
   '/tokens',
-  requireJwtAuth,
   asyncHandler(async (req, res) => {
     if (!req.user) throw new AppError('Authentication required', 401);
     const tokens = await listTokens({ userId: req.user.id });

@@ -32,7 +32,7 @@ that prefix grammar in column form.
 | Tool | Role | Endpoint | What it does |
 |---|---|---|---|
 | `whoami` | `authed` | `GET /api/auth/profile` | Confirm which user this MCP process is acting as (also listed under Auth). |
-| `list_pats` | `self+jwt-only` | `GET /api/auth/tokens` | List the current user's PATs (metadata only; secret never returned). |
+| `list_pats` | `self` | `GET /api/auth/tokens` | List the current user's PATs (metadata only; secret never returned). Works under either JWT or PAT auth so agents can introspect their own tokens. |
 | `create_pat` | `self+jwt-only` | `POST /api/auth/tokens` | Mint a new PAT (`name`, `expiresIn ∈ {never, 30d, 90d, 1y}`). Plaintext returned **exactly once**. **Requires interactive `login`** — BE returns 403 `PAT_CANNOT_MINT_PAT` when called via env token. |
 | `revoke_pat` | `self+jwt-only` | `DELETE /api/auth/tokens/:id` | Revoke one of the current user's PATs. **Requires interactive `login`** (same mint guard). |
 

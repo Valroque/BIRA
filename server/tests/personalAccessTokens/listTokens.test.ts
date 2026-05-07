@@ -35,16 +35,21 @@ describe('GET /api/auth/tokens', () => {
     expect(res.status).toBe(401);
   });
 
-  it('403 PAT_CANNOT_MINT_PAT when called via PAT bearer', async () => {
+  it('200 returns the caller\'s tokens when authed via a PAT bearer', async () => {
     const { user } = await createUser();
-    const { plaintext } = await createPat({ userId: user.id });
+    const { plaintext, token } = await createPat({ userId: user.id });
 
     const res = await api()
       .get('/api/auth/tokens')
       .set('Authorization', `Bearer ${plaintext}`);
 
-    expect(res.status).toBe(403);
-    expect(res.body.code).toBe('PAT_CANNOT_MINT_PAT');
+    expect(res.status).toBe(200);
+    expect(Array.isArray(res.body.data)).toBe(true);
+    expect(res.body.data).toHaveLength(1);
+    expect(res.body.data[0].id).toBe(token.id);
+    // Read-via-PAT must still scrub the secret.
+    expect(res.body.data[0]).not.toHaveProperty('tokenHash');
+    expect(JSON.stringify(res.body)).not.toContain(plaintext);
   });
 
   it('does not surface other users\' tokens', async () => {

@@ -140,7 +140,7 @@ tool(
 
 tool(
   'list_pats',
-  "[self+jwt-only · GET /api/auth/tokens] List the current user's personal access tokens. The response NEVER includes the secret — only metadata (id, name, last4, createdAt, lastUsedAt, expiresAt, revokedAt). Active rows first, then revoked rows for audit context.",
+  "[self · GET /api/auth/tokens] List the current user's personal access tokens. Works under either JWT or PAT auth — agents running under a PAT can introspect their own tokens. The response NEVER includes the secret — only metadata (id, name, last4, createdAt, lastUsedAt, expiresAt, revokedAt). Active rows first, then revoked rows for audit context.",
   z.object({}),
   async () => ok(await client.request('GET', '/api/auth/tokens'))
 );

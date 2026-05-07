@@ -69,10 +69,12 @@ Zod parse failures are auto-converted to 400 with a flat message.
   when `req.user.mustResetPassword` is set. See "Password reset gate"
   below.
 - `requireJwtAuth` returns HTTP 403 with `code: 'PAT_CANNOT_MINT_PAT'`
-  when `req.auth.method !== 'jwt'`. Mounted on the PAT-management routes
-  (`POST/GET/DELETE /api/auth/tokens`) so a leaked PAT can't mint or
-  revoke other tokens — the legitimate owner must log in with their
-  password to manage their tokens.
+  when `req.auth.method !== 'jwt'`. Mounted on the PAT-mutation routes
+  (`POST /api/auth/tokens`, `DELETE /api/auth/tokens/:id`) so a leaked
+  PAT can't mint or revoke other tokens — the legitimate owner must
+  log in with their password to manage them. `GET /api/auth/tokens`
+  deliberately allows PAT auth so an MCP agent can introspect its own
+  tokens; the list response carries no secret material.
 - `resolveTenantScope` (mounted on `/:tenantSlug` routers) sets
   `req.scope = { tenantId, tenantSlug, role }` after looking up
   `tenant_memberships`.
@@ -113,9 +115,11 @@ carry 256 bits of entropy so the slow-KDF cost would be wasted on every
 authenticated request. Mirrors GitHub's public design. The plaintext is
 never logged; the create response is the only place it touches a string.
 
-**PATs cannot mint or revoke PATs.** All three `/api/auth/tokens` routes
-mount `requireJwtAuth` after `authenticate`, returning 403
-`PAT_CANNOT_MINT_PAT` when called via a PAT bearer. This means a leaked
+**PATs cannot mint or revoke PATs.** `POST /api/auth/tokens` and
+`DELETE /api/auth/tokens/:id` mount `requireJwtAuth` after
+`authenticate`, returning 403 `PAT_CANNOT_MINT_PAT` when called via a
+PAT bearer. `GET /api/auth/tokens` is intentionally readable under PAT
+auth — agents need to introspect their own tokens. This means a leaked
 PAT can read / write user data per the user's RBAC, but cannot
 self-perpetuate — the legitimate owner can revoke it via the web UI,
 which kills it on the next request. PATs DO flow through
@@ -140,7 +144,7 @@ issue). The write is fire-and-forget and never blocks the request.
 | PATCH  | `/api/auth/me`                    | any authenticated user (incl. locked) |
 | POST   | `/api/auth/change-password`       | any authenticated user (incl. locked) |
 | POST   | `/api/auth/tokens`                | JWT-authed user (PATs forbidden)   |
-| GET    | `/api/auth/tokens`                | JWT-authed user (PATs forbidden)   |
+| GET    | `/api/auth/tokens`                | any authenticated user (JWT or PAT) |
 | DELETE | `/api/auth/tokens/:id`            | JWT-authed user (PATs forbidden)   |
 
 `PATCH /api/auth/me` accepts any subset of `{ firstName, lastName, email,
