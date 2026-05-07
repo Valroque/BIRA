@@ -10,117 +10,151 @@ change.
 
 ## Tools
 
+Every tool description is prefixed with `[<role-required> · <METHOD> <path>]`
+so an LLM picking up a fresh BIRA MCP context can see at a glance which gate
+the BE applies and which endpoint the tool wraps. The role tokens are a
+closed set (see `mcp/src/index.ts` header banner). The tables below mirror
+that prefix grammar in column form.
+
 ### Auth
-| Tool | What it does |
-|---|---|
-| `login` | Auth against `/api/auth/login`; cache token in process. **Dev fallback only** — production agents should use `BIRA_API_TOKEN` instead (see Auth model below). |
-| `logout` | Clear the cached JWT. The `BIRA_API_TOKEN` env (if set) remains as the fallback Bearer. |
-| `register` | `POST /api/auth/register` — public; create a new user with no memberships |
-| `profile` | `GET /api/auth/profile` |
-| `whoami` | `GET /api/auth/profile` — confirm which user this MCP process is acting as. Especially useful when the credential is `BIRA_API_TOKEN` and there was no interactive `login`. |
-| `update_profile` | `PATCH /api/auth/me` (firstName / lastName / email / phone / avatar) |
-| `change_password` | Self-service password change; required to clear `mustResetPassword` |
-| `refresh_token` | Exchange a refresh token for a new access token |
+| Tool | Role | Endpoint | What it does |
+|---|---|---|---|
+| `login` | `public` | `POST /api/auth/login` | Auth against the BIRA backend; cache token in process. **Dev fallback only** — production agents should use `BIRA_API_TOKEN` instead (see Auth model below). |
+| `logout` | _(client-only)_ | _(no HTTP)_ | Clear the cached JWT. The `BIRA_API_TOKEN` env (if set) remains as the fallback Bearer. |
+| `register` | `public` | `POST /api/auth/register` | Create a new user with no memberships. |
+| `profile` | `authed` | `GET /api/auth/profile` | Get the currently logged-in BIRA user profile. |
+| `whoami` | `authed` | `GET /api/auth/profile` | Confirm which user this MCP process is acting as. Especially useful when the credential is `BIRA_API_TOKEN` and there was no interactive `login`. |
+| `update_profile` | `self` | `PATCH /api/auth/me` | Patch firstName / lastName / email / phone / avatar. |
+| `change_password` | `self` | `POST /api/auth/change-password` | Self-service password change; required to clear `mustResetPassword`. |
+| `refresh_token` | `public` | `POST /api/auth/refresh-token` | Exchange a refresh token for a new access token. |
 
 ### Personal access tokens
-| Tool | What it does |
-|---|---|
-| `list_pats` | `GET /api/auth/tokens` — list the current user's PATs (metadata only; secret never returned). Works under JWT or PAT auth. |
-| `create_pat` | `POST /api/auth/tokens` — mint a new PAT (`name`, `expiresIn ∈ {never, 30d, 90d, 1y}`). Plaintext returned **exactly once**. **Requires interactive `login`** — BE returns 403 `PAT_CANNOT_MINT_PAT` when called via env token. |
-| `revoke_pat` | `DELETE /api/auth/tokens/:id` — revoke one of the current user's PATs. **Requires interactive `login`** (same mint guard). |
+| Tool | Role | Endpoint | What it does |
+|---|---|---|---|
+| `whoami` | `authed` | `GET /api/auth/profile` | Confirm which user this MCP process is acting as (also listed under Auth). |
+| `list_pats` | `self+jwt-only` | `GET /api/auth/tokens` | List the current user's PATs (metadata only; secret never returned). |
+| `create_pat` | `self+jwt-only` | `POST /api/auth/tokens` | Mint a new PAT (`name`, `expiresIn ∈ {never, 30d, 90d, 1y}`). Plaintext returned **exactly once**. **Requires interactive `login`** — BE returns 403 `PAT_CANNOT_MINT_PAT` when called via env token. |
+| `revoke_pat` | `self+jwt-only` | `DELETE /api/auth/tokens/:id` | Revoke one of the current user's PATs. **Requires interactive `login`** (same mint guard). |
 
 ### Tenants
-| Tool | What it does |
-|---|---|
-| `list_tenants` | All active tenants (public; pre-login picker) |
-| `get_tenant` | Tenant detail by slug |
-| `create_tenant` | Any authenticated user; caller becomes admin |
-| `update_tenant` | Tenant admin; rename + cosmetics (slug + plan immutable) |
-| `deactivate_tenant` / `reactivate_tenant` | Tenant admin lifecycle |
-| `list_tenant_members` | Hydrated tenant directory; visible to any tenant member |
-| `get_tenant_member` | Single user lookup by uuid (display-name fallback) |
-| `admin_reset_password` | Tenant admin issues a one-time temp password for another member |
-| `deactivate_user` / `reactivate_user` | Tenant admin flips another member's `isActive` flag (effective scope is global) |
+| Tool | Role | Endpoint | What it does |
+|---|---|---|---|
+| `list_tenants` | `public` | `GET /api/tenants` | All active tenants (pre-login picker). |
+| `get_tenant` | `tenant-member` | `GET /api/tenants/:t` | Tenant detail by slug. |
+| `create_tenant` | `authed` | `POST /api/tenants` | Any authenticated user; caller becomes admin. |
+| `update_tenant` | `tenant-admin` | `PATCH /api/tenants/:t` | Rename + cosmetics (slug + plan immutable). |
+| `deactivate_tenant` | `tenant-admin` | `POST /api/tenants/:t/deactivate` | Soft-freeze; disappears from public listing. |
+| `reactivate_tenant` | `tenant-admin` | `POST /api/tenants/:t/reactivate` | Restore a deactivated tenant. |
+| `list_tenant_members` | `tenant-member` | `GET /api/tenants/:t/members` | Hydrated tenant directory. |
+| `get_tenant_member` | `tenant-member` | `GET /api/tenants/:t/members/:userId` | Single user lookup by uuid (display-name fallback). |
+| `add_tenant_member` | `tenant-admin` | `POST /api/tenants/:t/members` | Direct-add a registered user to the tenant. |
+| `update_tenant_member_role` | `tenant-admin` | `PATCH /api/tenants/:t/members/:userId` | Patch role; last-admin guard. |
+| `remove_tenant_member` | `self-or-tenant-admin` | `DELETE /api/tenants/:t/members/:userId` | Tenant admin removes anyone, or target self-leaves. |
+| `admin_reset_password` | `tenant-admin` | `POST /api/tenants/:t/members/:userId/reset-password` | Tenant admin issues a one-time temp password for another member. |
+| `deactivate_user` | `tenant-admin` | `POST /api/tenants/:t/members/:userId/deactivate` | Tenant admin flips another member's `isActive` flag (effective scope is global). |
+| `reactivate_user` | `tenant-admin` | `POST /api/tenants/:t/members/:userId/reactivate` | Restore a deactivated user. |
 
 ### Workspaces
-| Tool | What it does |
-|---|---|
-| `list_workspaces` / `get_workspace` | Read; supports `includeArchived` |
-| `create_workspace` | Tenant admin |
-| `update_workspace` | Workspace admin (slug is immutable) |
-| `archive_workspace` / `unarchive_workspace` | Tenant admin |
+| Tool | Role | Endpoint | What it does |
+|---|---|---|---|
+| `list_workspaces` | `tenant-member` | `GET /api/tenants/:t/workspaces` | Workspaces visible to the user; supports `includeArchived`. |
+| `get_workspace` | `ws-member` | `GET /api/tenants/:t/workspaces/:w` | Workspace detail; supports `includeArchived`. |
+| `create_workspace` | `tenant-admin` | `POST /api/tenants/:t/workspaces` | Create a workspace. |
+| `update_workspace` | `ws-admin` | `PATCH /api/tenants/:t/workspaces/:w` | Patch name/letter/color/bg (slug immutable). |
+| `archive_workspace` | `tenant-admin` | `POST /api/tenants/:t/workspaces/:w/archive` | Freeze workspace writes. |
+| `unarchive_workspace` | `tenant-admin` | `POST /api/tenants/:t/workspaces/:w/unarchive` | Restore a frozen workspace. |
 
 ### Projects
-| Tool | What it does |
-|---|---|
-| `list_projects` / `get_project` | Read; both support `includeArchived` |
-| `create_project` | Workspace write+ |
-| `update_project` | Workspace admin (slug + key are immutable) |
-| `archive_project` / `unarchive_project` | Workspace admin; archived projects block issue mutations |
-| `get_project_workflows` | Per-issue-type workflow assignment |
-| `set_project_workflow` | Assign a workflow slug to a (project, issueType) pair |
+| Tool | Role | Endpoint | What it does |
+|---|---|---|---|
+| `list_projects` | `ws-member` | `GET /api/tenants/:t/workspaces/:w/projects` | Projects in a workspace; supports `includeArchived`. |
+| `get_project` | `ws-member` | `GET /api/tenants/:t/workspaces/:w/projects/:p` | Project detail; supports `includeArchived`. |
+| `create_project` | `ws-write` | `POST /api/tenants/:t/workspaces/:w/projects` | Create a project. |
+| `update_project` | `ws-admin` | `PATCH /api/tenants/:t/workspaces/:w/projects/:p` | Patch project (slug + key immutable). |
+| `archive_project` | `ws-admin` | `POST /api/tenants/:t/workspaces/:w/projects/:p/archive` | Freeze project writes. |
+| `unarchive_project` | `ws-admin` | `POST /api/tenants/:t/workspaces/:w/projects/:p/unarchive` | Restore a frozen project. |
+| `get_project_workflows` | `ws-member` | `GET /api/tenants/:t/workspaces/:w/projects/:p/workflows` | Per-issue-type workflow assignment. |
+| `set_project_workflow` | `ws-write` | `PUT /api/tenants/:t/workspaces/:w/projects/:p/workflows/:issueType` | Assign a workflow slug to a (project, issueType) pair. |
 
 ### Issues
-| Tool | What it does |
-|---|---|
-| `list_issues` | Workspace-scoped or project-scoped (when `projectSlug` is set) |
-| `get_issue` | Issue detail by key (e.g. `CMT-7`) |
-| `create_issue` / `update_issue` | Write; honours hierarchy + workflow guards |
-| `set_issue_parent` | Move an issue under a new parent (or clear) |
+| Tool | Role | Endpoint | What it does |
+|---|---|---|---|
+| `list_issues` | `ws-member` | `GET /api/tenants/:t/workspaces/:w/issues` or `GET /api/tenants/:t/workspaces/:w/projects/:p/issues` | Workspace-scoped or project-scoped (when `projectSlug` is set). |
+| `get_issue` | `ws-member` | `GET /api/tenants/:t/workspaces/:w/projects/:p/issues/:k` | Issue detail by key (e.g. `CMT-7`). |
+| `create_issue` | `ws-write` | `POST /api/tenants/:t/workspaces/:w/projects/:p/issues` | Create an issue; honours hierarchy + workflow guards. |
+| `update_issue` | `ws-write` | `PATCH /api/tenants/:t/workspaces/:w/projects/:p/issues/:k` | Update an issue; status changes validated against the workflow. |
+| `set_issue_parent` | `ws-write` | `PATCH /api/tenants/:t/workspaces/:w/projects/:p/issues/:k/parent` | Move an issue under a new parent (or clear). |
 
 ### Issue links
-| Tool | What it does |
-|---|---|
-| `add_issue_relation` / `remove_issue_relation` | Symmetric `relates` link |
-| `add_issue_dependency` / `remove_issue_dependency` | Directed `depends on` (Tasks; rejects cycles) |
+| Tool | Role | Endpoint | What it does |
+|---|---|---|---|
+| `add_issue_relation` | `ws-write` | `POST /api/tenants/:t/workspaces/:w/projects/:p/issues/:k/relates` | Add a symmetric `relates` link. |
+| `remove_issue_relation` | `ws-write` | `DELETE /api/tenants/:t/workspaces/:w/projects/:p/issues/:k/relates/:relatedKey` | Remove a `relates` link. |
+| `add_issue_dependency` | `ws-write` | `POST /api/tenants/:t/workspaces/:w/projects/:p/issues/:k/dependencies` | Add a directed `depends on` (Tasks; rejects cycles). |
+| `remove_issue_dependency` | `ws-write` | `DELETE /api/tenants/:t/workspaces/:w/projects/:p/issues/:k/dependencies/:blockerKey` | Remove a `depends on` edge. |
 
 ### Comments
-| Tool | What it does |
-|---|---|
-| `list_comments` / `create_comment` | Issue-scoped |
-| `update_comment` / `delete_comment` | Workspace-scoped by comment uuid |
+| Tool | Role | Endpoint | What it does |
+|---|---|---|---|
+| `list_comments` | `ws-member` | `GET /api/tenants/:t/workspaces/:w/projects/:p/issues/:k/comments` | Comments on an issue, oldest first. |
+| `create_comment` | `ws-write` | `POST /api/tenants/:t/workspaces/:w/projects/:p/issues/:k/comments` | Add a comment; up to 10 attachment refs. |
+| `update_comment` | `ws-write` | `PATCH /api/tenants/:t/workspaces/:w/comments/:commentId` | Edit a comment (usecase further restricts to author or workspace admin). |
+| `delete_comment` | `ws-write` | `DELETE /api/tenants/:t/workspaces/:w/comments/:commentId` | Delete a comment (author or workspace admin only, enforced in the usecase). |
 
 ### Milestones
-| Tool | What it does |
-|---|---|
-| `list_milestones` | Workspace-scoped or project-scoped (when `projectSlug` is set); workspace form accepts `projectId` filter |
-| `get_milestone` | Project-scoped lookup by uuid |
-| `create_milestone` / `update_milestone` / `delete_milestone` | Workspace write+; rejected on archived projects |
+| Tool | Role | Endpoint | What it does |
+|---|---|---|---|
+| `list_milestones` | `ws-member` | `GET /api/tenants/:t/workspaces/:w/milestones` or `GET /api/tenants/:t/workspaces/:w/projects/:p/milestones` | Workspace-scoped or project-scoped (when `projectSlug` is set); workspace form accepts `projectId` filter. |
+| `get_milestone` | `ws-member` | `GET /api/tenants/:t/workspaces/:w/projects/:p/milestones/:milestoneId` | Project-scoped lookup by uuid. |
+| `create_milestone` | `ws-write` | `POST /api/tenants/:t/workspaces/:w/projects/:p/milestones` | Create a milestone; rejected on archived projects. |
+| `update_milestone` | `ws-write` | `PATCH /api/tenants/:t/workspaces/:w/projects/:p/milestones/:milestoneId` | Patch a milestone; rejected on archived projects. |
+| `delete_milestone` | `ws-write` | `DELETE /api/tenants/:t/workspaces/:w/projects/:p/milestones/:milestoneId` | Delete a milestone; rejected on archived projects. |
 
 ### Workflows
-| Tool | What it does |
-|---|---|
-| `list_workflows` / `get_workflow` | Read |
-| `create_workflow` / `update_workflow` | Write; full-replace nodes / transitions |
-| `delete_workflow` | Workspace admin |
+| Tool | Role | Endpoint | What it does |
+|---|---|---|---|
+| `list_workflows` | `ws-member` | `GET /api/tenants/:t/workspaces/:w/workflows` | List workflows in a workspace. |
+| `get_workflow` | `ws-member` | `GET /api/tenants/:t/workspaces/:w/workflows/:workflowSlug` | Workflow with nodes, transitions, and rules. |
+| `create_workflow` | `ws-write` | `POST /api/tenants/:t/workspaces/:w/workflows` | Create a workflow. |
+| `update_workflow` | `ws-write` | `PATCH /api/tenants/:t/workspaces/:w/workflows/:workflowSlug` | Full-replace nodes / transitions; or rename. |
+| `delete_workflow` | `ws-admin` | `DELETE /api/tenants/:t/workspaces/:w/workflows/:workflowSlug` | Delete a workflow. |
 
 ### Mentionables
-| Tool | What it does |
-|---|---|
-| `search_mentionables` | `/mentionables/search?q=...` — users + teams |
+| Tool | Role | Endpoint | What it does |
+|---|---|---|---|
+| `search_mentionables` | `ws-member` | `GET /api/tenants/:t/workspaces/:w/mentionables/search` | Search for `@`-mention candidates (users + teams). |
 
 ### Workspace members
-| Tool | What it does |
-|---|---|
-| `list_workspace_members` | Hydrated directory; visible to any workspace member |
-| `add_workspace_member` | Direct-add (target must already be an active tenant member); workspace admin |
-| `update_workspace_member_role` | Patch role; last-admin guard refuses demoting the only effective admin |
-| `remove_workspace_member` | Workspace admin OR self-leave; cascades clear team_memberships + project_user_access |
+| Tool | Role | Endpoint | What it does |
+|---|---|---|---|
+| `list_workspace_members` | `ws-member` | `GET /api/tenants/:t/workspaces/:w/members` | Hydrated directory. |
+| `add_workspace_member` | `ws-admin` | `POST /api/tenants/:t/workspaces/:w/members` | Direct-add (target must already be an active tenant member). |
+| `update_workspace_member_role` | `ws-admin` | `PATCH /api/tenants/:t/workspaces/:w/members/:membershipId` | Patch role; last-admin guard refuses demoting the only effective admin. |
+| `remove_workspace_member` | `self-or-ws-admin` | `DELETE /api/tenants/:t/workspaces/:w/members/:membershipId` | Workspace admin OR self-leave; cascades clear team_memberships + project_user_access. |
 
 ### Teams
-| Tool | What it does |
-|---|---|
-| `list_teams` / `get_team` | Read team CRUD with hydrated rosters |
-| `create_team` / `update_team` / `delete_team` | Workspace admin (slug immutable) |
-| `list_team_members` / `add_team_member` / `remove_team_member` | Roster mutations; admin-only; new members must be active workspace members |
+| Tool | Role | Endpoint | What it does |
+|---|---|---|---|
+| `list_teams` | `ws-member` | `GET /api/tenants/:t/workspaces/:w/teams` | Teams in a workspace, with hydrated members. |
+| `create_team` | `ws-admin` | `POST /api/tenants/:t/workspaces/:w/teams` | Create a team (slug immutable). |
+| `get_team` | `ws-member` | `GET /api/tenants/:t/workspaces/:w/teams/:teamSlug` | Team detail with members. |
+| `update_team` | `ws-admin` | `PATCH /api/tenants/:t/workspaces/:w/teams/:teamSlug` | Patch name/description/color. |
+| `delete_team` | `ws-admin` | `DELETE /api/tenants/:t/workspaces/:w/teams/:teamSlug` | CASCADE removes team_memberships + project_team_access. |
+| `list_team_members` | `ws-member` | `GET /api/tenants/:t/workspaces/:w/teams/:teamSlug/members` | Team roster. |
+| `add_team_member` | `ws-admin` | `POST /api/tenants/:t/workspaces/:w/teams/:teamSlug/members` | Add a workspace member to a team. |
+| `remove_team_member` | `ws-admin` | `DELETE /api/tenants/:t/workspaces/:w/teams/:teamSlug/members/:userId` | Remove a member from a team. |
 
 ### Project access
-| Tool | What it does |
-|---|---|
-| `list_project_access` | Returns `{ teams[], users[] }` for a project |
-| `list_project_effective_members` | Flat per-user list with provenance + viaTeams[] |
-| `add_project_team_grant` / `update_project_team_grant` / `remove_project_team_grant` | Team grants (write/read; admin never inherited via team — both Zod and DB CHECK enforce) |
-| `add_project_user_grant` / `update_project_user_grant` / `remove_project_user_grant` | Explicit user grants (admin/write/read); target must be an active workspace member or tenant admin |
+| Tool | Role | Endpoint | What it does |
+|---|---|---|---|
+| `list_project_access` | `ws-member` | `GET /api/tenants/:t/workspaces/:w/projects/:p/access` | Returns `{ teams[], users[] }` for a project. |
+| `list_project_effective_members` | `ws-member` | `GET /api/tenants/:t/workspaces/:w/projects/:p/access/effective-members` | Flat per-user list with provenance + `viaTeams[]`. |
+| `add_project_team_grant` | `ws-admin` | `POST /api/tenants/:t/workspaces/:w/projects/:p/access/teams` | Grant a team write/read on the project (admin never inherited via team). |
+| `update_project_team_grant` | `ws-admin` | `PATCH /api/tenants/:t/workspaces/:w/projects/:p/access/teams/:teamId` | Change a team's project role (write ↔ read). |
+| `remove_project_team_grant` | `ws-admin` | `DELETE /api/tenants/:t/workspaces/:w/projects/:p/access/teams/:teamId` | Revoke a team grant. |
+| `add_project_user_grant` | `ws-admin` | `POST /api/tenants/:t/workspaces/:w/projects/:p/access/users` | Explicit user grant (admin/write/read); target must be an active workspace member or tenant admin. |
+| `update_project_user_grant` | `ws-admin` | `PATCH /api/tenants/:t/workspaces/:w/projects/:p/access/users/:userId` | Change an explicit user's project role. |
+| `remove_project_user_grant` | `ws-admin` | `DELETE /api/tenants/:t/workspaces/:w/projects/:p/access/users/:userId` | Revoke an explicit user grant. |
 
 ### Files
 File upload + download are intentionally not exposed as MCP tools — multipart
