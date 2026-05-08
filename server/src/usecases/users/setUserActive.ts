@@ -50,6 +50,29 @@ export async function setUserActive(input: SetUserActiveInput): Promise<User> {
   // returns the user row.
   if (existing.isActive === input.isActive) return existing;
 
+  // Workspace last-admin invariant (issue #20). Only matters on
+  // deactivation. Under v1 "implicit OK" semantics — tenant admins
+  // count as effective admins on every workspace — the API-reachable
+  // surface for stranding a workspace is empty (the actor must already
+  // be a tenant admin to call this endpoint, so at least one tenant
+  // admin remains after deactivating someone else). The guard is
+  // wired in anyway as defense-in-depth: it catches scenarios a future
+  // surface (e.g. system-admin path) could reach, and keeps the
+  // invariant uniform across user / role / member-removal paths.
+  if (!input.isActive) {
+    const stranded = await membershipService.findWorkspacesLeftAdminless(
+      input.targetUserId,
+      input.tenantId
+    );
+    if (stranded.length > 0) {
+      const slugs = stranded.map((w) => w.slug).join(', ');
+      throw new AppError(
+        `Cannot deactivate this user — would leave the following workspaces without an admin: ${slugs}. Promote another admin first.`,
+        409
+      );
+    }
+  }
+
   const updated = await userService.setActive(input.targetUserId, input.isActive);
   if (!updated) throw new AppError('User not found', 404);
   return updated;

@@ -11,7 +11,261 @@ in the log unedited — the log is a history, not the current state.
 
 ---
 
-## 2026-05-05 — `@mentions` promoted into v1 (notifications still deferred)
+## 2026-05-08 — RBAC open questions (#21 slice 2): self-leave, demotion, reactivation, archive
+
+Closing out seven of the eight open questions on the RBAC tracking
+issue (#21). Q1 (workspace last-admin invariant) was resolved
+separately by tech-lead — tenant admins count as implicit fallbacks,
+so a workspace with one explicit admin and one tenant admin in the
+same tenant can still demote/remove the explicit admin. The rest
+follow below. The role matrix in `docs/specs/permissions.md` (slice
+3) and the test pass (slice 4) encode these decisions.
+
+### Q2 — Self-leave is workspace-and-tenant only in v1
+
+Decision: keep self-leave on the two scopes where it already exists
+(`DELETE /api/tenants/:t/members/:userId` and `DELETE
+/api/tenants/:t/workspaces/:w/members/:membershipId`, with the
+caller's userId matching the target). **Project self-leave and team
+self-leave are not added in v1.** Anyone wanting off a project or a
+team asks an admin (workspace admin for projects, anyone with team
+edit access for teams) to revoke them.
+
+Why now and why this shape: tenant + workspace are the *containers*
+the user opted into — symmetric for them to be able to walk away
+without a gatekeeper. Project + team are *grants on top of a
+membership* — the explicit grant exists because someone deliberately
+added them. Adding a self-revoke surface there gives a daily user a
+button labelled "Leave project" that, if they're the only person
+with admin access, locks the project. The workspace-admin invariant
+(Q1) catches that at the workspace boundary, but pushing the same
+guard down to project + team would mean adding a "last edit-access
+holder" check to four more code paths to protect against a problem
+nobody has reported. Cost > benefit until someone asks.
+
+UX surface for the existing two: the workspace-members list already
+has a row-level Remove control on a member's own row (settings.tsx
+treats self the same as an admin-removed target). Tenant self-leave
+has no FE today — when it's wired, it goes in
+`/:tenant/settings/profile` as a danger-zone "Leave tenant" button,
+not in a member list (the user removing themselves rarely thinks
+"find my row in the directory and click the trash icon").
+
+Cascade rule for the unbuilt cases, if/when they're added:
+team-member self-leave should drop the user from `team_memberships`
+only — *not* cascade to `project_team_access`, because the team's
+project grants are about the team as a unit, not about the
+individual. The user already loses team-derived project access by
+virtue of no longer being on the team; no extra cascade needed.
+
+Implication for slice 3: matrix entries for "remove project
+member" and "remove team member" are admin-or-write-only, no
+self-leave column.
+
+### Q3 — Demotion does not touch explicit grants
+
+Decision: when a workspace admin is demoted to write or read, only
+their *implicit* admin reach (the "workspace admin → effective
+admin in every project" pathway computed at read time in
+`listEffectiveMembers.ts`) goes away. Any **explicit**
+`project_user_access` row they hold survives, at whatever role it
+was granted at. This is just the explicit-over-inherited rule
+(`.claude/rules/v1-constraints.md`) read in the demotion direction.
+
+Worked example: Maya is workspace admin on the `acme` workspace.
+Comet is a project in `acme`. Maya has no row in
+`project_user_access` for Comet — her admin reach is implicit. Atlas
+is also in `acme`; someone explicitly granted Maya `write` on Atlas
+last quarter (a no-op at the time, since her workspace-admin
+implicit reach was already broader). Today, an admin demotes Maya
+to `write` at the workspace level. Result: on Comet she's now a
+plain workspace `write` member with no project-specific row, so her
+effective project role is `write`. On Atlas she still has the
+explicit `write` grant, so she's `write` there too. The demotion did
+exactly one thing — it removed the implicit admin pathway that
+existed only because she was workspace admin. Nothing was deleted
+from any access table.
+
+Why this and not "demotion cascades to demote/delete project
+grants": cascade-on-demote breaks the explicit-over-inherited
+contract — the whole reason explicit grants exist is to be the
+durable, auditable layer that doesn't move when inherited roles
+shift. It also creates a footgun where the admin doing the demotion
+has to remember every explicit grant the target ever received and
+decide on each. The current behaviour ("we change one thing; the
+rest persists") is easier to explain to the workspace admin on day
+1: *"Demoting Maya only changes Maya's role on this workspace. Any
+project where she has a separate grant keeps that grant — go to the
+project's Members page if you want to revoke it too."*
+
+Implication for slice 3: the matrix has no "demotion side-effects"
+column — the row-level effect is just the role change.
+
+### Q4 — Tenant admins surface where admin-relevance > opt-in concern
+
+Decision: tenant admins appear as implicit members on surfaces
+where their effective access is the load-bearing fact, and stay
+hidden on surfaces where the question is "who has chosen to engage
+here." Concretely:
+
+- **Show as implicit (with a "Tenant admin" source pill):**
+  - Workspace settings → Members (already does this; keep).
+  - Project Members page (already does this via the
+    `tenant-admin` provenance row; keep).
+  - Effective-members views in any future audit / capacity surface.
+- **Hide:**
+  - The team-detail "Add member" picker. Already excludes them
+    (`addable: !m.membershipId.startsWith('tenant-admin:')` in
+    `teams.tsx`); keep. Tenant admins aren't team members the way
+    explicit users are — putting them in a team grants them nothing
+    they don't already have, and the team roster on a team-detail
+    page is the human "who's on this team" question.
+  - The New project modal's People-with-edit-access picker. They
+    don't need a grant to be admin on the project, so offering the
+    box is misleading: ticking it would write a row that is a no-op
+    against the implicit pathway and survives a demotion (per Q3).
+    Hidden today; keep.
+  - Issue assignee picker. An assignee is a person doing the work,
+    not a person with permission to do it. Tenant admins who don't
+    explicitly belong to the workspace shouldn't be the suggested
+    pick.
+
+Principle to apply when a new surface comes up: ask *"is this
+surface answering 'who can do this' or 'who is in this group'?"*
+First case shows tenant admins; second case hides them.
+
+Note for the slice-3 author: this is a clarification of existing
+behaviour, not a feature removal — every surface listed above
+already does the right thing, the rule above is so they stay
+consistent when someone adds the eighth surface.
+
+### Q5 — Already shipped; question was stale
+
+The brief's premise (no FE consumes `updateUserAccess` /
+`updateTeamAccess`) is out of date. The project-members page
+(`web/src/screens/project-members.tsx`) has an in-row role picker
+on both team-grant rows (`TeamGrantRow`, lines ~380–410) and
+user-grant rows that calls `updateTeam` / `updateUser` from
+`useProjectAccess()`, which proxies the BE update endpoints. Delete
++ re-grant is no longer the only path. No decision needed; no GH
+issue filed.
+
+### Q6 — Default team-grant role is `read`; but the modals disagree
+
+Decision: keep `read` as the default for team grants in v1, but
+**fix the inconsistency** between the two surfaces that grant teams.
+Today:
+
+- New project modal (`web/src/screens/projects.tsx:415`) hardcodes
+  every selected team to `read` with no per-row picker, and tells
+  the user to upgrade from the project Members page after creation.
+- Project Members → Add team modal
+  (`web/src/screens/project-members.tsx:582`) defaults to `write`
+  with a per-row picker and a comment that says "write is the most
+  common project-team grant."
+
+Both can't be right. Going with `read` for both, for two reasons:
+
+1. **Asymmetry of error cost.** A team granted `read` that should
+   have been `write` produces a friction signal — someone tries to
+   edit, gets blocked, asks for an upgrade. A team granted `write`
+   that should have been `read` produces silent over-access and an
+   audit miss. The default should fail loud, not quiet.
+2. **The picker exists to override.** Defaulting to the *narrower*
+   role and asking the granter to widen it is a conscious-act
+   pattern; defaulting to the *wider* role hides the choice.
+
+Implication for slice 3: matrix entry for "team grant default" is
+`read`. Implication for the FE (filed as a follow-up issue, see
+URLs at the end): change `AddTeamModal` in project-members.tsx to
+default to `read` and update the code comment, and keep the picker.
+The New project modal also shows a small "you can upgrade
+individual teams later" hint — it stays accurate.
+
+### Q7 — Reactivation restores prior grants as-is, with a loud audit trail
+
+Decision: reactivating a deactivated user (`POST
+/api/tenants/:t/members/:userId/reactivate`) is the inverse of
+deactivate — it flips `users.is_active` back to `true` and
+**leaves every dependent grant untouched**. Workspace memberships,
+team memberships, project user-access rows are all already
+preserved across deactivate (no cascade in `setUserActive.ts` or
+`userService.setActive`); reactivate keeps that symmetry.
+
+Why "restore as-is" and not "require re-grant":
+
+- The deactivation use case BIRA is targeting in v1 is *temporary
+  unavailability* (sabbatical, parental leave, contractor between
+  engagements) — not *security incident*. Re-granting after a
+  3-month parental leave is purely friction: every team, every
+  project, every workspace they had to be re-added to.
+- Tenant admins are the only role that can deactivate, and they're
+  the same role that can demote / revoke — if a tenant admin
+  *wants* a security-flavoured "deactivate and wipe all grants,"
+  the path is still available manually before reactivation.
+- "Restore as-is" matches what every other system in this space
+  does (Linear, GitHub, Slack), so it matches expectation.
+
+Trade-off explicitly acknowledged: if the deactivation **was** for
+security reasons, the admin must remember to revoke the user's
+grants *separately* before reactivating. This is documented loudly:
+
+- The deactivate confirmation dialog text (settings.tsx today) gets
+  a line: *"Deactivation freezes login but leaves project, team,
+  and workspace access in place. If this is a security action,
+  revoke the user's access from those scopes separately before
+  reactivating."*
+- The reactivate confirmation dialog gets a parallel line: *"This
+  user's prior project, team, and workspace access is being
+  restored. Review their grants if circumstances have changed."*
+
+Implication for slice 3: the matrix has no "reactivation
+side-effects" column — the row-level effect is just the
+`is_active` flip. The two dialog-copy changes are filed as a
+follow-up FE issue (URL below).
+
+### Q8 — Workspace archive freezes mutations; unarchive restores everything; no GC
+
+Decision: **archive is a soft-freeze.** Stating it explicitly so
+nobody adds GC-on-archive in a future slice without another
+decision-log entry.
+
+What archive does today (`requireActiveWorkspace` middleware in
+`tenantScope.ts`):
+
+- Blocks writes under the workspace — any handler that mounts
+  `requireActiveWorkspace` returns 409 with a "unarchive first"
+  message.
+- Reads continue to work (the middleware only runs on mutating
+  routes).
+- No data is deleted or moved. Projects, issues, comments, files,
+  workflows, project-grants, team-grants, team memberships, and
+  workspace memberships all persist on disk.
+
+What unarchive does: flips `workspaces.status` back to `active`. No
+other side-effects. Every grant, member, project, issue, comment,
+file is exactly where it was — the workspace simply becomes mutable
+again.
+
+Why state this explicitly: the temptation to "tidy up" archived
+workspaces (drop project-team grants, drop project-user grants,
+delete drafts) is real and would silently change the user's mental
+model from "archive is pause" to "archive is gradual delete." Pause
+matches the Linear / Notion / GitHub pattern; gradual delete is a
+trap that surfaces as "I unarchived and half my data is gone." We
+pick pause.
+
+Implication for slice 4: one test asserts that after archive →
+unarchive, the listed effective members, project grants, and issue
+counts are byte-identical to pre-archive. If that test ever
+becomes hard to keep green, the fix is to keep the data, not to
+weaken the test.
+
+### Follow-up GH issues filed
+
+- Q5: none — already shipped on the FE.
+- Q6 default-role alignment: https://github.com/Valroque/BIRA/issues/43
+- Q7 dialog copy: https://github.com/Valroque/BIRA/issues/44
 
 The earlier "no @mentions" rule was bundled with notifications,
 watchers, and email digests as a single out-of-scope line. Splitting
