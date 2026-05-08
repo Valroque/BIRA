@@ -2,6 +2,8 @@ import jwt, { type JwtPayload, type SignOptions } from 'jsonwebtoken';
 import type { Request, Response, NextFunction, RequestHandler } from 'express';
 import { AppError } from '../lib/errors.js';
 import { getById as getUserById } from '../services/userService.js';
+import * as patService from '../services/personalAccessTokenService.js';
+import { hashPat, PAT_PREFIX } from '../lib/patUtils.js';
 import { logger } from './logger.js';
 
 interface AccessTokenPayload extends JwtPayload {
@@ -45,6 +47,34 @@ export function verifyRefreshToken(token: string): RefreshTokenPayload {
   return decoded;
 }
 
+/**
+ * Per-token debounce for the `last_used_at` UPDATE. Single-instance BE
+ * for now; if we go multi-instance the debounce becomes per-instance,
+ * which is fine — at worst we get one extra write per minute per instance,
+ * not a correctness issue.
+ *
+ * Map<tokenId, lastWriteEpochMs>. Module-level on purpose: cleared only
+ * on process restart (and PATs that go quiet drop out of the map only
+ * when the process churns, which is acceptable for an in-memory hint).
+ */
+const PAT_LAST_USED_DEBOUNCE_MS = 60_000;
+const patLastUsedAt = new Map<string, number>();
+
+function maybeTouchLastUsed(tokenId: string): void {
+  const now = Date.now();
+  const last = patLastUsedAt.get(tokenId);
+  if (last !== undefined && now - last < PAT_LAST_USED_DEBOUNCE_MS) return;
+  patLastUsedAt.set(tokenId, now);
+  // Fire-and-forget. The service helper has its own try/catch so this
+  // never throws into the request path; the .catch is belt-and-braces.
+  patService.touchLastUsed(tokenId).catch((err) => {
+    logger.warn('PAT touchLastUsed unexpectedly threw', {
+      tokenId,
+      error: err instanceof Error ? err.message : String(err),
+    });
+  });
+}
+
 export const authenticate: RequestHandler = async (
   req: Request,
   res: Response,
@@ -58,6 +88,49 @@ export const authenticate: RequestHandler = async (
       return;
     }
 
+    // ── PAT path ─────────────────────────────────────────────────────
+    // PATs are recognised by their `bira_pat_` prefix. The string is
+    // hashed (sha256), looked up by hash, validated for revoke/expiry,
+    // and the owning user is loaded via the same `getUserById` path the
+    // JWT branch uses — so `req.user` is byte-for-byte identical between
+    // the two methods and downstream code stays agnostic.
+    //
+    // Failure modes are intentionally collapsed into a single 401 with
+    // a generic message: the caller doesn't get to distinguish "wrong
+    // token" from "revoked" from "expired" — that's an information leak.
+    if (token.startsWith(PAT_PREFIX)) {
+      const hashHex = hashPat(token);
+      const pat = await patService.findActiveByHash(hashHex);
+      if (!pat) {
+        logger.warn('Auth: invalid or expired PAT', { path: req.originalUrl });
+        res.status(401).json({
+          success: false,
+          message: 'Access denied. Invalid or expired token.',
+        });
+        return;
+      }
+
+      const user = await getUserById(pat.userId);
+      if (!user || !user.isActive) {
+        logger.warn('Auth: PAT owner not found or inactive', {
+          tokenId: pat.id,
+          userId: pat.userId,
+        });
+        res.status(401).json({
+          success: false,
+          message: 'Access denied. Invalid or expired token.',
+        });
+        return;
+      }
+
+      req.user = user;
+      req.auth = { method: 'pat', tokenId: pat.id };
+      maybeTouchLastUsed(pat.id);
+      next();
+      return;
+    }
+
+    // ── JWT path (unchanged behaviour) ───────────────────────────────
     let decoded: AccessTokenPayload;
     try {
       decoded = jwt.verify(token, jwtSecret('access')) as AccessTokenPayload;
@@ -86,6 +159,7 @@ export const authenticate: RequestHandler = async (
     }
 
     req.user = user;
+    req.auth = { method: 'jwt' };
     next();
   } catch (err) {
     next(err);
@@ -111,6 +185,33 @@ export const requirePasswordResetCleared: RequestHandler = (req, res, next) => {
       code: 'PASSWORD_RESET_REQUIRED',
       message:
         'Your password must be reset before you can continue. Use POST /api/auth/change-password.',
+    });
+    return;
+  }
+  next();
+};
+
+/**
+ * Gate that blocks any request not authenticated via JWT — i.e. PAT-
+ * authed requests fail here with 403. Mount on PAT-management routes
+ * (`POST/GET/DELETE /api/auth/tokens`) so a stolen / leaked PAT cannot
+ * be used to mint additional PATs or revoke existing ones. The legitimate
+ * owner must log in with their password to manage their tokens.
+ *
+ * Returns a structured error code (`PAT_CANNOT_MINT_PAT`) so the FE / MCP
+ * client can surface a useful prompt rather than a generic "forbidden".
+ */
+export const requireJwtAuth: RequestHandler = (req, res, next) => {
+  if (!req.user) {
+    res.status(401).json({ success: false, message: 'Authentication required' });
+    return;
+  }
+  if (req.auth?.method !== 'jwt') {
+    res.status(403).json({
+      success: false,
+      code: 'PAT_CANNOT_MINT_PAT',
+      message:
+        'Personal Access Tokens cannot be used to manage tokens. Log in with your password first.',
     });
     return;
   }

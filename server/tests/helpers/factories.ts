@@ -10,7 +10,12 @@ import { createIssue as createIssueUseCase } from '../../src/usecases/issues/cre
 import { uploadFile as uploadFileUseCase } from '../../src/usecases/files/uploadFile.js';
 import { createComment as createCommentUseCase } from '../../src/usecases/comments/createComment.js';
 import { createMilestone as createMilestoneUseCase } from '../../src/usecases/milestones/createMilestone.js';
+import {
+  createToken as createTokenUseCase,
+  type PatExpiresIn,
+} from '../../src/usecases/personalAccessTokens/createToken.js';
 import type { User } from '../../src/entities/User.js';
+import type { PersonalAccessToken } from '../../src/entities/PersonalAccessToken.js';
 import type { Tenant } from '../../src/entities/Tenant.js';
 import type { Workspace } from '../../src/entities/Workspace.js';
 import type { Project } from '../../src/entities/Project.js';
@@ -339,5 +344,34 @@ export async function createMilestone(opts: CreateMilestoneFactoryOpts): Promise
     name: opts.name ?? `Milestone ${tag}`,
     description: opts.description,
     date: opts.date ?? '2030-01-01',
+  });
+}
+
+// ── Personal Access Token factories ───────────────────────────────────────
+
+export interface CreatePatOpts {
+  userId: string;
+  name?: string;
+  expiresIn?: PatExpiresIn;
+}
+
+export interface CreatePatResult {
+  token: PersonalAccessToken;
+  plaintext: string;
+}
+
+/**
+ * Creates a PAT by calling the real createToken usecase. Returns both the
+ * persisted entity and the plaintext (which is what tests need to set as
+ * `Authorization: Bearer <plaintext>` on subsequent requests). Goes through
+ * the usecase, not a raw service insert, so cap enforcement / hashing /
+ * last4 derivation are all exercised the same way prod hits them.
+ */
+export async function createPat(opts: CreatePatOpts): Promise<CreatePatResult> {
+  const tag = uniq();
+  return createTokenUseCase({
+    userId: opts.userId,
+    name: opts.name ?? `pat-${tag}`,
+    expiresIn: opts.expiresIn ?? 'never',
   });
 }

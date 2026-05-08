@@ -2,10 +2,10 @@
 // members) + user profile, all hosted under one /settings tree so users
 // only ever click "Settings" to find any of these surfaces. Sections live
 // as nested routes so each is deep-linkable.
-import { useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { Icon } from '../components/icons';
-import { TopBar, Avatar, useTenantBreadcrumbs, useTenantContext } from '../components/shell';
+import { TopBar, Avatar, Chip, useTenantBreadcrumbs, useTenantContext } from '../components/shell';
 import { Modal, ModalHeader, ModalBody, ModalFooter } from '../components/modal';
 import { Field, Hint, DangerRow } from '../components/forms';
 import { Section } from '../components/section';
@@ -19,6 +19,13 @@ import { useWorkspaceMembers } from '../state/workspace-members';
 import type { WorkspaceMember } from '../api/adapters/workspaceMember.adapter';
 import { updateProfile, changePassword } from '../api/auth';
 import { adminResetPassword, deactivateUser, reactivateUser } from '../api/userAdmin';
+import {
+  listTokens,
+  createToken,
+  revokeToken,
+  type PersonalAccessToken,
+  type PatExpiresIn,
+} from '../api/personalAccessTokens';
 
 // --- Outer layout (header + grouped left-nav + outlet) ---
 
@@ -1009,6 +1016,8 @@ export function ProfileSettings() {
         </div>
       </Section>
 
+      <ApiTokensSection />
+
       <Section title="Sign out" subtitle="Sign out of this device. You can sign back in any time." card>
         <button onClick={handleSignOut} className="btn">
           <Icon name="power" size={13} />Sign out
@@ -1016,6 +1025,439 @@ export function ProfileSettings() {
       </Section>
     </>
   );
+}
+
+// --- API tokens ---
+//
+// Personal Access Tokens — long-lived Bearer credentials a user can mint to
+// authenticate the BIRA MCP server (or any other Bearer client) on their
+// behalf. Profile-shaped (per-user, not per-tenant) so it lives next to
+// "change my password" in the Profile tab rather than as a top-level
+// Settings section.
+//
+// The plaintext is shown EXACTLY ONCE in `TokenCreatedModal`, kept in
+// transient React state, and cleared the moment that modal closes — never
+// localStorage, never logged.
+
+function ApiTokensSection() {
+  const [tokens, setTokens] = useState<PersonalAccessToken[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [showCreate, setShowCreate] = useState(false);
+  // Held only while the post-create modal is open. Cleared on close.
+  const [createdPlaintext, setCreatedPlaintext] = useState<string | null>(null);
+  const [revokeError, setRevokeError] = useState<string | null>(null);
+
+  const refresh = async () => {
+    setError(null);
+    try {
+      const list = await listTokens();
+      setTokens(list);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to load tokens');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    void refresh();
+  }, []);
+
+  const handleCreated = async (plaintext: string) => {
+    setCreatedPlaintext(plaintext);
+    // Refetch so the new row is in the list once the user closes the
+    // reveal modal. Cheaper to re-list than to mutate locally — the BE
+    // also computes ordering (active-first, recently-used-first).
+    await refresh();
+  };
+
+  const handleRevoke = async (t: PersonalAccessToken) => {
+    if (!window.confirm(
+      `Revoke token "${t.name}"? Any client using it will stop working immediately.`,
+    )) return;
+    setRevokeError(null);
+    try {
+      await revokeToken(t.id);
+      await refresh();
+    } catch (err) {
+      setRevokeError(err instanceof Error ? err.message : 'Failed to revoke token');
+    }
+  };
+
+  return (
+    <>
+      <Section
+        title="API tokens"
+        subtitle="Generate tokens to authenticate the BIRA MCP server or other Bearer-token clients on your behalf. Treat them like passwords — anyone with a token can act as you."
+        action={
+          tokens.length > 0 && !loading ? (
+            <button
+              onClick={() => setShowCreate(true)}
+              className="btn btn-primary btn-sm"
+            >
+              <Icon name="plus" size={13} />Generate token
+            </button>
+          ) : undefined
+        }
+        card
+      >
+        {revokeError && (
+          <div style={{
+            padding: '7px 10px', borderRadius: 6, fontSize: 12, marginBottom: 12,
+            background: 'color-mix(in srgb, var(--blocked) 10%, var(--bg))',
+            border: '1px solid color-mix(in srgb, var(--blocked) 30%, transparent)',
+            color: 'var(--blocked)',
+          }}>
+            {revokeError}
+          </div>
+        )}
+
+        {loading && (
+          <div style={{ padding: 24, textAlign: 'center', color: 'var(--fg-muted)', fontSize: 13 }}>
+            Loading tokens…
+          </div>
+        )}
+
+        {error && !loading && (
+          <div style={{
+            padding: '7px 10px', borderRadius: 6, fontSize: 12, marginBottom: 12,
+            background: 'color-mix(in srgb, var(--blocked) 10%, var(--bg))',
+            border: '1px solid color-mix(in srgb, var(--blocked) 30%, transparent)',
+            color: 'var(--blocked)',
+            display: 'flex', alignItems: 'center', gap: 8,
+          }}>
+            <span style={{ flex: 1 }}>{error}</span>
+            <button onClick={() => void refresh()} className="btn btn-sm">Retry</button>
+          </div>
+        )}
+
+        {!loading && !error && tokens.length === 0 && (
+          <EmptyState
+            size="inline"
+            icon="lock"
+            title="No API tokens yet"
+            description="You haven't created any API tokens yet. Generate one to use the BIRA MCP server or other Bearer-token clients."
+            action={
+              <button
+                onClick={() => setShowCreate(true)}
+                className="btn btn-primary btn-sm"
+              >
+                <Icon name="plus" size={13} />Generate token
+              </button>
+            }
+          />
+        )}
+
+        {!loading && !error && tokens.length > 0 && (
+          <div className="card" style={{ padding: 0 }}>
+            <ApiTokensHeader />
+            {tokens.map((t) => (
+              <ApiTokenRow
+                key={t.id}
+                token={t}
+                first={false /* header above already provides the top divider */}
+                onRevoke={() => handleRevoke(t)}
+              />
+            ))}
+          </div>
+        )}
+      </Section>
+
+      {showCreate && (
+        <CreateTokenModal
+          onClose={() => setShowCreate(false)}
+          onCreated={async (plaintext) => {
+            setShowCreate(false);
+            await handleCreated(plaintext);
+          }}
+        />
+      )}
+
+      {createdPlaintext && (
+        <TokenCreatedModal
+          plaintext={createdPlaintext}
+          // Clear the plaintext from state on close so it can't be reopened
+          // or read out of devtools after the user dismisses the reveal.
+          onClose={() => setCreatedPlaintext(null)}
+        />
+      )}
+    </>
+  );
+}
+
+// Column widths shared by the header + each row so they line up exactly.
+// Mirrors the pattern used by `MemberRow` further up — fixed widths on the
+// chip / date columns keep the action button right-aligned across rows.
+const TOKEN_GRID = '1fr 200px 90px 90px 110px 100px';
+
+function ApiTokensHeader() {
+  return (
+    <div
+      style={{
+        display: 'grid',
+        gridTemplateColumns: TOKEN_GRID,
+        gap: 12, alignItems: 'center',
+        padding: '8px 14px',
+        background: 'var(--bg-subtle)',
+        borderBottom: '1px solid var(--border-muted)',
+        fontSize: 11, fontWeight: 600, color: 'var(--fg-muted)',
+        textTransform: 'uppercase', letterSpacing: 0.4,
+      }}
+    >
+      <span>Name</span>
+      <span>Token</span>
+      <span>Created</span>
+      <span>Last used</span>
+      <span>Expires</span>
+      <span />
+    </div>
+  );
+}
+
+interface ApiTokenRowProps {
+  token: PersonalAccessToken;
+  first: boolean;
+  onRevoke: () => void;
+}
+function ApiTokenRow({ token, first, onRevoke }: ApiTokenRowProps) {
+  const revoked = token.revokedAt !== null;
+  const expired = !revoked && isExpired(token.expiresAt);
+  // Visually dim revoked / expired rows the same way deactivated members
+  // dim — the row stays in the table for audit but it's clearly inert.
+  const muted = revoked || expired;
+
+  return (
+    <div
+      style={{
+        display: 'grid',
+        gridTemplateColumns: TOKEN_GRID,
+        gap: 12, alignItems: 'center',
+        padding: '10px 14px',
+        borderTop: first ? 'none' : '1px solid var(--border-muted)',
+        opacity: muted ? 0.65 : 1,
+      }}
+    >
+      <div style={{ minWidth: 0, fontSize: 13, fontWeight: 500 }}>{token.name}</div>
+      <div>
+        <Chip dim style={{ fontFamily: 'var(--font-mono)', fontSize: 11.5 }}>
+          bira_pat_…{token.last4}
+        </Chip>
+      </div>
+      <span style={{ fontSize: 11.5, color: 'var(--fg-muted)' }}>
+        {formatShortDate(token.createdAt)}
+      </span>
+      <span style={{ fontSize: 11.5, color: 'var(--fg-muted)' }}>
+        {token.lastUsedAt ? formatShortDate(token.lastUsedAt) : 'Never'}
+      </span>
+      <ExpiresCell expiresAt={token.expiresAt} expired={expired} />
+      <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+        {revoked ? (
+          <span
+            style={{
+              fontSize: 11, fontWeight: 600, letterSpacing: 0.4, textTransform: 'uppercase',
+              color: 'var(--fg-muted)', background: 'var(--bg-muted)',
+              padding: '2px 8px', borderRadius: 10,
+            }}
+          >
+            Revoked
+          </span>
+        ) : (
+          <button onClick={onRevoke} className="btn btn-danger btn-sm">
+            Revoke
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function ExpiresCell({ expiresAt, expired }: { expiresAt: string | null; expired: boolean }) {
+  if (expiresAt === null) {
+    return <span style={{ fontSize: 11.5, color: 'var(--fg-muted)' }}>Never</span>;
+  }
+  if (expired) {
+    return (
+      <span
+        style={{
+          fontSize: 11, fontWeight: 600, letterSpacing: 0.4, textTransform: 'uppercase',
+          color: 'var(--blocked)', background: 'var(--blocked-bg)',
+          padding: '2px 8px', borderRadius: 10,
+        }}
+        data-tip={`Expired ${formatShortDate(expiresAt)}`}
+      >
+        Expired
+      </span>
+    );
+  }
+  return (
+    <span style={{ fontSize: 11.5, color: 'var(--fg-muted)' }}>
+      {formatShortDate(expiresAt)}
+    </span>
+  );
+}
+
+interface CreateTokenModalProps {
+  onClose: () => void;
+  onCreated: (plaintext: string) => void | Promise<void>;
+}
+function CreateTokenModal({ onClose, onCreated }: CreateTokenModalProps) {
+  const [name, setName] = useState('');
+  const [expiresIn, setExpiresIn] = useState<PatExpiresIn>('never');
+  const [submitting, setSubmitting] = useState(false);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+
+  const submit = async () => {
+    setErrorMsg(null);
+    if (!name.trim()) {
+      setErrorMsg('Name is required.');
+      return;
+    }
+    setSubmitting(true);
+    try {
+      const result = await createToken({ name: name.trim(), expiresIn });
+      // Hand the plaintext up; the parent owns the reveal modal so the
+      // plaintext can outlive *this* modal (which closes on success).
+      await onCreated(result.plaintext);
+    } catch (err) {
+      setErrorMsg(err instanceof Error ? err.message : 'Failed to create token');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <Modal
+      onClose={onClose}
+      onSubmit={(e) => { e.preventDefault(); void submit(); }}
+      label="Generate API token"
+    >
+      <ModalHeader title="Generate API token" onClose={onClose} />
+      <ModalBody>
+        <Field label="Name">
+          <input
+            autoFocus
+            className="input"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            maxLength={64}
+            placeholder="e.g., claude-desktop"
+          />
+          <Hint>A short label so you can identify this token later (e.g., "claude-desktop").</Hint>
+        </Field>
+        <Field label="Expiration">
+          <select
+            className="input"
+            value={expiresIn}
+            onChange={(e) => setExpiresIn(e.target.value as PatExpiresIn)}
+          >
+            <option value="never">Never</option>
+            <option value="30d">30 days</option>
+            <option value="90d">90 days</option>
+            <option value="1y">1 year</option>
+          </select>
+        </Field>
+        {errorMsg && (
+          <div style={{
+            padding: '7px 10px', borderRadius: 6, fontSize: 12, marginTop: 8,
+            background: 'color-mix(in srgb, var(--blocked) 10%, var(--bg))',
+            border: '1px solid color-mix(in srgb, var(--blocked) 30%, transparent)',
+            color: 'var(--blocked)',
+          }}>
+            {errorMsg}
+          </div>
+        )}
+      </ModalBody>
+      <ModalFooter>
+        <div style={{ flex: 1 }} />
+        <button type="button" onClick={onClose} className="btn btn-sm">Cancel</button>
+        <button type="submit" disabled={submitting} className="btn btn-primary btn-sm">
+          <Icon name="plus" size={13} />
+          {submitting ? 'Generating…' : 'Generate'}
+        </button>
+      </ModalFooter>
+    </Modal>
+  );
+}
+
+interface TokenCreatedModalProps {
+  plaintext: string;
+  onClose: () => void;
+}
+function TokenCreatedModal({ plaintext, onClose }: TokenCreatedModalProps) {
+  // Mirrors `ResetPasswordResultModal` (this file, ~line 826) — same one-shot
+  // reveal shape, copy-button affordance, and warning copy tone. The plaintext
+  // is owned by the parent and cleared from state on close.
+  const [copied, setCopied] = useState(false);
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(plaintext);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      setCopied(false);
+    }
+  };
+  return (
+    <Modal onClose={onClose} label="Token created">
+      <ModalHeader title="Token created" onClose={onClose} />
+      <ModalBody>
+        <p style={{ fontSize: 13, color: 'var(--fg)', margin: '0 0 12px' }}>
+          Copy this token now. You won't be able to see it again — if you lose it, you'll need to generate a new one.
+        </p>
+        <div style={{
+          display: 'flex', alignItems: 'center', gap: 8,
+          padding: '8px 10px', borderRadius: 6,
+          border: '1px solid var(--border)', background: 'var(--bg-subtle)',
+        }}>
+          <code style={{
+            flex: 1, fontFamily: 'var(--font-mono)', fontSize: 13,
+            wordBreak: 'break-all',
+          }}>
+            {plaintext}
+          </code>
+          <button onClick={copy} className="btn btn-sm">
+            <Icon name="copy" size={13} />{copied ? 'Copied' : 'Copy'}
+          </button>
+        </div>
+        <Hint warning>Store this token somewhere safe (a password manager). BIRA does not retain a copy.</Hint>
+      </ModalBody>
+      <ModalFooter>
+        <div style={{ flex: 1 }} />
+        <button type="button" onClick={onClose} className="btn btn-primary btn-sm">Done</button>
+      </ModalFooter>
+    </Modal>
+  );
+}
+
+// Local date helpers — kept inline since the project doesn't have a shared
+// date util module yet (the only formatter, `formatRelative` in
+// issue-detail.tsx, is local to that file too). If a future PR extracts a
+// shared util, both call sites can collapse onto it.
+
+const MONTH_NAMES_SHORT = [
+  'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+  'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
+];
+
+function formatShortDate(iso: string): string {
+  if (!iso) return '';
+  const ts = Date.parse(iso);
+  if (Number.isNaN(ts)) return iso;
+  const d = new Date(ts);
+  const now = new Date();
+  // Same year → drop the year for compactness ("Apr 14"); otherwise include it.
+  const sameYear = d.getFullYear() === now.getFullYear();
+  return sameYear
+    ? `${MONTH_NAMES_SHORT[d.getMonth()]} ${d.getDate()}`
+    : `${MONTH_NAMES_SHORT[d.getMonth()]} ${d.getDate()}, ${d.getFullYear()}`;
+}
+
+function isExpired(iso: string | null): boolean {
+  if (!iso) return false;
+  const ts = Date.parse(iso);
+  if (Number.isNaN(ts)) return false;
+  return ts < Date.now();
 }
 
 // --- Helpers ---

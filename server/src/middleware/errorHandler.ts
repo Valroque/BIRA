@@ -7,6 +7,13 @@ interface NormalisedError {
   statusCode: number;
   message: string;
   data?: unknown;
+  /**
+   * Optional structured error code surfaced in the response body. Used by
+   * gates that need a stable, machine-readable handle (e.g.
+   * `PAT_LIMIT_REACHED`, `PAT_NOT_FOUND`) so the FE / MCP client can
+   * surface a useful prompt rather than parse the human message.
+   */
+  code?: string;
 }
 
 function normalise(err: unknown): NormalisedError {
@@ -14,7 +21,11 @@ function normalise(err: unknown): NormalisedError {
     return { statusCode: err.statusCode, message: err.message, data: err.data };
   }
   if (err instanceof ServiceError) {
-    return { statusCode: err.statusCode, message: err.message };
+    return {
+      statusCode: err.statusCode,
+      message: err.message,
+      ...(err.code ? { code: err.code } : {}),
+    };
   }
   if (err instanceof ZodError) {
     const message = err.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join(', ');
@@ -63,6 +74,7 @@ export const errorHandler = (
   res.status(normalised.statusCode).json({
     success: false,
     message: normalised.message,
+    ...(normalised.code !== undefined && { code: normalised.code }),
     ...(normalised.data !== undefined && { data: normalised.data }),
     ...(process.env.NODE_ENV === 'development' &&
       err instanceof Error && { stack: err.stack }),

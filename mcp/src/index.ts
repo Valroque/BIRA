@@ -1,4 +1,14 @@
 #!/usr/bin/env node
+// Tool descriptions follow the prefix grammar:
+//   [<role-required> · <METHOD> <path>] <description>
+// Role tokens (closed set): public, authed, tenant-member, tenant-admin,
+//   ws-member, ws-write, ws-admin, project-member, project-write,
+//   project-admin, self, self-or-tenant-admin, self-or-ws-admin,
+//   jwt-only (combine via `+`, e.g. `self+jwt-only`).
+// Path abbreviations: :t (tenant slug), :w (workspace slug), :p (project
+//   slug), :k (issue key), :id (uuid path param).
+// When adding a new tool, the prefix is mandatory — keep the source of
+//   truth (BE middleware mount order) aligned with the description.
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { z, type ZodTypeAny } from 'zod';
@@ -38,7 +48,7 @@ function tool<S extends ZodTypeAny>(
 
 tool(
   'login',
-  'Log in to BIRA. Stores the access token in this MCP process for subsequent tool calls.',
+  '[public · POST /api/auth/login] Log in to BIRA. Stores the access token in this MCP process for subsequent tool calls.',
   z.object({ email: z.string().email(), password: z.string().min(1) }),
   async ({ email, password }) => {
     const data = await client.request<AuthState>(
@@ -64,14 +74,21 @@ tool(
 
 tool(
   'profile',
-  'Get the currently logged-in BIRA user profile.',
+  '[authed · GET /api/auth/profile] Get the currently logged-in BIRA user profile.',
+  z.object({}),
+  async () => ok(await client.request('GET', '/api/auth/profile'))
+);
+
+tool(
+  'whoami',
+  '[authed · GET /api/auth/profile] Return the BIRA user this MCP process is currently acting as. Use this to confirm identity — especially when the credential came from the BIRA_API_TOKEN env var (PAT) and there was no interactive `login` call. Wraps GET /api/auth/profile and returns the user object verbatim.',
   z.object({}),
   async () => ok(await client.request('GET', '/api/auth/profile'))
 );
 
 tool(
   'update_profile',
-  'Update the current user profile. At least one of firstName / lastName / email / phone / avatar must be provided. phone and avatar accept null to clear.',
+  '[self · PATCH /api/auth/me] Update the current user profile. At least one of firstName / lastName / email / phone / avatar must be provided. phone and avatar accept null to clear.',
   z.object({
     firstName: z.string().min(1).max(128).optional(),
     lastName: z.string().min(1).max(128).optional(),
@@ -84,7 +101,7 @@ tool(
 
 tool(
   'change_password',
-  'Change the current user password. Required when the account is locked with mustResetPassword=true. New password must be ≥ 8 chars and differ from the current one.',
+  '[self · POST /api/auth/change-password] Change the current user password. Required when the account is locked with mustResetPassword=true. New password must be ≥ 8 chars and differ from the current one.',
   z.object({
     currentPassword: z.string().min(1),
     newPassword: z.string().min(8),
@@ -94,7 +111,7 @@ tool(
 
 tool(
   'refresh_token',
-  'Exchange a refresh token for a new access token. Public endpoint — no Bearer auth required.',
+  '[public · POST /api/auth/refresh-token] Exchange a refresh token for a new access token. Public endpoint — no Bearer auth required.',
   z.object({ refreshToken: z.string().min(1) }),
   async (body) =>
     ok(await client.request('POST', '/api/auth/refresh-token', body, { authed: false }))
@@ -102,7 +119,7 @@ tool(
 
 tool(
   'register',
-  'Register a new user. Public — no Bearer auth required. The created user has no tenant or workspace memberships; grant them via add_workspace_member after the tenant admin has already been added (tenant membership is created automatically when the user is granted into a workspace via that flow). Email must be unique. Returns the new user plus access + refresh tokens.',
+  '[public · POST /api/auth/register] Register a new user. Public — no Bearer auth required. The created user has no tenant or workspace memberships; grant them via add_workspace_member after the tenant admin has already been added (tenant membership is created automatically when the user is granted into a workspace via that flow). Email must be unique. Returns the new user plus access + refresh tokens.',
   z.object({
     email: z.string().email(),
     password: z.string().min(8),
@@ -113,18 +130,53 @@ tool(
     ok(await client.request('POST', '/api/auth/register', body, { authed: false }))
 );
 
+// ── Personal access tokens ────────────────────────────────────────────────
+//
+// CRUD wrappers around POST/GET/DELETE /api/auth/tokens. The mint guard
+// (BE returns 403 PAT_CANNOT_MINT_PAT) means `create_pat` and `revoke_pat`
+// only work when the MCP process is JWT-authed via the `login` tool — a
+// PAT cannot mint or revoke other PATs. `list_pats` works under either
+// credential.
+
+tool(
+  'list_pats',
+  "[self · GET /api/auth/tokens] List the current user's personal access tokens. Works under either JWT or PAT auth — agents running under a PAT can introspect their own tokens. The response NEVER includes the secret — only metadata (id, name, last4, createdAt, lastUsedAt, expiresAt, revokedAt). Active rows first, then revoked rows for audit context.",
+  z.object({}),
+  async () => ok(await client.request('GET', '/api/auth/tokens'))
+);
+
+tool(
+  'create_pat',
+  "[self+jwt-only · POST /api/auth/tokens] Mint a new personal access token for the current user. Requires interactive `login` first — cannot be called via env token; the BE returns 403 PAT_CANNOT_MINT_PAT in that case. The plaintext secret is returned EXACTLY ONCE in the response and cannot be retrieved later — copy it immediately. Cap is 10 active (non-revoked, non-expired) tokens per user; the 11th attempt returns 422 PAT_LIMIT_REACHED.",
+  z.object({
+    name: z.string().min(1).max(64),
+    expiresIn: z.enum(['never', '30d', '90d', '1y']),
+  }),
+  async (body) => ok(await client.request('POST', '/api/auth/tokens', body))
+);
+
+tool(
+  'revoke_pat',
+  "[self+jwt-only · DELETE /api/auth/tokens/:id] Revoke one of the current user's personal access tokens by id. Requires interactive `login` first — cannot be called via env token; the BE returns 403 PAT_CANNOT_MINT_PAT in that case. Idempotent-ish: an unknown id, another user's token id, or an already-revoked token all return 404 PAT_NOT_FOUND.",
+  z.object({
+    tokenId: z.string().uuid(),
+  }),
+  async ({ tokenId }) =>
+    ok(await client.request('DELETE', `/api/auth/tokens/${tokenId}`))
+);
+
 // ── Tenants ────────────────────────────────────────────────────────────────
 
 tool(
   'list_tenants',
-  'List all active tenants. Public — returns the same rows regardless of caller. Deactivated tenants are excluded.',
+  '[public · GET /api/tenants] List all active tenants. Public — returns the same rows regardless of caller. Deactivated tenants are excluded.',
   z.object({}),
   async () => ok(await client.request('GET', '/api/tenants', undefined, { authed: false }))
 );
 
 tool(
   'get_tenant',
-  'Get a tenant by slug.',
+  '[tenant-member · GET /api/tenants/:t] Get a tenant by slug.',
   z.object({ tenantSlug: z.string().min(1) }),
   async ({ tenantSlug }) =>
     ok(await client.request('GET', `/api/tenants/${tenantSlug}`))
@@ -132,7 +184,7 @@ tool(
 
 tool(
   'create_tenant',
-  'Create a new tenant. The caller is granted admin membership on the new tenant in the same transaction. Slug must be globally unique.',
+  '[authed · POST /api/tenants] Create a new tenant. The caller is granted admin membership on the new tenant in the same transaction. Slug must be globally unique.',
   z.object({
     slug: z.string().min(1),
     name: z.string().min(1),
@@ -146,7 +198,7 @@ tool(
 
 tool(
   'deactivate_tenant',
-  'Deactivate a tenant. No data is destroyed; the tenant disappears from the default list until reactivated. Requires tenant admin role.',
+  '[tenant-admin · POST /api/tenants/:t/deactivate] Deactivate a tenant. No data is destroyed; the tenant disappears from the default list until reactivated. Requires tenant admin role.',
   z.object({ tenantSlug: z.string().min(1) }),
   async ({ tenantSlug }) =>
     ok(await client.request('POST', `/api/tenants/${tenantSlug}/deactivate`))
@@ -154,7 +206,7 @@ tool(
 
 tool(
   'reactivate_tenant',
-  'Restore a previously deactivated tenant to active. Requires tenant admin role.',
+  '[tenant-admin · POST /api/tenants/:t/reactivate] Restore a previously deactivated tenant to active. Requires tenant admin role.',
   z.object({ tenantSlug: z.string().min(1) }),
   async ({ tenantSlug }) =>
     ok(await client.request('POST', `/api/tenants/${tenantSlug}/reactivate`))
@@ -162,7 +214,7 @@ tool(
 
 tool(
   'update_tenant',
-  'Update a tenant (name / letter / color / bg). Slug + plan are immutable. Tenant admin only; rejected on deactivated tenants.',
+  '[tenant-admin · PATCH /api/tenants/:t] Update a tenant (name / letter / color / bg). Slug + plan are immutable. Tenant admin only; rejected on deactivated tenants.',
   z.object({
     tenantSlug: z.string().min(1),
     name: z.string().min(1).max(255).optional(),
@@ -178,7 +230,7 @@ tool(
 
 tool(
   'list_workspaces',
-  'List workspaces in a tenant that the user can see. Archived workspaces are excluded by default; pass includeArchived=true to see them too.',
+  '[tenant-member · GET /api/tenants/:t/workspaces] List workspaces in a tenant that the user can see. Archived workspaces are excluded by default; pass includeArchived=true to see them too.',
   z.object({
     tenantSlug: z.string().min(1),
     includeArchived: z.boolean().optional(),
@@ -191,7 +243,7 @@ tool(
 
 tool(
   'get_workspace',
-  'Get a workspace by slug within a tenant. Returns { workspace, role } — workspace includes status (active/archived). Archived workspaces 404 unless includeArchived=true.',
+  '[ws-member · GET /api/tenants/:t/workspaces/:w] Get a workspace by slug within a tenant. Returns { workspace, role } — workspace includes status (active/archived). Archived workspaces 404 unless includeArchived=true.',
   z.object({
     tenantSlug: z.string().min(1),
     workspaceSlug: z.string().min(1),
@@ -210,7 +262,7 @@ tool(
 
 tool(
   'create_workspace',
-  'Create a workspace under a tenant. Requires tenant admin role.',
+  '[tenant-admin · POST /api/tenants/:t/workspaces] Create a workspace under a tenant. Requires tenant admin role.',
   z.object({
     tenantSlug: z.string().min(1),
     slug: z.string().min(1),
@@ -225,7 +277,7 @@ tool(
 
 tool(
   'update_workspace',
-  'Update a workspace name/letter/color/bg. Slug is immutable. Requires admin role on the workspace (tenant admins inherit).',
+  '[ws-admin · PATCH /api/tenants/:t/workspaces/:w] Update a workspace name/letter/color/bg. Slug is immutable. Requires admin role on the workspace (tenant admins inherit).',
   z.object({
     tenantSlug: z.string().min(1),
     workspaceSlug: z.string().min(1),
@@ -246,7 +298,7 @@ tool(
 
 tool(
   'archive_workspace',
-  'Archive a workspace. No data is destroyed; the workspace becomes read-only — project and other workspace-scoped writes are blocked until it is unarchived. Requires tenant admin role.',
+  '[tenant-admin · POST /api/tenants/:t/workspaces/:w/archive] Archive a workspace. No data is destroyed; the workspace becomes read-only — project and other workspace-scoped writes are blocked until it is unarchived. Requires tenant admin role.',
   z.object({
     tenantSlug: z.string().min(1),
     workspaceSlug: z.string().min(1),
@@ -262,7 +314,7 @@ tool(
 
 tool(
   'unarchive_workspace',
-  'Restore a previously archived workspace to active. Requires tenant admin role.',
+  '[tenant-admin · POST /api/tenants/:t/workspaces/:w/unarchive] Restore a previously archived workspace to active. Requires tenant admin role.',
   z.object({
     tenantSlug: z.string().min(1),
     workspaceSlug: z.string().min(1),
@@ -280,7 +332,7 @@ tool(
 
 tool(
   'list_projects',
-  'List projects in a workspace. Pass includeArchived=true to also surface frozen projects.',
+  '[ws-member · GET /api/tenants/:t/workspaces/:w/projects] List projects in a workspace. Pass includeArchived=true to also surface frozen projects.',
   z.object({
     tenantSlug: z.string().min(1),
     workspaceSlug: z.string().min(1),
@@ -299,7 +351,7 @@ tool(
 
 tool(
   'get_project',
-  'Get a project by slug within a workspace. Archived projects 404 unless includeArchived=true.',
+  '[ws-member · GET /api/tenants/:t/workspaces/:w/projects/:p] Get a project by slug within a workspace. Archived projects 404 unless includeArchived=true.',
   z.object({
     tenantSlug: z.string().min(1),
     workspaceSlug: z.string().min(1),
@@ -319,7 +371,7 @@ tool(
 
 tool(
   'create_project',
-  'Create a project in a workspace. Requires write role on the workspace.',
+  '[ws-write · POST /api/tenants/:t/workspaces/:w/projects] Create a project in a workspace. Requires write role on the workspace.',
   z.object({
     tenantSlug: z.string().min(1),
     workspaceSlug: z.string().min(1),
@@ -344,7 +396,7 @@ tool(
 
 tool(
   'update_project',
-  'Update a project (name/letter/color/bg/description). Slug + key are immutable. Requires admin role on the workspace (tenant admins inherit).',
+  '[ws-admin · PATCH /api/tenants/:t/workspaces/:w/projects/:p] Update a project (name/letter/color/bg/description). Slug + key are immutable. Requires admin role on the workspace (tenant admins inherit).',
   z.object({
     tenantSlug: z.string().min(1),
     workspaceSlug: z.string().min(1),
@@ -367,7 +419,7 @@ tool(
 
 tool(
   'archive_project',
-  'Archive a project. No data is destroyed; the project becomes read-only — issue create/update, links, parent changes, and comments are blocked until it is unarchived. Requires admin role on the workspace.',
+  '[ws-admin · POST /api/tenants/:t/workspaces/:w/projects/:p/archive] Archive a project. No data is destroyed; the project becomes read-only — issue create/update, links, parent changes, and comments are blocked until it is unarchived. Requires admin role on the workspace.',
   z.object({
     tenantSlug: z.string().min(1),
     workspaceSlug: z.string().min(1),
@@ -384,7 +436,7 @@ tool(
 
 tool(
   'unarchive_project',
-  'Restore a previously archived project to active. Requires admin role on the workspace.',
+  '[ws-admin · POST /api/tenants/:t/workspaces/:w/projects/:p/unarchive] Restore a previously archived project to active. Requires admin role on the workspace.',
   z.object({
     tenantSlug: z.string().min(1),
     workspaceSlug: z.string().min(1),
@@ -401,7 +453,7 @@ tool(
 
 tool(
   'list_tenant_members',
-  'List members of a tenant with hydrated user details (id, email, displayName, firstName, lastName, avatar, isActive, role, status, lastSeenAt). Sorted alphabetically by display name. Open to any tenant member (read+).',
+  '[tenant-member · GET /api/tenants/:t/members] List members of a tenant with hydrated user details (id, email, displayName, firstName, lastName, avatar, isActive, role, status, lastSeenAt). Sorted alphabetically by display name. Open to any tenant member (read+).',
   z.object({
     tenantSlug: z.string().min(1),
   }),
@@ -416,7 +468,7 @@ tool(
 
 tool(
   'get_tenant_member',
-  'Get a single tenant member by user uuid. Powers UUID-fallback display-name resolution for users not in the current workspace directory. Open to any tenant member (read+).',
+  '[tenant-member · GET /api/tenants/:t/members/:userId] Get a single tenant member by user uuid. Powers UUID-fallback display-name resolution for users not in the current workspace directory. Open to any tenant member (read+).',
   z.object({
     tenantSlug: z.string().min(1),
     userId: z.string().uuid(),
@@ -432,7 +484,7 @@ tool(
 
 tool(
   'add_tenant_member',
-  'Add a registered user to a tenant. Direct-add — the target must already exist as a user (no invite-token flow in v1). Idempotent on already-active members; reactivates rows in `invited` / `deactivated` state with the new role. Tenant admin only. Note: tenant admin role is only ever explicit-on-user, never team-derived.',
+  '[tenant-admin · POST /api/tenants/:t/members] Add a registered user to a tenant. Direct-add — the target must already exist as a user (no invite-token flow in v1). Idempotent on already-active members; reactivates rows in `invited` / `deactivated` state with the new role. Tenant admin only. Note: tenant admin role is only ever explicit-on-user, never team-derived.',
   z.object({
     tenantSlug: z.string().min(1),
     userId: z.string().uuid(),
@@ -450,7 +502,7 @@ tool(
 
 tool(
   'update_tenant_member_role',
-  "Update a tenant member's role. Last-admin guard refuses demoting the only active admin. Tenant admin only.",
+  "[tenant-admin · PATCH /api/tenants/:t/members/:userId] Update a tenant member's role. Last-admin guard refuses demoting the only active admin. Tenant admin only.",
   z.object({
     tenantSlug: z.string().min(1),
     userId: z.string().uuid(),
@@ -468,7 +520,7 @@ tool(
 
 tool(
   'remove_tenant_member',
-  'Remove a tenant member. Tenant admin OR the target themselves (self-leave). Last-admin guard applies. Cascades clear workspace_memberships, team_memberships, and project_user_access for this user across the entire tenant in the same transaction.',
+  '[self-or-tenant-admin · DELETE /api/tenants/:t/members/:userId] Remove a tenant member. Tenant admin OR the target themselves (self-leave). Last-admin guard applies. Cascades clear workspace_memberships, team_memberships, and project_user_access for this user across the entire tenant in the same transaction.',
   z.object({
     tenantSlug: z.string().min(1),
     userId: z.string().uuid(),
@@ -484,7 +536,7 @@ tool(
 
 tool(
   'admin_reset_password',
-  'Tenant admin generates a temporary password for another member. The plaintext is returned exactly once — share it OOB. The target user must call change_password before they can interact with tenant data.',
+  '[tenant-admin · POST /api/tenants/:t/members/:userId/reset-password] Tenant admin generates a temporary password for another member. The plaintext is returned exactly once — share it OOB. The target user must call change_password before they can interact with tenant data.',
   z.object({
     tenantSlug: z.string().min(1),
     userId: z.string().uuid(),
@@ -500,7 +552,7 @@ tool(
 
 tool(
   'deactivate_user',
-  "Tenant admin flips another member's isActive flag to false. Effective scope is global (the user can't log in to ANY tenant), but the gate is tenant-admin — the target must be an active member of this tenant. Existing sessions are rejected on the next request. Self-target → 400.",
+  "[tenant-admin · POST /api/tenants/:t/members/:userId/deactivate] Tenant admin flips another member's isActive flag to false. Effective scope is global (the user can't log in to ANY tenant), but the gate is tenant-admin — the target must be an active member of this tenant. Existing sessions are rejected on the next request. Self-target → 400.",
   z.object({
     tenantSlug: z.string().min(1),
     userId: z.string().uuid(),
@@ -516,7 +568,7 @@ tool(
 
 tool(
   'reactivate_user',
-  'Tenant admin restores a previously deactivated user. Same scope rules as deactivate_user.',
+  '[tenant-admin · POST /api/tenants/:t/members/:userId/reactivate] Tenant admin restores a previously deactivated user. Same scope rules as deactivate_user.',
   z.object({
     tenantSlug: z.string().min(1),
     userId: z.string().uuid(),
@@ -540,7 +592,7 @@ const ISO_DATE = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Date must be YYYY-MM-D
 
 tool(
   'list_issues',
-  'List issues. Pass projectSlug to scope to one project; omit it to list across the whole workspace. Optional filters: status, type, assigneeUserId, label, priority. The workspace-scoped form additionally accepts projectId.',
+  '[ws-member · GET /api/tenants/:t/workspaces/:w/issues | GET /api/tenants/:t/workspaces/:w/projects/:p/issues] List issues. Pass projectSlug to scope to one project; omit it to list across the whole workspace. Optional filters: status, type, assigneeUserId, label, priority. The workspace-scoped form additionally accepts projectId.',
   z.object({
     tenantSlug: z.string().min(1),
     workspaceSlug: z.string().min(1),
@@ -567,7 +619,7 @@ tool(
 
 tool(
   'get_issue',
-  'Get a single issue by key (e.g. CMT-7) within a project.',
+  '[ws-member · GET /api/tenants/:t/workspaces/:w/projects/:p/issues/:k] Get a single issue by key (e.g. CMT-7) within a project.',
   z.object({
     tenantSlug: z.string().min(1),
     workspaceSlug: z.string().min(1),
@@ -585,7 +637,7 @@ tool(
 
 tool(
   'create_issue',
-  'Create an issue under a project. Workspace write+. Stories require an Epic parent. Schedules (start/end/estimate) are only valid on Tasks/Bugs. `assigneeUserId` and `teamId` are mutually exclusive — passing both non-null is a 400; both null is allowed (Unscheduled).',
+  '[ws-write · POST /api/tenants/:t/workspaces/:w/projects/:p/issues] Create an issue under a project. Workspace write+. Stories require an Epic parent. Schedules (start/end/estimate) are only valid on Tasks/Bugs. `assigneeUserId` and `teamId` are mutually exclusive — passing both non-null is a 400; both null is allowed (Unscheduled).',
   z.object({
     tenantSlug: z.string().min(1),
     workspaceSlug: z.string().min(1),
@@ -616,7 +668,7 @@ tool(
 
 tool(
   'update_issue',
-  'Update an issue by key. At least one field is required. Status changes are validated against the project workflow. `assigneeUserId` and `teamId` are mutually exclusive: setting one to a non-null value automatically clears the other on the same write. Passing both non-null in one patch is a 400. Explicit `null` clears that field WITHOUT touching the other.',
+  '[ws-write · PATCH /api/tenants/:t/workspaces/:w/projects/:p/issues/:k] Update an issue by key. At least one field is required. Status changes are validated against the project workflow. `assigneeUserId` and `teamId` are mutually exclusive: setting one to a non-null value automatically clears the other on the same write. Passing both non-null in one patch is a 400. Explicit `null` clears that field WITHOUT touching the other.',
   z.object({
     tenantSlug: z.string().min(1),
     workspaceSlug: z.string().min(1),
@@ -646,7 +698,7 @@ tool(
 
 tool(
   'set_issue_parent',
-  'Move an issue under a new parent (or clear with parent=null). Hierarchy rules apply: Epics are top-level, Stories require an Epic parent, Tasks/Bugs are leaves.',
+  '[ws-write · PATCH /api/tenants/:t/workspaces/:w/projects/:p/issues/:k/parent] Move an issue under a new parent (or clear with parent=null). Hierarchy rules apply: Epics are top-level, Stories require an Epic parent, Tasks/Bugs are leaves.',
   z.object({
     tenantSlug: z.string().min(1),
     workspaceSlug: z.string().min(1),
@@ -668,7 +720,7 @@ tool(
 
 tool(
   'add_issue_relation',
-  'Add a symmetric `relates` link between two issues in the same workspace.',
+  '[ws-write · POST /api/tenants/:t/workspaces/:w/projects/:p/issues/:k/relates] Add a symmetric `relates` link between two issues in the same workspace.',
   z.object({
     tenantSlug: z.string().min(1),
     workspaceSlug: z.string().min(1),
@@ -688,7 +740,7 @@ tool(
 
 tool(
   'remove_issue_relation',
-  'Remove a `relates` link between two issues.',
+  '[ws-write · DELETE /api/tenants/:t/workspaces/:w/projects/:p/issues/:k/relates/:relatedKey] Remove a `relates` link between two issues.',
   z.object({
     tenantSlug: z.string().min(1),
     workspaceSlug: z.string().min(1),
@@ -707,7 +759,7 @@ tool(
 
 tool(
   'add_issue_dependency',
-  'Mark an issue as depending on another (Task-only). The depender (`key`) cannot start until the blocker (`blockerKey`) ends. Cycles are rejected.',
+  '[ws-write · POST /api/tenants/:t/workspaces/:w/projects/:p/issues/:k/dependencies] Mark an issue as depending on another (Task-only). The depender (`key`) cannot start until the blocker (`blockerKey`) ends. Cycles are rejected.',
   z.object({
     tenantSlug: z.string().min(1),
     workspaceSlug: z.string().min(1),
@@ -727,7 +779,7 @@ tool(
 
 tool(
   'remove_issue_dependency',
-  'Remove a `depends on` edge.',
+  '[ws-write · DELETE /api/tenants/:t/workspaces/:w/projects/:p/issues/:k/dependencies/:blockerKey] Remove a `depends on` edge.',
   z.object({
     tenantSlug: z.string().min(1),
     workspaceSlug: z.string().min(1),
@@ -748,7 +800,7 @@ tool(
 
 tool(
   'list_comments',
-  'List comments on an issue, oldest first.',
+  '[ws-member · GET /api/tenants/:t/workspaces/:w/projects/:p/issues/:k/comments] List comments on an issue, oldest first.',
   z.object({
     tenantSlug: z.string().min(1),
     workspaceSlug: z.string().min(1),
@@ -766,7 +818,7 @@ tool(
 
 tool(
   'create_comment',
-  'Add a comment to an issue. Up to 10 attachment refs (attachment:<uuid>) per comment.',
+  '[ws-write · POST /api/tenants/:t/workspaces/:w/projects/:p/issues/:k/comments] Add a comment to an issue. Up to 10 attachment refs (attachment:<uuid>) per comment.',
   z.object({
     tenantSlug: z.string().min(1),
     workspaceSlug: z.string().min(1),
@@ -787,7 +839,7 @@ tool(
 
 tool(
   'update_comment',
-  'Edit a comment. At least one of body or attachmentIds must be provided.',
+  '[ws-write · PATCH /api/tenants/:t/workspaces/:w/comments/:commentId] Edit a comment. At least one of body or attachmentIds must be provided. Usecase further restricts mutation to the author or a workspace admin.',
   z.object({
     tenantSlug: z.string().min(1),
     workspaceSlug: z.string().min(1),
@@ -807,7 +859,7 @@ tool(
 
 tool(
   'delete_comment',
-  'Delete a comment. Author or workspace admin only.',
+  '[ws-write · DELETE /api/tenants/:t/workspaces/:w/comments/:commentId] Delete a comment. Author or workspace admin only.',
   z.object({
     tenantSlug: z.string().min(1),
     workspaceSlug: z.string().min(1),
@@ -826,7 +878,7 @@ tool(
 
 tool(
   'list_milestones',
-  'List milestones. Pass projectSlug to scope to one project; omit it to list across the whole workspace. The workspace-scoped form additionally accepts projectId (uuid) as a filter.',
+  '[ws-member · GET /api/tenants/:t/workspaces/:w/milestones | GET /api/tenants/:t/workspaces/:w/projects/:p/milestones] List milestones. Pass projectSlug to scope to one project; omit it to list across the whole workspace. The workspace-scoped form additionally accepts projectId (uuid) as a filter.',
   z.object({
     tenantSlug: z.string().min(1),
     workspaceSlug: z.string().min(1),
@@ -843,7 +895,7 @@ tool(
 
 tool(
   'get_milestone',
-  "Get a milestone by uuid. The URL must match the milestone's project — a milestone uuid that lives in the same workspace but on a different project 404s.",
+  "[ws-member · GET /api/tenants/:t/workspaces/:w/projects/:p/milestones/:milestoneId] Get a milestone by uuid. The URL must match the milestone's project — a milestone uuid that lives in the same workspace but on a different project 404s.",
   z.object({
     tenantSlug: z.string().min(1),
     workspaceSlug: z.string().min(1),
@@ -861,7 +913,7 @@ tool(
 
 tool(
   'create_milestone',
-  'Create a milestone under a project. Workspace write+; rejected if the project is archived.',
+  '[ws-write · POST /api/tenants/:t/workspaces/:w/projects/:p/milestones] Create a milestone under a project. Workspace write+; rejected if the project is archived.',
   z.object({
     tenantSlug: z.string().min(1),
     workspaceSlug: z.string().min(1),
@@ -882,7 +934,7 @@ tool(
 
 tool(
   'update_milestone',
-  'Update a milestone (name / description / date). At least one field required. Workspace write+; rejected if the project is archived.',
+  '[ws-write · PATCH /api/tenants/:t/workspaces/:w/projects/:p/milestones/:milestoneId] Update a milestone (name / description / date). At least one field required. Workspace write+; rejected if the project is archived.',
   z.object({
     tenantSlug: z.string().min(1),
     workspaceSlug: z.string().min(1),
@@ -904,7 +956,7 @@ tool(
 
 tool(
   'delete_milestone',
-  'Delete a milestone. Workspace write+; rejected if the project is archived.',
+  '[ws-write · DELETE /api/tenants/:t/workspaces/:w/projects/:p/milestones/:milestoneId] Delete a milestone. Workspace write+; rejected if the project is archived.',
   z.object({
     tenantSlug: z.string().min(1),
     workspaceSlug: z.string().min(1),
@@ -948,7 +1000,7 @@ const TransitionInput = z.object({
 
 tool(
   'list_workflows',
-  'List workflows in a workspace.',
+  '[ws-member · GET /api/tenants/:t/workspaces/:w/workflows] List workflows in a workspace.',
   z.object({
     tenantSlug: z.string().min(1),
     workspaceSlug: z.string().min(1),
@@ -964,7 +1016,7 @@ tool(
 
 tool(
   'get_workflow',
-  'Get a workflow with its nodes, transitions, and transition rules.',
+  '[ws-member · GET /api/tenants/:t/workspaces/:w/workflows/:workflowSlug] Get a workflow with its nodes, transitions, and transition rules.',
   z.object({
     tenantSlug: z.string().min(1),
     workspaceSlug: z.string().min(1),
@@ -981,7 +1033,7 @@ tool(
 
 tool(
   'create_workflow',
-  'Create a workflow. Nodes are inserted first; pass transition fromNodeId/toNodeId in a follow-up update once node ids are known, OR omit transitions entirely on first create.',
+  '[ws-write · POST /api/tenants/:t/workspaces/:w/workflows] Create a workflow. Nodes are inserted first; pass transition fromNodeId/toNodeId in a follow-up update once node ids are known, OR omit transitions entirely on first create.',
   z.object({
     tenantSlug: z.string().min(1),
     workspaceSlug: z.string().min(1),
@@ -1003,7 +1055,7 @@ tool(
 
 tool(
   'update_workflow',
-  'Replace a workflow definition. Pass nodes and/or transitions to fully replace those sets; pass name/description to rename. Each node may carry an optional id (uuid) — supply existing node ids to preserve them across the full-replace so transitions in the same call can reference them; omit id on new nodes and the BE mints one.',
+  '[ws-write · PATCH /api/tenants/:t/workspaces/:w/workflows/:workflowSlug] Replace a workflow definition. Pass nodes and/or transitions to fully replace those sets; pass name/description to rename. Each node may carry an optional id (uuid) — supply existing node ids to preserve them across the full-replace so transitions in the same call can reference them; omit id on new nodes and the BE mints one.',
   z.object({
     tenantSlug: z.string().min(1),
     workspaceSlug: z.string().min(1),
@@ -1025,7 +1077,7 @@ tool(
 
 tool(
   'delete_workflow',
-  'Delete a workflow. Workspace admin only.',
+  '[ws-admin · DELETE /api/tenants/:t/workspaces/:w/workflows/:workflowSlug] Delete a workflow. Workspace admin only.',
   z.object({
     tenantSlug: z.string().min(1),
     workspaceSlug: z.string().min(1),
@@ -1044,7 +1096,7 @@ tool(
 
 tool(
   'get_project_workflows',
-  'Return the per-issue-type workflow assignment for a project.',
+  '[ws-member · GET /api/tenants/:t/workspaces/:w/projects/:p/workflows] Return the per-issue-type workflow assignment for a project.',
   z.object({
     tenantSlug: z.string().min(1),
     workspaceSlug: z.string().min(1),
@@ -1061,7 +1113,7 @@ tool(
 
 tool(
   'set_project_workflow',
-  'Assign a workflow to a (project, issueType) pair. issueType is one of T/B/S/E.',
+  '[ws-write · PUT /api/tenants/:t/workspaces/:w/projects/:p/workflows/:issueType] Assign a workflow to a (project, issueType) pair. issueType is one of T/B/S/E.',
   z.object({
     tenantSlug: z.string().min(1),
     workspaceSlug: z.string().min(1),
@@ -1083,7 +1135,7 @@ tool(
 
 tool(
   'search_mentionables',
-  'Search for @-mention candidates in a workspace. v1: users only — passing types=[\'team\'] returns 501 until workspace_teams ships.',
+  '[ws-member · GET /api/tenants/:t/workspaces/:w/mentionables/search] Search for @-mention candidates in a workspace. v1: users only — passing types=[\'team\'] returns 501 until workspace_teams ships.',
   z.object({
     tenantSlug: z.string().min(1),
     workspaceSlug: z.string().min(1),
@@ -1115,7 +1167,7 @@ const ROLE = z.enum(['admin', 'write', 'read']);
 
 tool(
   'list_workspace_members',
-  'List members of a workspace with hydrated user details and tenant-admin flags. Open to any workspace member.',
+  '[ws-member · GET /api/tenants/:t/workspaces/:w/members] List members of a workspace with hydrated user details and tenant-admin flags. Open to any workspace member.',
   z.object({
     tenantSlug: z.string().min(1),
     workspaceSlug: z.string().min(1),
@@ -1131,7 +1183,7 @@ tool(
 
 tool(
   'add_workspace_member',
-  'Add a user to a workspace. Direct-add only — the target must already be an active tenant member (400 otherwise). Workspace admin only.',
+  '[ws-admin · POST /api/tenants/:t/workspaces/:w/members] Add a user to a workspace. Direct-add only — the target must already be an active tenant member (400 otherwise). Workspace admin only.',
   z.object({
     tenantSlug: z.string().min(1),
     workspaceSlug: z.string().min(1),
@@ -1150,7 +1202,7 @@ tool(
 
 tool(
   'update_workspace_member_role',
-  "Update a workspace member's role. Last-admin guard refuses demoting the only effective admin. Workspace admin only.",
+  "[ws-admin · PATCH /api/tenants/:t/workspaces/:w/members/:membershipId] Update a workspace member's role. Last-admin guard refuses demoting the only effective admin. Workspace admin only.",
   z.object({
     tenantSlug: z.string().min(1),
     workspaceSlug: z.string().min(1),
@@ -1169,7 +1221,7 @@ tool(
 
 tool(
   'remove_workspace_member',
-  'Remove a workspace member. Workspace admin OR the target themselves (self-leave). Last-admin guard applies. Cascades clear team_memberships and project_user_access for this user in this workspace.',
+  '[self-or-ws-admin · DELETE /api/tenants/:t/workspaces/:w/members/:membershipId] Remove a workspace member. Workspace admin OR the target themselves (self-leave). Last-admin guard applies. Cascades clear team_memberships and project_user_access for this user in this workspace.',
   z.object({
     tenantSlug: z.string().min(1),
     workspaceSlug: z.string().min(1),
@@ -1188,7 +1240,7 @@ tool(
 
 tool(
   'list_teams',
-  'List teams in a workspace. Each entry includes memberCount and a hydrated members[] roster.',
+  '[ws-member · GET /api/tenants/:t/workspaces/:w/teams] List teams in a workspace. Each entry includes memberCount and a hydrated members[] roster.',
   z.object({
     tenantSlug: z.string().min(1),
     workspaceSlug: z.string().min(1),
@@ -1204,7 +1256,7 @@ tool(
 
 tool(
   'create_team',
-  'Create a team in a workspace. Slug is workspace-unique and immutable. Workspace admin only.',
+  '[ws-admin · POST /api/tenants/:t/workspaces/:w/teams] Create a team in a workspace. Slug is workspace-unique and immutable. Workspace admin only.',
   z.object({
     tenantSlug: z.string().min(1),
     workspaceSlug: z.string().min(1),
@@ -1225,7 +1277,7 @@ tool(
 
 tool(
   'get_team',
-  'Get a team by slug, hydrated with members.',
+  '[ws-member · GET /api/tenants/:t/workspaces/:w/teams/:teamSlug] Get a team by slug, hydrated with members.',
   z.object({
     tenantSlug: z.string().min(1),
     workspaceSlug: z.string().min(1),
@@ -1242,7 +1294,7 @@ tool(
 
 tool(
   'update_team',
-  'Update a team (name / description / color). Slug is immutable. Workspace admin only.',
+  '[ws-admin · PATCH /api/tenants/:t/workspaces/:w/teams/:teamSlug] Update a team (name / description / color). Slug is immutable. Workspace admin only.',
   z.object({
     tenantSlug: z.string().min(1),
     workspaceSlug: z.string().min(1),
@@ -1263,7 +1315,7 @@ tool(
 
 tool(
   'delete_team',
-  'Delete a team. CASCADE removes team_memberships and project_team_access rows. Workspace admin only.',
+  '[ws-admin · DELETE /api/tenants/:t/workspaces/:w/teams/:teamSlug] Delete a team. CASCADE removes team_memberships and project_team_access rows. Workspace admin only.',
   z.object({
     tenantSlug: z.string().min(1),
     workspaceSlug: z.string().min(1),
@@ -1280,7 +1332,7 @@ tool(
 
 tool(
   'list_team_members',
-  'List the roster of a team.',
+  '[ws-member · GET /api/tenants/:t/workspaces/:w/teams/:teamSlug/members] List the roster of a team.',
   z.object({
     tenantSlug: z.string().min(1),
     workspaceSlug: z.string().min(1),
@@ -1297,7 +1349,7 @@ tool(
 
 tool(
   'add_team_member',
-  'Add a user to a team. The target must be an active workspace member (400 otherwise). Workspace admin only.',
+  '[ws-admin · POST /api/tenants/:t/workspaces/:w/teams/:teamSlug/members] Add a user to a team. The target must be an active workspace member (400 otherwise). Workspace admin only.',
   z.object({
     tenantSlug: z.string().min(1),
     workspaceSlug: z.string().min(1),
@@ -1316,7 +1368,7 @@ tool(
 
 tool(
   'remove_team_member',
-  'Remove a user from a team. Workspace admin only.',
+  '[ws-admin · DELETE /api/tenants/:t/workspaces/:w/teams/:teamSlug/members/:userId] Remove a user from a team. Workspace admin only.',
   z.object({
     tenantSlug: z.string().min(1),
     workspaceSlug: z.string().min(1),
@@ -1338,7 +1390,7 @@ const TEAM_GRANT_ROLE = z.enum(['write', 'read']); // admin never inherited via 
 
 tool(
   'list_project_access',
-  'List project access grants — `teams` (with memberCount) and `users` (with hydrated user details).',
+  '[ws-member · GET /api/tenants/:t/workspaces/:w/projects/:p/access] List project access grants — `teams` (with memberCount) and `users` (with hydrated user details).',
   z.object({
     tenantSlug: z.string().min(1),
     workspaceSlug: z.string().min(1),
@@ -1355,7 +1407,7 @@ tool(
 
 tool(
   'list_project_effective_members',
-  'List effective project members with provenance. Provenance precedence: explicit-user > tenant-admin > workspace-admin > team. Team-derived entries include viaTeams[].',
+  '[ws-member · GET /api/tenants/:t/workspaces/:w/projects/:p/access/effective-members] List effective project members with provenance. Provenance precedence: explicit-user > tenant-admin > workspace-admin > team. Team-derived entries include viaTeams[].',
   z.object({
     tenantSlug: z.string().min(1),
     workspaceSlug: z.string().min(1),
@@ -1372,7 +1424,7 @@ tool(
 
 tool(
   'add_project_team_grant',
-  'Grant a team access to a project (write or read — admin is never inherited via teams). Workspace admin only.',
+  '[ws-admin · POST /api/tenants/:t/workspaces/:w/projects/:p/access/teams] Grant a team access to a project (write or read — admin is never inherited via teams). Workspace admin only.',
   z.object({
     tenantSlug: z.string().min(1),
     workspaceSlug: z.string().min(1),
@@ -1392,7 +1444,7 @@ tool(
 
 tool(
   'update_project_team_grant',
-  "Change a team's project role (write ↔ read). Workspace admin only.",
+  "[ws-admin · PATCH /api/tenants/:t/workspaces/:w/projects/:p/access/teams/:teamId] Change a team's project role (write ↔ read). Workspace admin only.",
   z.object({
     tenantSlug: z.string().min(1),
     workspaceSlug: z.string().min(1),
@@ -1412,7 +1464,7 @@ tool(
 
 tool(
   'remove_project_team_grant',
-  'Revoke a team grant. Workspace admin only.',
+  '[ws-admin · DELETE /api/tenants/:t/workspaces/:w/projects/:p/access/teams/:teamId] Revoke a team grant. Workspace admin only.',
   z.object({
     tenantSlug: z.string().min(1),
     workspaceSlug: z.string().min(1),
@@ -1430,7 +1482,7 @@ tool(
 
 tool(
   'add_project_user_grant',
-  'Grant an explicit user access to a project. Target must be an active workspace member (or a tenant admin). Roles: admin / write / read. Workspace admin only.',
+  '[ws-admin · POST /api/tenants/:t/workspaces/:w/projects/:p/access/users] Grant an explicit user access to a project. Target must be an active workspace member (or a tenant admin). Roles: admin / write / read. Workspace admin only.',
   z.object({
     tenantSlug: z.string().min(1),
     workspaceSlug: z.string().min(1),
@@ -1450,7 +1502,7 @@ tool(
 
 tool(
   'update_project_user_grant',
-  "Change an explicit user's project role. Workspace admin only.",
+  "[ws-admin · PATCH /api/tenants/:t/workspaces/:w/projects/:p/access/users/:userId] Change an explicit user's project role. Workspace admin only.",
   z.object({
     tenantSlug: z.string().min(1),
     workspaceSlug: z.string().min(1),
@@ -1470,7 +1522,7 @@ tool(
 
 tool(
   'remove_project_user_grant',
-  'Revoke an explicit user grant. Workspace admin only.',
+  '[ws-admin · DELETE /api/tenants/:t/workspaces/:w/projects/:p/access/users/:userId] Revoke an explicit user grant. Workspace admin only.',
   z.object({
     tenantSlug: z.string().min(1),
     workspaceSlug: z.string().min(1),
