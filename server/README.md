@@ -337,6 +337,20 @@ tenant; otherwise 404. Login (and refresh, and any
 is deactivated — the auth middleware checks `isActive` on every
 authenticated request, so existing sessions die on the next call.
 
+Deactivation is also gated by the **workspace last-admin invariant**
+(issue #20): if flipping the user inactive would leave any workspace
+in the tenant with zero effective admins, the request is rejected
+with `409` and a message naming the offending workspace slug(s) —
+"effective admin" matches `resolveEffectiveWorkspaceRole` (explicit
+active workspace admin OR active tenant admin). Under the v1
+"implicit OK" rule, the API-reachable surface for stranding a
+workspace is empty (the actor must already be a tenant admin to call
+this endpoint, so at least one tenant admin remains and covers every
+workspace). The guard is wired in as defense-in-depth — it stays
+correct if a future surface (e.g. a system-admin path) bypasses the
+tenant-admin gate, and keeps the workspace last-admin invariant a
+uniform property of the codebase rather than a per-call-site proof.
+
 ### Issues (slice 1 — basic CRUD; slice 2 — hierarchy; slice C — description attachments)
 
 Issues live under a project. The human-readable `key` (e.g. `CMT-241`)

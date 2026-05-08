@@ -516,6 +516,84 @@ export async function listWorkspaceMembers(
 }
 
 /**
+ * For each workspace in a tenant, decide whether deactivating
+ * `targetUserId` would leave that workspace with zero effective admins.
+ * Returns the workspaces (id + slug + name) that would be left
+ * adminless.
+ *
+ * "Effective admin" here matches `countEffectiveWorkspaceAdmins`:
+ *   - explicit active `workspace_memberships` row with role='admin', OR
+ *   - active `tenant_memberships` row with role='admin'.
+ *
+ * Used by the user-deactivation guard. Note: under the v1
+ * "implicit OK" rule (tenant admins resolve to workspace admin), the
+ * tenant-admin floor usually means deactivating one user can't strand
+ * a workspace — there's still at least one other tenant admin acting
+ * as the implicit admin. The guard is still wired in as
+ * defense-in-depth: it catches edge cases the API can't currently
+ * reach but a future surface (e.g. system-admin path) might, and it
+ * keeps the workspace last-admin invariant a uniform property of the
+ * codebase rather than something each call site has to re-prove.
+ *
+ * Implementation: three independent queries combined in JS — NO SQL
+ * JOIN (per project rule: feedback_no_db_joins_without_approval).
+ *   Q1: list all workspaces in the tenant.
+ *   Q2: tenant admins (active) excluding target → if size >= 1, every
+ *       workspace already has implicit coverage post-deactivation, and
+ *       we can short-circuit to an empty result.
+ *   Q3: only when Q2 is empty, fetch explicit workspace admins (active)
+ *       per workspace excluding target, and flag any workspace with no
+ *       remaining admin.
+ */
+export async function findWorkspacesLeftAdminless(
+  targetUserId: string,
+  tenantId: string,
+  trx?: Knex.Transaction
+): Promise<Array<{ id: string; slug: string; name: string }>> {
+  const k = trx ?? db;
+
+  // Q1 — workspaces in this tenant. Status filter is intentionally
+  // omitted: a deactivated workspace can still be reactivated, and
+  // re-entering it without an admin is the same broken state we're
+  // trying to prevent.
+  const workspaces = (await k('workspaces')
+    .where('tenant_id', tenantId)
+    .select('id', 'slug', 'name')) as Array<{ id: string; slug: string; name: string }>;
+
+  if (workspaces.length === 0) return [];
+
+  // Q2 — active tenant admins excluding the target. If at least one
+  // remains, every workspace in the tenant retains implicit admin
+  // coverage post-deactivation; nothing can be stranded.
+  const tenantAdmins = (await k('tenant_memberships')
+    .where('tenant_id', tenantId)
+    .where('role', 'admin')
+    .where('status', 'active')
+    .whereNot('user_id', targetUserId)
+    .select('user_id as userId')) as { userId: string }[];
+
+  if (tenantAdmins.length > 0) return [];
+
+  // Q3 — no tenant-admin coverage left. Each workspace must have at
+  // least one explicit active admin (excluding target) to remain
+  // covered. Pull all explicit workspace admins for this tenant's
+  // workspaces in one shot, then group by workspace in JS.
+  const workspaceIds = workspaces.map((w) => w.id);
+  const explicitAdmins = (await k('workspace_memberships')
+    .whereIn('workspace_id', workspaceIds)
+    .where('role', 'admin')
+    .where('status', 'active')
+    .whereNot('user_id', targetUserId)
+    .select('workspace_id as workspaceId', 'user_id as userId')) as Array<{
+    workspaceId: string;
+    userId: string;
+  }>;
+
+  const coveredWorkspaceIds = new Set(explicitAdmins.map((r) => r.workspaceId));
+  return workspaces.filter((w) => !coveredWorkspaceIds.has(w.id));
+}
+
+/**
  * Count active admins on a workspace, INCLUDING implicit admins
  * (active tenant admins). Used by the last-admin guard so a workspace
  * never ends up with zero admin coverage.
