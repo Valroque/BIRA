@@ -296,7 +296,8 @@ export function MembersSettings() {
 
   const handleDeactivate = async (m: WorkspaceMember) => {
     if (!window.confirm(
-      `Deactivate ${m.displayName}? They will be signed out and unable to log in to any tenant until reactivated.`,
+      `Deactivate ${m.displayName}? They will be signed out and unable to log in to any tenant until reactivated.\n\n`
+      + `Deactivation freezes login but leaves project, team, and workspace access in place. If this is a security action, revoke the user's access from those scopes separately before reactivating.`,
     )) return;
     setRowError(null);
     try {
@@ -311,6 +312,10 @@ export function MembersSettings() {
   };
 
   const handleReactivate = async (m: WorkspaceMember) => {
+    if (!window.confirm(
+      `Reactivate ${m.displayName}? They will be able to log in again.\n\n`
+      + `This user's prior project, team, and workspace access is being restored. Review their grants if circumstances have changed.`,
+    )) return;
     setRowError(null);
     try {
       await reactivateUser(tenant, m.userId);
