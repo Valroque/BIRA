@@ -14,7 +14,7 @@ import {
 import { Icon } from './icons';
 import {
   Toolbar, StatusDot, Avatar, Priority, TypeChip,
-  STATUSES, useTenantContext,
+  STATUSES, useTenantContext, LabelledSelect,
 } from './shell';
 import {
   ListRow, buildRowColumns, useColumnLayout, MIN_WIDTHS, COLUMN_LABELS,
@@ -983,25 +983,13 @@ function GroupSelect({
   options: IssueGroupKey[];
 }) {
   return (
-    <label className="btn btn-sm" style={{ paddingRight: 4, cursor: 'pointer' }}>
-      <Icon name="layers" size={13} />
-      Group:
-      <select
-        value={value}
-        onChange={(e) => onChange(e.target.value as IssueGroupKey)}
-        style={{
-          appearance: 'none', border: 'none', background: 'transparent',
-          fontSize: 12, fontWeight: 600, color: 'var(--fg)',
-          padding: '0 2px', cursor: 'pointer', outline: 'none',
-          fontFamily: 'var(--font-sans)',
-        }}
-      >
-        {options.map((o) => (
-          <option key={o} value={o}>{GROUP_LABELS[o]}</option>
-        ))}
-      </select>
-      <Icon name="chevronDown" size={11} color="var(--fg-faint)" />
-    </label>
+    <LabelledSelect
+      icon="layers"
+      label="Group:"
+      value={value}
+      onChange={onChange}
+      options={options.map((o) => ({ value: o, label: GROUP_LABELS[o] }))}
+    />
   );
 }
 
@@ -1061,25 +1049,13 @@ function GranularityToggle({
 
 function LevelSelect({ value, onChange }: { value: IssueLevel; onChange: (v: IssueLevel) => void }) {
   return (
-    <label className="btn btn-sm" style={{ paddingRight: 4, cursor: 'pointer' }}>
-      <Icon name="branch" size={13} />
-      Level:
-      <select
-        value={value}
-        onChange={(e) => onChange(e.target.value as IssueLevel)}
-        style={{
-          appearance: 'none', border: 'none', background: 'transparent',
-          fontSize: 12, fontWeight: 600, color: 'var(--fg)',
-          padding: '0 2px', cursor: 'pointer', outline: 'none',
-          fontFamily: 'var(--font-sans)',
-        }}
-      >
-        {(['all', 'epics', 'stories-tasks'] as IssueLevel[]).map((o) => (
-          <option key={o} value={o}>{LEVEL_LABELS[o]}</option>
-        ))}
-      </select>
-      <Icon name="chevronDown" size={11} color="var(--fg-faint)" />
-    </label>
+    <LabelledSelect
+      icon="branch"
+      label="Level:"
+      value={value}
+      onChange={onChange}
+      options={(['all', 'epics', 'stories-tasks'] as IssueLevel[]).map((o) => ({ value: o, label: LEVEL_LABELS[o] }))}
+    />
   );
 }
 
