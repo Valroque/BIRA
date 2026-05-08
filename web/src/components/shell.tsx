@@ -2,7 +2,7 @@
 import type { CSSProperties, ReactNode } from 'react';
 import { Fragment } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
-import { Icon } from './icons';
+import { Icon, type IconName } from './icons';
 import { NotificationsButton } from './topbar-menus';
 import { useProjects } from '../state/projects';
 import { useWorkspaces } from '../state/workspaces';
@@ -199,22 +199,38 @@ export const Sidebar = ({ collapsed = false, active = '', onToggleCollapsed }: S
   }) => {
     const isActive = active === id;
     const enabled = !!to;
-    const baseStyle: CSSProperties = {
-      display: 'flex', alignItems: 'center', gap: 8, height: 28,
-      padding: collapsed ? '0' : `0 8px 0 ${8 + indent * 14}px`,
-      justifyContent: collapsed ? 'center' : 'flex-start',
-      borderRadius: 6,
-      cursor: enabled ? 'pointer' : 'not-allowed',
-      background: isActive ? 'var(--accent-subtle)' : 'transparent',
-      color: isActive
-        ? 'var(--accent-active)'
-        : enabled ? 'var(--fg-muted)' : 'var(--fg-faint)',
-      fontWeight: isActive ? 600 : 500,
-      fontSize: 13,
-      margin: '0 6px',
-      textDecoration: 'none',
-      opacity: enabled ? 1 : 0.55,
-    };
+    const baseStyle: CSSProperties = collapsed
+      ? {
+          // Collapsed: square 32x32 icon button, centred in the 52px rail
+          // with a couple px of vertical breathing room between items.
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          width: 32, height: 32,
+          margin: '2px auto',
+          borderRadius: 6,
+          cursor: enabled ? 'pointer' : 'not-allowed',
+          background: isActive ? 'var(--accent-subtle)' : 'transparent',
+          color: isActive
+            ? 'var(--accent-active)'
+            : enabled ? 'var(--fg-muted)' : 'var(--fg-faint)',
+          textDecoration: 'none',
+          opacity: enabled ? 1 : 0.55,
+        }
+      : {
+          display: 'flex', alignItems: 'center', gap: 8, height: 28,
+          padding: `0 8px 0 ${8 + indent * 14}px`,
+          justifyContent: 'flex-start',
+          borderRadius: 6,
+          cursor: enabled ? 'pointer' : 'not-allowed',
+          background: isActive ? 'var(--accent-subtle)' : 'transparent',
+          color: isActive
+            ? 'var(--accent-active)'
+            : enabled ? 'var(--fg-muted)' : 'var(--fg-faint)',
+          fontWeight: isActive ? 600 : 500,
+          fontSize: 13,
+          margin: '0 6px',
+          textDecoration: 'none',
+          opacity: enabled ? 1 : 0.55,
+        };
     const inner = (
       <>
         <Icon name={icon} size={15} />
@@ -244,7 +260,19 @@ export const Sidebar = ({ collapsed = false, active = '', onToggleCollapsed }: S
         {children}
       </div>
     ) : (
-      <div style={{ height: 14 }}>{children}</div>
+      // Collapsed: drop the label, but keep section boundaries visible with a
+      // short centred divider line. Margin spacing replaces the broken
+      // height:14 container that previously clipped its children.
+      <div style={{ marginTop: 10, paddingTop: 10, position: 'relative' }}>
+        <div
+          aria-hidden
+          style={{
+            position: 'absolute', top: 0, left: 10, right: 10,
+            height: 1, background: 'var(--border-muted)',
+          }}
+        />
+        {children}
+      </div>
     )
   );
 
@@ -252,8 +280,12 @@ export const Sidebar = ({ collapsed = false, active = '', onToggleCollapsed }: S
     <div style={{
       width: w, background: 'var(--bg-subtle)', borderRight: '1px solid var(--border-muted)',
       display: 'flex', flexDirection: 'column', flexShrink: 0, transition: 'width .2s ease',
+      position: 'relative',
     }}>
-      <BiraBrand collapsed={collapsed} onToggleCollapsed={onToggleCollapsed} />
+      <BiraBrand collapsed={collapsed} />
+      {onToggleCollapsed && (
+        <SidebarCollapseToggle collapsed={collapsed} onToggle={onToggleCollapsed} />
+      )}
       <div className="scroll" style={{ flex: 1, overflow: 'auto', padding: '12px 0' }}>
         {/* Counts are derived from issues whose project belongs to the
             current workspace — so a fresh workspace with no projects shows
@@ -327,47 +359,16 @@ export const Sidebar = ({ collapsed = false, active = '', onToggleCollapsed }: S
 /**
  * BIRA wordmark used across sidebars (workspace shell + tenant picker shell).
  * Collapsed mode hides the wordmark and centres the chip so it tucks into the
- * narrow rail. When `onToggleCollapsed` is provided, the brand row also
- * renders a chevron toggle (flips the rail width); see AppShell for the
- * persistence hookup.
+ * narrow rail. The collapse/expand toggle is no longer rendered here — it
+ * floats on the middle of the sidebar's right border (see
+ * `SidebarCollapseToggle`).
+ *
+ * The `onToggleCollapsed` prop is accepted but ignored, kept for backwards
+ * compatibility with existing callers (e.g. the tenant-picker shell).
  */
 export function BiraBrand({
   collapsed = false,
-  onToggleCollapsed,
 }: { collapsed?: boolean; onToggleCollapsed?: () => void }) {
-  // Toggle button — rendered as a sibling of the brand chip. In
-  // expanded mode it sits to the right of the wordmark (flex row); in
-  // collapsed mode it stacks below the chip (flex column) so it stays
-  // reachable on the narrow rail without overflowing. Native `title`
-  // gives the tooltip — same pattern Sidebar `Item` uses for collapsed
-  // labels.
-  const toggle = onToggleCollapsed ? (
-    <button
-      type="button"
-      onClick={onToggleCollapsed}
-      aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-      aria-pressed={collapsed}
-      title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-      style={{
-        width: 22, height: 22,
-        display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-        background: 'transparent', border: '1px solid var(--border-muted)',
-        borderRadius: 4, padding: 0, cursor: 'pointer',
-        color: 'var(--fg-muted)', flexShrink: 0,
-      }}
-      onMouseEnter={(e) => {
-        e.currentTarget.style.background = 'var(--bg-muted)';
-        e.currentTarget.style.color = 'var(--fg)';
-      }}
-      onMouseLeave={(e) => {
-        e.currentTarget.style.background = 'transparent';
-        e.currentTarget.style.color = 'var(--fg-muted)';
-      }}
-    >
-      <Icon name={collapsed ? 'chevronRight' : 'chevronLeft'} size={13} />
-    </button>
-  ) : null;
-
   return (
     <div style={{
       display: 'flex',
@@ -375,7 +376,7 @@ export function BiraBrand({
       alignItems: 'center',
       gap: collapsed ? 6 : 8,
       flexShrink: 0,
-      padding: collapsed ? '12px 0' : '14px 12px 14px 16px',
+      padding: collapsed ? '14px 0 8px' : '14px 12px 14px 16px',
       justifyContent: collapsed ? 'center' : 'flex-start',
     }}>
       <div style={{
@@ -388,8 +389,53 @@ export function BiraBrand({
       {!collapsed && (
         <span style={{ fontSize: 16, fontWeight: 700, letterSpacing: -0.5, flex: 1 }}>BIRA</span>
       )}
-      {toggle}
     </div>
+  );
+}
+
+/**
+ * Floating collapse/expand button that sits centred on the sidebar's right
+ * border. Half-overlaps the border so the chevron reads as a "handle" the
+ * user grabs to fold the rail. Sidebar must be `position: relative` for the
+ * absolute positioning to anchor correctly.
+ */
+function SidebarCollapseToggle({
+  collapsed,
+  onToggle,
+}: { collapsed: boolean; onToggle: () => void }) {
+  const size = 22;
+  return (
+    <button
+      type="button"
+      onClick={onToggle}
+      aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+      aria-pressed={collapsed}
+      title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+      style={{
+        position: 'absolute',
+        top: '50%',
+        right: -(size / 2),
+        transform: 'translateY(-50%)',
+        width: size, height: size,
+        display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+        background: 'var(--bg)',
+        border: '1px solid var(--border-muted)',
+        borderRadius: '50%', padding: 0, cursor: 'pointer',
+        color: 'var(--fg-muted)',
+        boxShadow: 'var(--shadow-sm)',
+        zIndex: 2,
+      }}
+      onMouseEnter={(e) => {
+        e.currentTarget.style.background = 'var(--bg-muted)';
+        e.currentTarget.style.color = 'var(--fg)';
+      }}
+      onMouseLeave={(e) => {
+        e.currentTarget.style.background = 'var(--bg)';
+        e.currentTarget.style.color = 'var(--fg-muted)';
+      }}
+    >
+      <Icon name={collapsed ? 'chevronRight' : 'chevronLeft'} size={13} />
+    </button>
   );
 }
 
@@ -501,6 +547,49 @@ export const Tabs = ({ tabs, active }: { tabs: Tab[]; active: string }) => (
     })}
   </div>
 );
+
+// --- LabelledSelect — toolbar dropdown with leading icon + "Label:" prefix ---
+// Reused by the issues table's group/level pickers and the planner toolbar.
+// The visual shape is a `btn btn-sm` shell with an inline native <select> so
+// the trigger picks up the same hover/focus treatment as sibling toolbar
+// buttons. Generic over the value type so callers don't have to widen to
+// `string`.
+export interface LabelledSelectOption<T extends string> {
+  value: T;
+  label: string;
+}
+
+export function LabelledSelect<T extends string>({
+  icon, label, value, onChange, options,
+}: {
+  icon?: IconName;
+  label: string;
+  value: T;
+  onChange: (v: T) => void;
+  options: ReadonlyArray<LabelledSelectOption<T>>;
+}) {
+  return (
+    <label className="btn btn-sm" style={{ paddingRight: 4, cursor: 'pointer' }}>
+      {icon && <Icon name={icon} size={13} />}
+      {label}
+      <select
+        value={value}
+        onChange={(e) => onChange(e.target.value as T)}
+        style={{
+          appearance: 'none', border: 'none', background: 'transparent',
+          fontSize: 12, fontWeight: 600, color: 'var(--fg)',
+          padding: '0 2px', cursor: 'pointer', outline: 'none',
+          fontFamily: 'var(--font-sans)',
+        }}
+      >
+        {options.map((o) => (
+          <option key={o.value} value={o.value}>{o.label}</option>
+        ))}
+      </select>
+      <Icon name="chevronDown" size={11} color="var(--fg-faint)" />
+    </label>
+  );
+}
 
 // --- Toolbar (filters etc) ---
 export const Toolbar = ({ children, right }: { children?: ReactNode; right?: ReactNode }) => (

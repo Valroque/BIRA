@@ -19,6 +19,7 @@ dist-ssr
 
 # Local Claude Code state
 .claude/settings.local.json
+.claude/worktrees/
 
 # Editor directories and files
 .vscode/*
@@ -30,3 +31,19 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Terraform — see infra/terraform/
+**/.terraform/
+*.tfstate
+*.tfstate.*
+*.tfstate.backup
+crash.log
+crash.*.log
+*.tfvars
+*.tfvars.json
+!*.tfvars.example
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+.terraform.lock.hcl
