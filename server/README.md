@@ -519,8 +519,6 @@ of writing, 45 files / 345 it-blocks):
 - `tests/issueLinks/` — `relates` / `depends on` happy paths and the
   `wouldCreateCycle` rejection.
 - `tests/mentionables/` — additional ranking edge cases beyond what's in `search.test.ts`.
-- `tests/projects/` — `PUT /:slug/workflows/:issueType` (project-workflow
-  assignment).
 
 ```bash
 # one-time: copy the test env file and set up bira_test DB
@@ -654,7 +652,10 @@ through.
 | PUT    | `/api/tenants/:t/workspaces/:w/projects/:p/workflows/:issueType`              | workspace `write`   |
 
 GET returns a record `{ T?, B?, S?, E? }` of workflow slugs. PUT body is
-`{ workflowSlug }`; `:issueType` must be one of `T|B|S|E`.
+`{ workflowSlug }`; `:issueType` must be one of `T|B|S|E`. PUT is gated
+on the workspace + project archive status — assigning a workflow to an
+archived workspace or project returns 409 with the unarchive hint
+(matches every other project-scoped mutation).
 
 ### Milestones
 

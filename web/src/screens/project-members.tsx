@@ -577,8 +577,11 @@ function AddTeamModal({
   const { teams } = useTeams();
   const [filter, setFilter] = useState('');
   const [pendingTeamId, setPendingTeamId] = useState<string | null>(null);
-  // Track per-row role selection. Defaults to 'write' which is the most
-  // common project-team grant.
+  // Track per-row role selection. Defaults to 'read' so the granter
+  // makes a conscious choice to widen access — a too-narrow grant
+  // surfaces as a friction signal (someone asks to be upgraded), a
+  // too-wide grant is silent over-access. Matches docs/decisions.md
+  // Q6 (2026-05-08).
   const [roleFor, setRoleFor] = useState<Record<string, 'write' | 'read'>>({});
 
   const candidates = useMemo(() => {
@@ -593,7 +596,7 @@ function AddTeamModal({
   const onPick = async (teamId: string) => {
     setPendingTeamId(teamId);
     try {
-      await onAdd(teamId, roleFor[teamId] ?? 'write');
+      await onAdd(teamId, roleFor[teamId] ?? 'read');
     } finally {
       setPendingTeamId(null);
     }
@@ -625,7 +628,7 @@ function AddTeamModal({
         )}
         {candidates.map((t) => {
           const pending = pendingTeamId === t.id;
-          const role = roleFor[t.id] ?? 'write';
+          const role = roleFor[t.id] ?? 'read';
           return (
             <div
               key={t.id}

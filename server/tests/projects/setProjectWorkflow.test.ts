@@ -19,9 +19,8 @@ import {
  * happy path + 400 invalid issueType. This file fills the rest of
  * the matrix per #21 slice 4.
  *
- * NOTE on "archived project": the route does NOT mount
- * `requireActiveProject` (see `routes/projects.ts` PUT handler).
- * That's flagged as a finding — see test below.
+ * Archive gates (project + workspace) were added in #45 — assignments
+ * against an archived project / workspace return 409.
  */
 
 async function setupAdmin() {
@@ -230,14 +229,7 @@ describe('PUT /api/tenants/:t/workspaces/:w/projects/:p/workflows/:issueType', (
     expect(res.status).toBe(400);
   });
 
-  it('archived project — current behaviour: PUT is NOT blocked (FINDING)', async () => {
-    // The `PUT /:projectSlug/workflows/:issueType` route in
-    // `routes/projects.ts` does not mount `requireActiveProject`,
-    // so workflow assignment succeeds against an archived project.
-    // The spec asks this case to 409 if it does, otherwise flag it.
-    // Test asserts the actual current behaviour (200) so a future
-    // fix that adds the gate produces a visible failure here that
-    // points at this exact decision.
+  it('409 when project is archived', async () => {
     const { tenant, ws, proj, token } = await setupAdmin();
     await seedWorkflow(tenant.slug, ws.slug, token, 'task-flow');
     const archive = await api()
@@ -256,17 +248,12 @@ describe('PUT /api/tenants/:t/workspaces/:w/projects/:p/workflows/:issueType', (
       )
       .set('Authorization', `Bearer ${token}`)
       .send({ workflowSlug: 'task-flow' });
-    // FINDING: route does not require an active project.
-    expect(res.status).toBe(200);
+    expect(res.status).toBe(409);
   });
 
   it('409 when workspace is archived', async () => {
     const { tenant, ws, proj, token } = await setupAdmin();
     await seedWorkflow(tenant.slug, ws.slug, token, 'task-flow');
-    // Archive the workspace; the PUT goes through resolveWorkspaceScope
-    // chain which blocks ALL workspace mutations via requireActiveTenant
-    // / archive gates downstream. PUT /workflows/:issueType currently
-    // does NOT mount requireActiveWorkspace either — verify behaviour.
     const archive = await api()
       .post(`/api/tenants/${tenant.slug}/workspaces/${ws.slug}/archive`)
       .set('Authorization', `Bearer ${token}`);
@@ -283,9 +270,6 @@ describe('PUT /api/tenants/:t/workspaces/:w/projects/:p/workflows/:issueType', (
       )
       .set('Authorization', `Bearer ${token}`)
       .send({ workflowSlug: 'task-flow' });
-    // Documenting current behaviour: route does not mount
-    // requireActiveWorkspace either, so archived-workspace doesn't
-    // 409. Flagged as a sibling finding to the archived-project one.
-    expect(res.status).toBe(200);
+    expect(res.status).toBe(409);
   });
 });

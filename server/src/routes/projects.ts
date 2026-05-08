@@ -217,6 +217,7 @@ router.get(
 router.put(
   '/:projectSlug/workflows/:issueType',
   authorize('write'),
+  requireActiveWorkspace,
   asyncHandler(async (req, res) => {
     if (!req.scope?.workspaceId) throw new AppError('Workspace scope missing', 500);
     const project = await projectService.findBySlug(
@@ -224,6 +225,12 @@ router.put(
       req.params.projectSlug
     );
     if (!project) throw new AppError(`Project '${req.params.projectSlug}' not found`, 404);
+    if (project.status !== 'active') {
+      throw new AppError(
+        `Project '${project.slug}' is archived — unarchive it before making changes`,
+        409
+      );
+    }
 
     const issueType = req.params.issueType;
     if (!ISSUE_TYPES.includes(issueType as (typeof ISSUE_TYPES)[number])) {
